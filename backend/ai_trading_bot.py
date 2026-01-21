@@ -1109,7 +1109,7 @@ class AITradingBot:
         price_projection = base_result.get("price_projection", {})
         
         # Enhanced Analysis
-        enhanced_result = self.enhanced_analyzer.analyze(
+        enhanced_result = await self.enhanced_analyzer.analyze(
             base_signal=base_signal,
             base_confidence=base_confidence,
             ohlcv_data=ohlcv_data,
