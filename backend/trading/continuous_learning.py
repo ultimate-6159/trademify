@@ -936,6 +936,7 @@ class ContinuousLearningSystem:
     ):
         self.data_dir = data_dir
         self.firebase = firebase_service
+        self.enable_background = enable_background  # Store as attribute
         
         # Create data directory
         os.makedirs(data_dir, exist_ok=True)

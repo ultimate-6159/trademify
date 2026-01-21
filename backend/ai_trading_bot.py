@@ -2180,7 +2180,7 @@ class AITradingBot:
         
         # 📚 Start background learner (ประหยัด CPU)
         if self.learning_system and self.learning_system.enable_background:
-            await self.learning_system.start_background_learner()
+            await self.learning_system.start()
             logger.info("📚 Background Learner started (async mode)")
         
         # Broadcast bot status
@@ -2319,9 +2319,8 @@ class AITradingBot:
         
         # 📚 Stop background learner and save state
         if self.learning_system:
-            await self.learning_system.stop_background_learner()
-            await self.learning_system.save_all_state()
-            logger.info("📚 Learning state saved to Firebase")
+            await self.learning_system.stop()
+            logger.info("📚 Learning state saved")
         
         if self.trading_engine:
             await self.trading_engine.stop()
