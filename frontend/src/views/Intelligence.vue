@@ -483,14 +483,15 @@ const refreshAll = async () => {
   isLoading.value = true;
   try {
     // Fetch real data from API
-    const [intelligence, botStatus, titan, omega, risk, history] = await Promise.all([
-      api.getIntelligenceStatus(),
-      api.getBotStatus(),
-      api.getTitanData(selectedSymbol.value),
-      api.getOmegaData(selectedSymbol.value),
-      api.getRiskData(),
-      api.getSignalHistory(20),
-    ]);
+    const [intelligence, botStatus, titan, omega, risk, history] =
+      await Promise.all([
+        api.getIntelligenceStatus(),
+        api.getBotStatus(),
+        api.getTitanData(selectedSymbol.value),
+        api.getOmegaData(selectedSymbol.value),
+        api.getRiskData(),
+        api.getSignalHistory(20),
+      ]);
 
     console.log("API Data:", { intelligence, titan, omega, risk, history });
 
@@ -553,7 +554,7 @@ const refreshAll = async () => {
 
     // Update Signal History
     if (history && history.signals && history.signals.length > 0) {
-      signalHistory.value = history.signals.map(s => ({
+      signalHistory.value = history.signals.map((s) => ({
         timestamp: new Date(s.timestamp),
         symbol: s.symbol,
         signal: s.signal,
@@ -566,17 +567,56 @@ const refreshAll = async () => {
     // Update module analysis from intelligence status
     if (intelligence && !intelligence._isMock) {
       moduleAnalysis.value = [
-        { name: "Neural", icon: "🧠", signal: intelligence.neural?.active ? "ACTIVE" : "OFF", score: 0 },
-        { name: "Deep", icon: "🔮", signal: intelligence.deep?.active ? "ACTIVE" : "OFF", score: 0 },
-        { name: "Quantum", icon: "⚛️", signal: intelligence.quantum?.active ? "ACTIVE" : "OFF", score: 0 },
-        { name: "Alpha", icon: "🔶", signal: intelligence.alpha?.active ? "ACTIVE" : "OFF", score: intelligence.alpha?.score || 0 },
-        { name: "Omega", icon: "⚡", signal: intelligence.omega?.active ? "ACTIVE" : "OFF", score: intelligence.omega?.score || 0 },
-        { name: "Titan", icon: "🏛️", signal: intelligence.titan?.active ? "ACTIVE" : "OFF", score: intelligence.titan?.score || 0 },
-        { name: "Smart", icon: "💡", signal: intelligence.smart?.active ? "ACTIVE" : "OFF", score: 0 },
-        { name: "Pro", icon: "⭐", signal: intelligence.pro?.active ? "ACTIVE" : "OFF", score: 0 },
+        {
+          name: "Neural",
+          icon: "🧠",
+          signal: intelligence.neural?.active ? "ACTIVE" : "OFF",
+          score: 0,
+        },
+        {
+          name: "Deep",
+          icon: "🔮",
+          signal: intelligence.deep?.active ? "ACTIVE" : "OFF",
+          score: 0,
+        },
+        {
+          name: "Quantum",
+          icon: "⚛️",
+          signal: intelligence.quantum?.active ? "ACTIVE" : "OFF",
+          score: 0,
+        },
+        {
+          name: "Alpha",
+          icon: "🔶",
+          signal: intelligence.alpha?.active ? "ACTIVE" : "OFF",
+          score: intelligence.alpha?.score || 0,
+        },
+        {
+          name: "Omega",
+          icon: "⚡",
+          signal: intelligence.omega?.active ? "ACTIVE" : "OFF",
+          score: intelligence.omega?.score || 0,
+        },
+        {
+          name: "Titan",
+          icon: "🏛️",
+          signal: intelligence.titan?.active ? "ACTIVE" : "OFF",
+          score: intelligence.titan?.score || 0,
+        },
+        {
+          name: "Smart",
+          icon: "💡",
+          signal: intelligence.smart?.active ? "ACTIVE" : "OFF",
+          score: 0,
+        },
+        {
+          name: "Pro",
+          icon: "⭐",
+          signal: intelligence.pro?.active ? "ACTIVE" : "OFF",
+          score: 0,
+        },
       ];
     }
-
   } catch (e) {
     console.error("Failed to refresh:", e);
   } finally {

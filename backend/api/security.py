@@ -131,8 +131,8 @@ def get_cors_origins() -> List[str]:
     origins_str = os.getenv("CORS_ORIGINS", "")
     
     if not origins_str:
-        # Default: allow localhost for development
-        logger.warning("⚠️ No CORS origins configured! Allowing localhost only.")
+        # Default: allow localhost and VPS for development
+        logger.warning("⚠️ No CORS origins configured! Allowing localhost and VPS.")
         return [
             "http://localhost:3000",
             "http://localhost:5173",  # Vite default
@@ -140,6 +140,11 @@ def get_cors_origins() -> List[str]:
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
             "http://127.0.0.1:8080",
+            # VPS IP
+            "http://66.42.50.149:3000",
+            "http://66.42.50.149:5173",
+            "http://66.42.50.149:5174",
+            "http://66.42.50.149:8080",
         ]
     
     if origins_str.strip() == "*":
