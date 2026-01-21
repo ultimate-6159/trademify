@@ -1,0 +1,54 @@
+{
+  "enabled": true,
+  "broker_type": "MT5",
+  "risk": {
+    "max_risk_per_trade": 2.0,
+    "max_daily_loss": 5.0,
+    "max_positions": 3,
+    "max_drawdown": 10.0
+  },
+  "signals": {
+    "min_confidence": 65.0,
+    "min_quality": "MEDIUM",
+    "allowed_signals": [
+      "STRONG_BUY",
+      "BUY",
+      "SELL",
+      "STRONG_SELL"
+    ]
+  },
+  "position": {
+    "default_stop_loss_percent": 1.5,
+    "default_take_profit_percent": 3.0,
+    "max_holding_hours": 48
+  },
+  "trailing_stop": {
+    "enabled": true,
+    "percent": 1.0,
+    "activation": 1.5
+  },
+  "break_even": {
+    "enabled": true,
+    "at_percent": 1.0
+  },
+  "trading_hours": {
+    "enabled": false,
+    "start_hour": 0,
+    "end_hour": 24
+  },
+  "symbols": {
+    "allowed": [],
+    "blocked": []
+  },
+  "pattern": {
+    "top_k": 20,
+    "min_correlation": 0.85,
+    "window_size": 60
+  },
+  "trading_symbols": [
+    "EURUSDm",
+    "GBPUSDm",
+    "XAUUSDm"
+  ],
+  "timeframe": "H1"
+}

@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trademify-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - CORS_ORIGINS=*
+      - FIREBASE_CREDENTIALS_PATH=/app/config/firebase_credentials.json
+      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-}
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/config:/app/config
+      - ./backend/logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:8000
+    container_name: trademify-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # AI Trading Bot (Standalone - optional)
+  ai-trading-bot:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trademify-ai-bot
+    command: python ai_trading_bot.py --broker ${BOT_BROKER:-BINANCE} --symbols ${BOT_SYMBOLS:-BTCUSDT,ETHUSDT} --quality ${BOT_QUALITY:-HIGH} --interval ${BOT_INTERVAL:-60}
+    environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
+      - MT5_LOGIN=${MT5_LOGIN:-}
+      - MT5_PASSWORD=${MT5_PASSWORD:-}
+      - MT5_SERVER=${MT5_SERVER:-}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    depends_on:
+      - backend
+    restart: unless-stopped
+    profiles:
+      - bot  # Only start with: docker-compose --profile bot up
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: trademify-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - cache
+
+volumes:
+  redis_data:
