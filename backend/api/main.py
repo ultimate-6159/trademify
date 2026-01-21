@@ -55,12 +55,22 @@ def convert_numpy_types(obj):
         return {k: convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy_types(v) for v in obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
     elif isinstance(obj, np.floating):
         return float(obj)
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif hasattr(obj, '__dict__'):
+        # Handle dataclasses and custom objects
+        try:
+            return convert_numpy_types(vars(obj))
+        except TypeError:
+            return str(obj)
     return obj
 
 def load_bot_settings():
@@ -2324,7 +2334,7 @@ async def get_intelligence_status():
         except Exception:
             pass
     
-    return status
+    return convert_numpy_types(status)
 
 
 @app.get("/api/v1/intelligence/titan")
@@ -2364,7 +2374,7 @@ async def get_titan_data(symbol: str = "EURUSDm"):
     
     return {
         "status": "active",
-        **last_titan
+        **convert_numpy_types(last_titan)
     }
 
 
@@ -2404,7 +2414,7 @@ async def get_omega_data(symbol: str = "EURUSDm"):
     
     return {
         "status": "active",
-        **last_omega
+        **convert_numpy_types(last_omega)
     }
 
 
@@ -2478,11 +2488,11 @@ async def get_risk_data():
     risk_data["risk_score"] = min(100, risk_score)
     
     # Determine limits
-    risk_data["daily_limit_hit"] = risk_data["daily_pnl"] <= -risk_data["max_daily_loss"]
-    risk_data["losing_streak_limit"] = risk_data["losing_streak"] >= risk_data["max_losing_streak"]
-    risk_data["can_open_position"] = risk_data["open_positions"] < risk_data["max_positions"]
+    risk_data["daily_limit_hit"] = bool(risk_data["daily_pnl"] <= -risk_data["max_daily_loss"])
+    risk_data["losing_streak_limit"] = bool(risk_data["losing_streak"] >= risk_data["max_losing_streak"])
+    risk_data["can_open_position"] = bool(risk_data["open_positions"] < risk_data["max_positions"])
     
-    return risk_data
+    return convert_numpy_types(risk_data)
 
 
 @app.get("/api/v1/intelligence/signals/history")
@@ -2503,7 +2513,7 @@ async def get_signal_history(limit: int = 50):
     
     return {
         "status": "active",
-        "signals": signal_history[:limit],
+        "signals": convert_numpy_types(signal_history[:limit]),
         "count": len(signal_history),
         "total_available": len(signal_history)
     }
@@ -2544,7 +2554,7 @@ async def get_alpha_data(symbol: str = "EURUSDm"):
     
     return {
         "status": "active",
-        **last_alpha
+        **convert_numpy_types(last_alpha)
     }
 
 
