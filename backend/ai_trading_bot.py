@@ -44,6 +44,17 @@ from analysis import EnhancedAnalyzer, SignalQuality, get_enhanced_analyzer
 from trading.engine import TradingEngine, RiskManager, Order, OrderSide, OrderType
 from trading.binance_connector import BinanceBroker, BinanceConfig
 from trading.settings import TradingConfig, BrokerType
+from trading.risk_guardian import RiskGuardian, get_risk_guardian, create_risk_guardian
+from trading.pro_features import ProTradingFeatures, get_pro_features
+from trading.smart_brain import SmartBrain, get_smart_brain
+from trading.advanced_intelligence import AdvancedIntelligence, get_intelligence
+from trading.continuous_learning import ContinuousLearningSystem, get_learning_system
+from trading.neural_brain import NeuralBrain, get_neural_brain
+from trading.deep_intelligence import DeepIntelligence, get_deep_intelligence
+from trading.quantum_strategy import QuantumStrategy, get_quantum_strategy
+from trading.alpha_engine import AlphaEngine, get_alpha_engine
+from trading.omega_brain import OmegaBrain, get_omega_brain
+from trading.titan_core import TitanCore, get_titan_core, ModuleSignal
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
 from services.mt5_service import get_mt5_service, MT5Service
@@ -271,6 +282,37 @@ class AITradingBot:
         self.enhanced_analyzer: Optional[EnhancedAnalyzer] = None
         self.firebase_service = None
         
+        # 🛡️ Risk Guardian - ป้องกันการล้างพอร์ต
+        self.risk_guardian: Optional[RiskGuardian] = None
+        
+        # 🏆 Pro Trading Features - สิ่งที่ Pro Trader ทำ
+        self.pro_features: Optional[ProTradingFeatures] = None
+        
+        # 🧠 Smart Brain - เรียนรู้และปรับตัวเอง
+        self.smart_brain: Optional[SmartBrain] = None
+        
+        # 📚 Continuous Learning
+        self.learning_system: Optional[ContinuousLearningSystem] = None
+        self._pending_trade_factors: Dict[str, Dict] = {}  # trade_id -> factors used
+        
+        # 🧬 Neural Brain - Deep Pattern Understanding
+        self.neural_brain: Optional[NeuralBrain] = None
+        
+        # 🔮 Deep Intelligence - Multi-layer Analysis
+        self.deep_intelligence: Optional[DeepIntelligence] = None
+        
+        # ⚛️ Quantum Strategy - Advanced Quantitative Analysis
+        self.quantum_strategy: Optional[QuantumStrategy] = None
+        
+        # 🎯 Alpha Engine - Ultimate Trading Intelligence
+        self.alpha_engine: Optional[AlphaEngine] = None
+        
+        # 🧠⚡ Omega Brain - Institutional-Grade Intelligence
+        self.omega_brain: Optional[OmegaBrain] = None
+        
+        # 🏛️⚔️ Titan Core - Meta-Intelligence Synthesis
+        self.titan_core: Optional[TitanCore] = None
+        
         # State
         self._running = False
         self._last_signals: Dict[str, Any] = {}
@@ -282,6 +324,13 @@ class AITradingBot:
             "pnl": 0.0,
             "date": datetime.now().date().isoformat()
         }
+        
+        # 📊 Last Analysis Results (for Frontend API)
+        self._last_analysis: Dict[str, Any] = {}
+        self._last_titan_decision: Dict[str, Any] = {}
+        self._last_omega_result: Dict[str, Any] = {}
+        self._last_alpha_result: Dict[str, Any] = {}
+        self._signal_history: List[Dict] = []  # Keep last 100 signals
         
         # Subscribers for real-time updates (SSE)
         self._subscribers: List[asyncio.Queue] = []
@@ -479,20 +528,158 @@ class AITradingBot:
             enable_volume_filter=True,
             enable_mtf_filter=True,
             enable_regime_filter=True,
+            enable_sentiment_filter=True,  # 🆕 Smart Money/Contrarian
         )
         logger.info(f"✓ Enhanced analyzer initialized (Min Quality: {self.min_quality.value})")
         
-        # 5. Firebase (optional)
+        # 5. 🛡️ Risk Guardian - ป้องกันการล้างพอร์ต
+        self.risk_guardian = create_risk_guardian(
+            max_risk_per_trade=self.max_risk_percent,
+            max_daily_loss=5.0,    # หยุดเทรดเมื่อขาดทุน 5% ต่อวัน
+            max_drawdown=10.0,     # หยุดเทรดเมื่อ drawdown 10%
+        )
+        logger.info(f"✓ Risk Guardian initialized (Max Daily Loss: 5%, Max Drawdown: 10%)")
+        
+        # 6. 🏆 Pro Trading Features - สิ่งที่ Pro Trader ทำ
+        self.pro_features = ProTradingFeatures(
+            enable_session_filter=True,    # เทรดเฉพาะช่วงเวลาดี
+            enable_news_filter=True,       # หยุดช่วงข่าว
+            enable_correlation_filter=True, # ไม่เปิดคู่ที่ correlate
+            enable_losing_streak_stop=True, # หยุดเมื่อแพ้ติดๆ
+            min_session_quality=40,         # อนุญาต Tokyo session ขึ้นไป
+        )
+        logger.info("✓ Pro Trading Features initialized:")
+        logger.info("   - Session Filter (London-NY Overlap = Best)")
+        logger.info("   - News Filter (หยุดช่วง NFP, FOMC, CPI)")
+        logger.info("   - Trailing Stop (ล็อค profit อัตโนมัติ)")
+        logger.info("   - Break-Even (ย้าย SL ไปจุดเข้า)")
+        logger.info("   - Losing Streak Stop (หยุดแพ้ 5 ติด)")
+        logger.info("   - Correlation Filter (EURUSD vs GBPUSD)")
+        
+        # 7. Firebase (ต้องสร้างก่อน Smart Brain)
+        self.firebase_service = None
         if self.broadcast_to_firebase:
             try:
                 self.firebase_service = get_firebase_service()
-                logger.info("✓ Firebase service initialized")
+                logger.info("✓ Firebase service initialized ☁️")
             except Exception as e:
                 logger.warning(f"Firebase not available: {e}")
                 self.firebase_service = None
         
+        # 8. 🧠 Smart Brain - เรียนรู้จากการเทรด (with Firebase)
+        self.smart_brain = SmartBrain(
+            enable_pullback_entry=True,   # รอ pullback ก่อนเข้า
+            enable_partial_tp=True,       # ปิดบางส่วนที่ TP1
+            enable_stale_exit=True,       # ปิดเทรดที่ค้างนาน
+            enable_adaptive_risk=True,    # ปรับ size ตาม performance
+            firebase_service=self.firebase_service,  # 🔥 Cloud Storage
+        )
+        logger.info("✓ Smart Brain initialized:")
+        logger.info("   - Trade Journal (บันทึกทุกเทรด)")
+        logger.info("   - Pattern Memory (จำว่า pattern ไหนได้/เสีย)")
+        logger.info("   - Adaptive Risk (winning streak → +size)")
+        logger.info("   - Time Analysis (รู้ว่าช่วงไหนเทรดดี)")
+        logger.info("   - Symbol Analysis (รู้ว่า symbol ไหนเก่ง)")
+        logger.info("   - Partial TP (ปิด 50% ที่ TP1)")
+        if self.firebase_service:
+            logger.info("   - ☁️ Firebase Cloud Sync: ENABLED")
+        
+        # 9. 🧠 Advanced Intelligence - ฉลาดขั้นสูง
+        self.intelligence = AdvancedIntelligence(
+            enable_regime=True,      # ตรวจจับ Market Regime
+            enable_mtf=True,         # Multi-Timeframe Analysis
+            enable_momentum=True,    # RSI, MACD, Stochastic
+            enable_sr=True,          # Auto S/R Detection
+            enable_kelly=True,       # Kelly Criterion Sizing
+            min_confluence=3,        # ต้องมี 3 ปัจจัยขึ้นไป
+        )
+        logger.info("✓ Advanced Intelligence initialized:")
+        logger.info("   - Market Regime Detection (Trend/Range/Volatile)")
+        logger.info("   - Multi-Timeframe Analysis (H1/H4/D1)")
+        logger.info("   - Momentum Scanner (RSI+MACD+Stoch)")
+        logger.info("   - Auto S/R Detection")
+        logger.info("   - Kelly Criterion Position Sizing")
+        logger.info("   - Confluence Scoring")
+        
+        # 10. 📚 Continuous Learning - เรียนรู้ตลอดเวลา
+        self.learning_system = ContinuousLearningSystem(
+            data_dir="data/learning",
+            enable_background=True,  # ประหยัดทรัพยากร
+            firebase_service=self.firebase_service,
+        )
+        logger.info("✓ Continuous Learning System initialized:")
+        logger.info("   - Online Learning (เรียนทีละ trade)")
+        logger.info("   - Market Cycle Detection")
+        logger.info("   - Pattern Evolution Tracking")
+        logger.info("   - Auto Strategy Optimization")
+        logger.info("   - Background Processing (ประหยัด CPU)")
+        
+        # 11. 🧬 Neural Brain - Deep Pattern Understanding
+        self.neural_brain = NeuralBrain(
+            data_dir="data/neural",
+            firebase_service=self.firebase_service,
+            enable_dna=True,           # Pattern DNA tracking
+            enable_state_machine=True, # Market state detection
+            enable_anomaly=True,       # Anomaly detection
+            enable_risk_intel=True,    # Risk intelligence
+        )
+        logger.info("✓ Neural Brain initialized:")
+        logger.info("   - Pattern DNA Analyzer (จำ DNA ที่ทำกำไร)")
+        logger.info("   - Market State Machine (7 states)")
+        logger.info("   - Anomaly Detector (ตรวจจับผิดปกติ)")
+        logger.info("   - Risk Intelligence (ฉลาดเรื่อง risk)")
+        
+        # 12. 🔮 Deep Intelligence - Multi-layer Analysis
+        self.deep_intelligence = get_deep_intelligence()
+        logger.info("✓ Deep Intelligence initialized:")
+        logger.info("   - Multi-Timeframe Confluence (M15/H1/H4/D1)")
+        logger.info("   - Cross-Asset Correlation")
+        logger.info("   - Adaptive Parameter Tuning")
+        logger.info("   - Predictive Model (5 methods)")
+        logger.info("   - Session Analyzer")
+        
+        # 13. ⚛️ Quantum Strategy - Advanced Quantitative Analysis
+        self.quantum_strategy = get_quantum_strategy()
+        logger.info("✓ Quantum Strategy initialized:")
+        logger.info("   - Market Microstructure (Smart Money Detection)")
+        logger.info("   - Volatility Regime (GARCH-like)")
+        logger.info("   - Fractal Analysis (Hurst Exponent)")
+        logger.info("   - Sentiment Aggregator")
+        logger.info("   - Dynamic Exit Manager")
+        
+        # 14. 🎯 Alpha Engine - Ultimate Trading Intelligence
+        self.alpha_engine = get_alpha_engine()
+        logger.info("✓ Alpha Engine initialized:")
+        logger.info("   - Order Flow Analyzer (Volume Delta)")
+        logger.info("   - Liquidity Zone Detector (SMC)")
+        logger.info("   - Market Profile (POC/Value Area)")
+        logger.info("   - Divergence Scanner (RSI/MACD/OBV)")
+        logger.info("   - Momentum Wave Analyzer")
+        logger.info("   - Risk Metrics Calculator")
+        
+        # 15. 🧠⚡ Omega Brain - Institutional-Grade Intelligence
+        self.omega_brain = get_omega_brain()
+        logger.info("✓ Omega Brain initialized:")
+        logger.info("   - Institutional Flow Detector (Big Money)")
+        logger.info("   - Manipulation Scanner (Stop Hunts)")
+        logger.info("   - Sentiment Fusion Engine")
+        logger.info("   - Regime Transition Predictor")
+        logger.info("   - Position Orchestrator")
+        logger.info("   - Risk Parity Allocator")
+        
+        # 16. 🏛️⚔️ Titan Core - Meta-Intelligence Synthesis
+        self.titan_core = get_titan_core()
+        logger.info("✓ Titan Core initialized:")
+        logger.info("   - Consensus Engine (Module Agreement)")
+        logger.info("   - Prediction Ensemble (Multi-Method)")
+        logger.info("   - Confidence Calibrator (Self-Correcting)")
+        logger.info("   - Dynamic Weight Optimizer")
+        logger.info("   - Self-Improvement Engine")
+        logger.info("   - Market Condition Analyzer")
+        
         logger.info("=" * 60)
         logger.info("✓ Bot initialization complete!")
+        logger.info(f"🏛️ Total Intelligence Layers: 16")
         logger.info("=" * 60)
     
     async def _build_index(self, symbol: str):
@@ -595,7 +782,48 @@ class AITradingBot:
         )
         
         await self.trading_engine.start()
+        
+        # 📚 Set callback for learning from closed positions
+        self.trading_engine.on_position_closed = self._on_position_closed
+        
         logger.info("✓ Trading engine started")
+    
+    def _on_position_closed(self, result):
+        """Callback เมื่อ Position ปิด - ใช้เรียนรู้"""
+        try:
+            position_id = result.position_id if hasattr(result, 'position_id') else str(result)
+            
+            # หา factors ที่ใช้ตอนเปิด trade
+            factors_used = self._pending_trade_factors.pop(position_id, None)
+            
+            if factors_used and self.learning_system:
+                # คำนวณ profit/loss
+                pnl = result.pnl if hasattr(result, 'pnl') else 0
+                is_win = pnl > 0
+                
+                # คำนวณ pnl percent
+                entry_price = result.entry_price if hasattr(result, 'entry_price') else 1
+                pnl_percent = (pnl / entry_price * 100) if entry_price > 0 else 0
+                
+                # 🧠 Learn from this trade (synchronous - uses background queue internally)
+                try:
+                    # Convert factor dict to bool dict
+                    factor_bools = {k: bool(v) for k, v in factors_used.items() 
+                                   if k not in ['symbol', 'signal', 'quality', 'entry_time']}
+                    
+                    self.learning_system.learn_from_trade(
+                        is_win=is_win,
+                        pnl_percent=pnl_percent,
+                        factors=factor_bools,
+                        pattern_hash=f"{factors_used.get('symbol', 'UNK')}_{factors_used.get('entry_time', '')}",
+                        rr_ratio=1.5,  # Default R:R
+                    )
+                    
+                    logger.info(f"📚 Trade closed: {'✅ WIN' if is_win else '❌ LOSS'} ${pnl:.2f} ({pnl_percent:.1f}%) - Learning recorded")
+                except Exception as e:
+                    logger.error(f"Learning record error: {e}")
+        except Exception as e:
+            logger.error(f"Error in _on_position_closed: {e}")
     
     async def analyze_symbol(self, symbol: str) -> Dict[str, Any]:
         """Analyze a symbol with enhanced AI factors"""
@@ -768,6 +996,18 @@ class AITradingBot:
         logger.info(f"✅ {symbol}: Signal={enhanced_result.signal} | Confidence={enhanced_result.enhanced_confidence:.1f}% | Quality={enhanced_result.quality.value}")
         logger.info(f"   Scores: Pattern={enhanced_result.pattern_score:.0f} Tech={enhanced_result.technical_score:.0f} Vol={enhanced_result.volume_score:.0f} Mom={enhanced_result.momentum_score:.0f}")
         
+        # 📚 Feed market data to Continuous Learning System
+        if self.learning_system and len(df) > 0:
+            try:
+                # Feed latest close price to cycle detector
+                self.learning_system.cycle_detector.add_data(
+                    close=float(df['close'].iloc[-1]),
+                    volume=float(df['volume'].iloc[-1]) if 'volume' in df.columns else 1000,
+                    volatility=float(df['high'].iloc[-1] - df['low'].iloc[-1])
+                )
+            except Exception as e:
+                logger.debug(f"Learning feed error: {e}")
+        
         return result
     
     async def execute_trade(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
@@ -776,6 +1016,26 @@ class AITradingBot:
         SECURITY: Mandatory Stop Loss Enforcement
         - All trades MUST have a Stop Loss
         - If no SL provided, auto-calculate from ATR or use 2% default
+        
+        PRO FEATURES:
+        - Session Filter (เทรดเฉพาะช่วงเวลาดี)
+        - News Filter (หยุดช่วงข่าว)
+        - Correlation Filter (ไม่เปิดคู่ที่ correlate)
+        - Losing Streak Stop (หยุดเมื่อแพ้ติดๆ)
+        
+        SMART BRAIN:
+        - Pattern Memory (จำ pattern ที่เคยเทรด)
+        - Adaptive Risk (ปรับ size ตาม performance)
+        - Time Analysis (รู้ว่าช่วงไหนดี)
+        - Symbol Analysis (รู้ว่า symbol ไหนเก่ง)
+        
+        ADVANCED INTELLIGENCE:
+        - Market Regime Detection (Trend/Range/Volatile)
+        - Multi-Timeframe Confirmation
+        - Momentum Analysis (RSI+MACD+Stoch)
+        - Support/Resistance Detection
+        - Kelly Criterion Sizing
+        - Confluence Scoring
         """
         symbol = analysis.get("symbol")
         signal = analysis.get("signal", "WAIT")
@@ -785,6 +1045,710 @@ class AITradingBot:
         
         logger.info(f"🔍 execute_trade() called for {symbol}")
         logger.info(f"   Signal: {signal}, Quality: {quality}, Price: {current_price}")
+        
+        # 🧠 ADVANCED INTELLIGENCE CHECK
+        intel_multiplier = 1.0
+        intel_decision = None
+        if self.intelligence and analysis.get("market_data"):
+            try:
+                # Get H1 data from analysis
+                market_data = analysis.get("market_data", {})
+                h1_data = {
+                    "open": np.array([market_data.get("open", current_price)]),
+                    "high": np.array([market_data.get("high", current_price)]),
+                    "low": np.array([market_data.get("low", current_price)]),
+                    "close": np.array([market_data.get("close", current_price)]),
+                }
+                
+                # Get more data if available
+                if hasattr(self, '_last_ohlcv') and symbol in self._last_ohlcv:
+                    h1_data = self._last_ohlcv[symbol]
+                
+                # Get Smart Brain stats for Kelly
+                win_rate, avg_win, avg_loss, total_trades = 0.5, 1.0, 1.0, 0
+                if self.smart_brain:
+                    stats = self.smart_brain.journal.get_stats(30)
+                    win_rate = stats.get("win_rate", 50) / 100
+                    total_trades = stats.get("total", 0)
+                    # Estimate avg win/loss from trades
+                    if total_trades > 0:
+                        wins = [t for t in self.smart_brain.journal.trades[-30:] if t.is_win()]
+                        losses = [t for t in self.smart_brain.journal.trades[-30:] if not t.is_win()]
+                        if wins:
+                            avg_win = sum(abs(t.pnl_percent) for t in wins if t.pnl_percent) / len(wins)
+                        if losses:
+                            avg_loss = sum(abs(t.pnl_percent) for t in losses if t.pnl_percent) / len(losses)
+                
+                side_for_intel = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                pattern_conf = analysis.get("enhanced_confidence", analysis.get("base_confidence", 70))
+                
+                intel_decision = self.intelligence.analyze(
+                    signal_side=side_for_intel,
+                    pattern_confidence=pattern_conf,
+                    h1_data=h1_data,
+                    win_rate=win_rate,
+                    avg_win=avg_win,
+                    avg_loss=avg_loss,
+                    total_trades=total_trades,
+                )
+                
+                # Log intelligence results
+                if intel_decision.regime:
+                    logger.info(f"   🌡️ Regime: {intel_decision.regime.regime.value} - {intel_decision.regime.message}")
+                if intel_decision.momentum:
+                    logger.info(f"   📈 Momentum: {intel_decision.momentum.momentum_state} (RSI={intel_decision.momentum.rsi:.0f})")
+                if intel_decision.confluence:
+                    logger.info(f"   🎯 Confluence: {intel_decision.confluence.agreeing_factors}/{intel_decision.confluence.total_factors}")
+                
+                if not intel_decision.can_trade:
+                    logger.warning(f"   🧠 ADVANCED INTELLIGENCE BLOCKED:")
+                    for warning in intel_decision.warnings:
+                        logger.warning(f"      {warning}")
+                    return {
+                        "action": "BLOCKED_BY_INTELLIGENCE",
+                        "reason": "; ".join(intel_decision.warnings),
+                        "confluence": intel_decision.confluence.to_dict() if intel_decision.confluence else None,
+                    }
+                
+                intel_multiplier = intel_decision.position_size_factor
+                logger.info(f"   🧠 Intelligence Multiplier: {intel_multiplier}x")
+                
+                for reason in intel_decision.reasons:
+                    logger.info(f"   ✅ {reason}")
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Intelligence analysis failed: {e}")
+        
+        # � NEURAL BRAIN CHECK
+        neural_multiplier = 1.0
+        if self.neural_brain:
+            try:
+                # Get balance for risk calculation
+                balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                
+                # Get price data
+                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                prices = df['close'].values.astype(np.float32) if len(df) > 0 else np.array([current_price])
+                volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns and len(df) > 0 else None
+                
+                neural_decision = self.neural_brain.analyze(
+                    signal_side="BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL",
+                    prices=prices,
+                    volumes=volumes,
+                    balance=balance,
+                )
+                
+                if not neural_decision.can_trade:
+                    logger.warning(f"   🧬 NEURAL BRAIN BLOCKED:")
+                    for warning in neural_decision.warnings:
+                        logger.warning(f"      {warning}")
+                    return {
+                        "action": "BLOCKED_BY_NEURAL",
+                        "reason": "; ".join(neural_decision.warnings),
+                        "market_state": neural_decision.market_state.value,
+                    }
+                
+                neural_multiplier = neural_decision.position_size_factor
+                
+                logger.info(f"   🧬 Market State: {neural_decision.market_state.value}")
+                logger.info(f"   🧬 Pattern Quality: {neural_decision.pattern_quality}")
+                logger.info(f"   🧬 Neural Confidence: {neural_decision.confidence:.1f}%")
+                logger.info(f"   🧬 Neural Multiplier: {neural_multiplier}x")
+                
+                if neural_decision.anomaly_detected:
+                    logger.warning(f"   ⚠️ Anomaly detected!")
+                
+                for reason in neural_decision.reasons:
+                    logger.info(f"   🧬 {reason}")
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Neural Brain analysis failed: {e}")
+        
+        # ⚛️ QUANTUM STRATEGY CHECK
+        quantum_multiplier = 1.0
+        if self.quantum_strategy:
+            try:
+                side_for_quantum = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                
+                # Get price data
+                prices_arr = prices if isinstance(prices, np.ndarray) else np.array(prices)
+                volumes_arr = volumes if volumes is not None and isinstance(volumes, np.ndarray) else None
+                
+                quantum_decision = self.quantum_strategy.analyze(
+                    symbol=symbol,
+                    signal_direction=side_for_quantum,
+                    prices=prices_arr,
+                    volumes=volumes_arr,
+                    entry_price=current_price
+                )
+                
+                if not quantum_decision.should_trade:
+                    logger.warning(f"   ⚛️ QUANTUM STRATEGY BLOCKED:")
+                    logger.warning(f"      Quantum Score: {quantum_decision.quantum_score:.1f}")
+                    logger.warning(f"      Confidence: {quantum_decision.confidence:.1f}%")
+                    for warning in quantum_decision.warnings:
+                        logger.warning(f"      {warning}")
+                    return {
+                        "action": "BLOCKED_BY_QUANTUM",
+                        "reason": f"Score={quantum_decision.quantum_score:.1f}, {'; '.join(quantum_decision.warnings)}",
+                        "quantum_score": quantum_decision.quantum_score,
+                        "confidence": quantum_decision.confidence,
+                    }
+                
+                quantum_multiplier = quantum_decision.position_multiplier
+                
+                # Log quantum analysis
+                logger.info(f"   ⚛️ Quantum Score: {quantum_decision.quantum_score:.1f}")
+                logger.info(f"   ⚛️ Confidence: {quantum_decision.confidence:.1f}%")
+                logger.info(f"   ⚛️ Edge Score: {quantum_decision.edge_score:.2f}")
+                logger.info(f"   ⚛️ R:R Ratio: {quantum_decision.risk_reward:.2f}")
+                logger.info(f"   ⚛️ Microstructure: {quantum_decision.microstructure.state.value}")
+                logger.info(f"   ⚛️ Smart Money: {quantum_decision.microstructure.smart_money_signal}")
+                logger.info(f"   ⚛️ Volatility: {quantum_decision.volatility.regime.value}")
+                logger.info(f"   ⚛️ Hurst: {quantum_decision.fractal.hurst_exponent:.2f}")
+                logger.info(f"   ⚛️ Sentiment: {quantum_decision.sentiment.overall_sentiment:.2f}")
+                logger.info(f"   ⚛️ Quantum Multiplier: {quantum_multiplier:.2f}x")
+                
+                # Log exit plan if available
+                if quantum_decision.exit_plan:
+                    ep = quantum_decision.exit_plan
+                    logger.info(f"   ⚛️ Exit Strategy: {ep.strategy.value}")
+                    logger.info(f"   ⚛️ SL: {ep.initial_stop_loss:.5f} | TP1: {ep.take_profit_1:.5f}")
+                
+                for reason in quantum_decision.reasons:
+                    logger.info(f"   ⚛️ {reason}")
+                    
+                if quantum_decision.warnings:
+                    for warning in quantum_decision.warnings:
+                        logger.info(f"   ⚠️ {warning}")
+                        
+            except Exception as e:
+                logger.warning(f"   ⚠️ Quantum Strategy analysis failed: {e}")
+        
+        # 🔮 DEEP INTELLIGENCE CHECK
+        deep_multiplier = 1.0
+        if self.deep_intelligence:
+            try:
+                side_for_deep = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                
+                # Get multi-timeframe data if available
+                timeframe_data = {}
+                if hasattr(self, 'data_provider') and self.data_provider:
+                    for tf_name, tf_code in [("M15", "15m"), ("H1", "1h"), ("H4", "4h")]:
+                        try:
+                            tf_df = await self.data_provider.get_historical_klines(
+                                symbol=symbol, timeframe=tf_code, days=7
+                            )
+                            if tf_df is not None and len(tf_df) > 30:
+                                timeframe_data[tf_name] = tf_df['close'].values
+                        except:
+                            pass
+                
+                # Get other symbols' direction
+                other_dirs = {}
+                for other_sym, last_sig in self._last_signals.items():
+                    if other_sym != symbol and last_sig:
+                        sig_val = last_sig.get("signal", "")
+                        if "BUY" in sig_val:
+                            other_dirs[other_sym] = "BUY"
+                        elif "SELL" in sig_val:
+                            other_dirs[other_sym] = "SELL"
+                
+                # Current params
+                current_params = {
+                    "quality_level": self.min_quality.value if hasattr(self.min_quality, 'value') else str(self.min_quality),
+                    "session": datetime.now().strftime("%H"),
+                    "symbol": symbol,
+                }
+                
+                deep_decision = self.deep_intelligence.analyze(
+                    symbol=symbol,
+                    signal_direction=side_for_deep,
+                    timeframe_data=timeframe_data,
+                    current_params=current_params,
+                    other_symbols_direction=other_dirs if other_dirs else None
+                )
+                
+                if not deep_decision.should_trade:
+                    logger.warning(f"   🔮 DEEP INTELLIGENCE BLOCKED:")
+                    logger.warning(f"      Confluence: {deep_decision.confluence_level.value}")
+                    logger.warning(f"      Confidence: {deep_decision.confidence:.1f}%")
+                    for warning in deep_decision.warnings:
+                        logger.warning(f"      {warning}")
+                    warnings_str = "; ".join(deep_decision.warnings)
+                    return {
+                        "action": "BLOCKED_BY_DEEP",
+                        "reason": f"Confluence={deep_decision.confluence_level.value}, {warnings_str}",
+                        "confluence": deep_decision.confluence_level.value,
+                        "confidence": deep_decision.confidence,
+                    }
+                
+                deep_multiplier = deep_decision.position_multiplier
+                
+                logger.info(f"   🔮 Confluence: {deep_decision.confluence_level.value}")
+                logger.info(f"   🔮 Deep Confidence: {deep_decision.confidence:.1f}%")
+                logger.info(f"   🔮 TF Score: {deep_decision.timeframe_score:.2f}")
+                logger.info(f"   🔮 Prediction: {deep_decision.prediction_score:.2f}")
+                logger.info(f"   🔮 Session Score: {deep_decision.session_score:.2f}")
+                logger.info(f"   🔮 Deep Multiplier: {deep_multiplier:.2f}x")
+                
+                if deep_decision.warnings:
+                    for warning in deep_decision.warnings:
+                        logger.info(f"   ⚠️ {warning}")
+                        
+            except Exception as e:
+                logger.warning(f"   ⚠️ Deep Intelligence analysis failed: {e}")
+        
+        # 🎯 ALPHA ENGINE CHECK
+        alpha_multiplier = 1.0
+        if self.alpha_engine:
+            try:
+                side_for_alpha = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                
+                # Prepare price arrays
+                closes = np.array(prices[-200:]) if len(prices) > 200 else np.array(prices)
+                
+                # Get OHLCV data from recent analysis
+                opens = closes * 0.999  # Approximate if not available
+                highs = closes * 1.002
+                lows = closes * 0.998
+                vols = np.array(volumes[-len(closes):]) if volumes is not None and len(volumes) >= len(closes) else np.ones(len(closes)) * 1000
+                
+                alpha_decision = self.alpha_engine.analyze(
+                    symbol=symbol,
+                    signal_direction=side_for_alpha,
+                    opens=opens,
+                    highs=highs,
+                    lows=lows,
+                    closes=closes,
+                    volumes=vols
+                )
+                
+                if not alpha_decision.should_trade:
+                    logger.warning(f"   🎯 ALPHA ENGINE BLOCKED:")
+                    logger.warning(f"      Grade: {alpha_decision.grade.value}")
+                    logger.warning(f"      Alpha Score: {alpha_decision.alpha_score:.1f}")
+                    for risk in alpha_decision.risk_factors[:3]:
+                        logger.warning(f"      {risk}")
+                    return {
+                        "action": "BLOCKED_BY_ALPHA",
+                        "reason": f"Grade={alpha_decision.grade.value}, Score={alpha_decision.alpha_score:.1f}",
+                        "alpha_grade": alpha_decision.grade.value,
+                        "alpha_score": alpha_decision.alpha_score,
+                    }
+                
+                alpha_multiplier = alpha_decision.position_multiplier
+                
+                # Log alpha analysis
+                logger.info(f"   🎯 Alpha Grade: {alpha_decision.grade.value}")
+                logger.info(f"   🎯 Alpha Score: {alpha_decision.alpha_score:.1f}")
+                logger.info(f"   🎯 Confidence: {alpha_decision.confidence:.1f}%")
+                logger.info(f"   🎯 R:R Ratio: {alpha_decision.risk_reward:.2f}")
+                logger.info(f"   🎯 Order Flow: {alpha_decision.order_flow.bias.value}")
+                logger.info(f"   🎯 Delta: {alpha_decision.order_flow.delta:+.2f}")
+                
+                if alpha_decision.liquidity_zones:
+                    for zone in alpha_decision.liquidity_zones[:3]:
+                        logger.info(f"   🎯 Liquidity: {zone.zone_type.value} at {zone.price_level:.5f}")
+                
+                if alpha_decision.divergences:
+                    for div in alpha_decision.divergences[:2]:
+                        logger.info(f"   🎯 Divergence: {div.indicator} {div.div_type.value}")
+                
+                if alpha_decision.market_profile:
+                    mp = alpha_decision.market_profile
+                    logger.info(f"   🎯 POC: {mp.poc:.5f} | Value Area: {mp.value_area_low:.5f}-{mp.value_area_high:.5f}")
+                
+                if alpha_decision.optimal_entry:
+                    logger.info(f"   🎯 Optimal Entry: {alpha_decision.optimal_entry:.5f}")
+                    logger.info(f"   🎯 Suggested SL: {alpha_decision.stop_loss:.5f}")
+                    logger.info(f"   🎯 Targets: {[f'{t:.5f}' for t in alpha_decision.targets[:3]]}")
+                
+                logger.info(f"   🎯 Alpha Multiplier: {alpha_multiplier:.2f}x")
+                
+                for edge in alpha_decision.edge_factors[:5]:
+                    logger.info(f"   ✅ {edge}")
+                
+                if alpha_decision.risk_factors:
+                    for risk in alpha_decision.risk_factors[:3]:
+                        logger.info(f"   ⚠️ {risk}")
+                
+                # 📊 Store Alpha Decision for API
+                self._last_alpha_result = {
+                    "symbol": symbol,
+                    "timestamp": datetime.now().isoformat(),
+                    "grade": alpha_decision.grade.value,
+                    "alpha_score": float(alpha_decision.alpha_score),
+                    "confidence": float(alpha_decision.confidence),
+                    "order_flow_bias": alpha_decision.order_flow.bias.value if alpha_decision.order_flow else "NEUTRAL",
+                    "order_flow_delta": float(alpha_decision.order_flow.delta) if alpha_decision.order_flow else 0,
+                    "risk_reward": float(alpha_decision.risk_reward),
+                    "position_multiplier": float(alpha_multiplier),
+                    "optimal_entry": float(alpha_decision.optimal_entry) if alpha_decision.optimal_entry else 0,
+                    "stop_loss": float(alpha_decision.stop_loss) if alpha_decision.stop_loss else 0,
+                    "targets": [float(t) for t in alpha_decision.targets[:3]] if alpha_decision.targets else [],
+                    "market_profile": {
+                        "poc": float(alpha_decision.market_profile.poc) if alpha_decision.market_profile else 0,
+                        "vah": float(alpha_decision.market_profile.value_area_high) if alpha_decision.market_profile else 0,
+                        "val": float(alpha_decision.market_profile.value_area_low) if alpha_decision.market_profile else 0,
+                    } if alpha_decision.market_profile else None,
+                    "liquidity_zones": [{"type": z.zone_type.value, "price": float(z.price_level)} for z in alpha_decision.liquidity_zones[:5]] if alpha_decision.liquidity_zones else [],
+                    "should_trade": alpha_decision.should_trade,
+                    "edge_factors": alpha_decision.edge_factors[:5] if alpha_decision.edge_factors else [],
+                    "risk_factors": alpha_decision.risk_factors[:5] if alpha_decision.risk_factors else [],
+                }
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Alpha Engine analysis failed: {e}")
+        
+        # 🧠⚡ OMEGA BRAIN CHECK
+        omega_multiplier = 1.0
+        if self.omega_brain:
+            try:
+                side_for_omega = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                
+                # Prepare price arrays
+                omega_closes = np.array(prices[-200:]) if len(prices) > 200 else np.array(prices)
+                omega_opens = omega_closes * 0.999
+                omega_highs = omega_closes * 1.002
+                omega_lows = omega_closes * 0.998
+                omega_vols = np.array(volumes[-len(omega_closes):]) if volumes is not None and len(volumes) >= len(omega_closes) else np.ones(len(omega_closes)) * 1000
+                
+                # Get balance for risk allocation
+                omega_balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                
+                omega_decision = self.omega_brain.analyze(
+                    symbol=symbol,
+                    signal_direction=side_for_omega,
+                    opens=omega_opens,
+                    highs=omega_highs,
+                    lows=omega_lows,
+                    closes=omega_closes,
+                    volumes=omega_vols,
+                    current_balance=omega_balance,
+                    other_symbols=self.symbols
+                )
+                
+                if not omega_decision.should_trade:
+                    logger.warning(f"   🧠⚡ OMEGA BRAIN BLOCKED:")
+                    logger.warning(f"      Grade: {omega_decision.grade.value}")
+                    logger.warning(f"      Omega Score: {omega_decision.omega_score:.1f}")
+                    logger.warning(f"      Verdict: {omega_decision.final_verdict}")
+                    for risk in omega_decision.risk_factors[:3]:
+                        logger.warning(f"      {risk}")
+                    return {
+                        "action": "BLOCKED_BY_OMEGA",
+                        "reason": f"Grade={omega_decision.grade.value}, Score={omega_decision.omega_score:.1f}",
+                        "omega_grade": omega_decision.grade.value,
+                        "omega_score": omega_decision.omega_score,
+                        "verdict": omega_decision.final_verdict
+                    }
+                
+                omega_multiplier = omega_decision.position_multiplier
+                
+                # Log Omega Brain analysis
+                logger.info(f"   🧠⚡ Omega Grade: {omega_decision.grade.value}")
+                logger.info(f"   🧠⚡ Omega Score: {omega_decision.omega_score:.1f}")
+                logger.info(f"   🧠⚡ Confidence: {omega_decision.confidence:.1f}%")
+                logger.info(f"   🧠⚡ Institutional: {omega_decision.institutional_flow.activity.value}")
+                logger.info(f"   🧠⚡ Smart Money: {omega_decision.institutional_flow.smart_money_direction}")
+                logger.info(f"   🧠⚡ Sentiment: {omega_decision.sentiment.overall_sentiment:.1f} ({omega_decision.sentiment.dominant_narrative})")
+                logger.info(f"   🧠⚡ Regime: {omega_decision.regime_prediction.current_regime}")
+                
+                if omega_decision.manipulation_alert:
+                    ma = omega_decision.manipulation_alert
+                    logger.info(f"   🧠⚡ Manipulation: {ma.manipulation_type.value} ({ma.probability:.0f}%)")
+                
+                logger.info(f"   🧠⚡ Position Plan: {omega_decision.position_plan.action}")
+                logger.info(f"   🧠⚡ R:R Ratio: {omega_decision.risk_reward:.2f}")
+                logger.info(f"   🧠⚡ Omega Multiplier: {omega_multiplier:.2f}x")
+                
+                # Log institutional insight
+                logger.info(f"   💡 {omega_decision.institutional_insight}")
+                logger.info(f"   📊 {omega_decision.final_verdict}")
+                
+                for edge in omega_decision.edge_factors[:3]:
+                    logger.info(f"   ✅ {edge}")
+                
+                if omega_decision.risk_factors:
+                    for risk in omega_decision.risk_factors[:2]:
+                        logger.info(f"   ⚠️ {risk}")
+                
+                # 📊 Store Omega Decision for API
+                self._last_omega_result = {
+                    "symbol": symbol,
+                    "timestamp": datetime.now().isoformat(),
+                    "grade": omega_decision.grade.value,
+                    "omega_score": float(omega_decision.omega_score),
+                    "confidence": float(omega_decision.confidence),
+                    "institutional_flow": omega_decision.institutional_flow.activity.value if omega_decision.institutional_flow else "N/A",
+                    "smart_money": omega_decision.institutional_flow.smart_money_direction if omega_decision.institutional_flow else "N/A",
+                    "manipulation_detected": omega_decision.manipulation_alert.manipulation_type.value if omega_decision.manipulation_alert else "NONE",
+                    "manipulation_probability": float(omega_decision.manipulation_alert.probability) if omega_decision.manipulation_alert else 0,
+                    "sentiment": float(omega_decision.sentiment.overall_sentiment) if omega_decision.sentiment else 0,
+                    "current_regime": omega_decision.regime_prediction.current_regime if omega_decision.regime_prediction else "N/A",
+                    "predicted_regime": omega_decision.regime_prediction.predicted_regime if omega_decision.regime_prediction else "N/A",
+                    "position_multiplier": float(omega_multiplier),
+                    "risk_reward": float(omega_decision.risk_reward),
+                    "should_trade": omega_decision.should_trade,
+                    "final_verdict": omega_decision.final_verdict,
+                    "institutional_insight": omega_decision.institutional_insight,
+                    "edge_factors": omega_decision.edge_factors[:5] if omega_decision.edge_factors else [],
+                    "risk_factors": omega_decision.risk_factors[:5] if omega_decision.risk_factors else [],
+                }
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Omega Brain analysis failed: {e}")
+        
+        # 🏛️⚔️ TITAN CORE CHECK (Final Meta-Intelligence)
+        titan_multiplier = 1.0
+        if self.titan_core:
+            try:
+                side_for_titan = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+                
+                # Prepare arrays
+                titan_closes = np.array(prices[-200:]) if len(prices) > 200 else np.array(prices)
+                titan_highs = titan_closes * 1.002
+                titan_lows = titan_closes * 0.998
+                titan_vols = np.array(volumes[-len(titan_closes):]) if volumes is not None and len(volumes) >= len(titan_closes) else np.ones(len(titan_closes)) * 1000
+                
+                # Collect module signals for synthesis
+                module_signals = []
+                
+                # Add signals from all active modules
+                if neural_multiplier != 1.0 or True:
+                    module_signals.append(ModuleSignal(
+                        module_name="NeuralBrain",
+                        should_trade=neural_multiplier > 0.3,
+                        direction=side_for_titan,
+                        confidence=70 * neural_multiplier,
+                        multiplier=neural_multiplier,
+                        score=70,
+                        reasons=[],
+                        warnings=[]
+                    ))
+                
+                if deep_multiplier != 1.0 or True:
+                    module_signals.append(ModuleSignal(
+                        module_name="DeepIntelligence",
+                        should_trade=deep_multiplier > 0.3,
+                        direction=side_for_titan,
+                        confidence=70 * deep_multiplier,
+                        multiplier=deep_multiplier,
+                        score=70,
+                        reasons=[],
+                        warnings=[]
+                    ))
+                
+                if quantum_multiplier != 1.0 or True:
+                    module_signals.append(ModuleSignal(
+                        module_name="QuantumStrategy",
+                        should_trade=quantum_multiplier > 0.3,
+                        direction=side_for_titan,
+                        confidence=70 * quantum_multiplier,
+                        multiplier=quantum_multiplier,
+                        score=70,
+                        reasons=[],
+                        warnings=[]
+                    ))
+                
+                if alpha_multiplier != 1.0 or True:
+                    module_signals.append(ModuleSignal(
+                        module_name="AlphaEngine",
+                        should_trade=alpha_multiplier > 0.3,
+                        direction=side_for_titan,
+                        confidence=70 * alpha_multiplier,
+                        multiplier=alpha_multiplier,
+                        score=70,
+                        reasons=[],
+                        warnings=[]
+                    ))
+                
+                if omega_multiplier != 1.0 or True:
+                    module_signals.append(ModuleSignal(
+                        module_name="OmegaBrain",
+                        should_trade=omega_multiplier > 0.3,
+                        direction=side_for_titan,
+                        confidence=70 * omega_multiplier,
+                        multiplier=omega_multiplier,
+                        score=70,
+                        reasons=[],
+                        warnings=[]
+                    ))
+                
+                titan_decision = self.titan_core.synthesize(
+                    symbol=symbol,
+                    signal_direction=side_for_titan,
+                    closes=titan_closes,
+                    highs=titan_highs,
+                    lows=titan_lows,
+                    volumes=titan_vols,
+                    module_signals=module_signals,
+                    current_price=current_price
+                )
+                
+                if not titan_decision.should_trade:
+                    logger.warning(f"   🏛️ TITAN CORE BLOCKED:")
+                    logger.warning(f"      Grade: {titan_decision.grade.value}")
+                    logger.warning(f"      Titan Score: {titan_decision.titan_score:.1f}")
+                    logger.warning(f"      Consensus: {titan_decision.consensus.level.value}")
+                    logger.warning(f"      Verdict: {titan_decision.final_verdict}")
+                    return {
+                        "action": "BLOCKED_BY_TITAN",
+                        "reason": f"Grade={titan_decision.grade.value}, Score={titan_decision.titan_score:.1f}",
+                        "titan_grade": titan_decision.grade.value,
+                        "titan_score": titan_decision.titan_score,
+                        "consensus": titan_decision.consensus.level.value,
+                        "verdict": titan_decision.final_verdict
+                    }
+                
+                titan_multiplier = titan_decision.position_multiplier
+                
+                # Log Titan Core analysis
+                logger.info(f"   🏛️ Titan Grade: {titan_decision.grade.value}")
+                logger.info(f"   🏛️ Titan Score: {titan_decision.titan_score:.1f}")
+                logger.info(f"   🏛️ Confidence: {titan_decision.confidence:.1f}%")
+                logger.info(f"   🏛️ Consensus: {titan_decision.consensus.level.value} ({titan_decision.consensus.agreement_ratio:.0%})")
+                logger.info(f"   🏛️ Prediction: {titan_decision.prediction.final_prediction} ({titan_decision.prediction.predicted_move:+.2f}%)")
+                logger.info(f"   🏛️ Market: {titan_decision.market_condition.value}")
+                logger.info(f"   🏛️ Agreeing: {titan_decision.agreeing_modules}/{titan_decision.total_modules} modules")
+                logger.info(f"   🏛️ Titan Multiplier: {titan_multiplier:.2f}x")
+                
+                # Log verdict
+                logger.info(f"   ⚔️ {titan_decision.final_verdict}")
+                
+                for edge in titan_decision.edge_factors[:3]:
+                    logger.info(f"   ✅ {edge}")
+                
+                if titan_decision.risk_factors:
+                    for risk in titan_decision.risk_factors[:2]:
+                        logger.info(f"   ⚠️ {risk}")
+                
+                # Log insights if any
+                if titan_decision.improvement_insights:
+                    for insight in titan_decision.improvement_insights[:2]:
+                        logger.info(f"   💡 {insight.description}")
+                
+                # 📊 Store Titan Decision for API
+                self._last_titan_decision = {
+                    "symbol": symbol,
+                    "timestamp": datetime.now().isoformat(),
+                    "grade": titan_decision.grade.value,
+                    "titan_score": float(titan_decision.titan_score),
+                    "confidence": float(titan_decision.confidence),
+                    "consensus": titan_decision.consensus.level.value,
+                    "agreement_ratio": float(titan_decision.consensus.agreement_ratio),
+                    "market_condition": titan_decision.market_condition.value,
+                    "prediction": {
+                        "direction": titan_decision.prediction.final_prediction,
+                        "predicted_move": float(titan_decision.prediction.predicted_move),
+                    },
+                    "position_multiplier": float(titan_multiplier),
+                    "agreeing_modules": titan_decision.agreeing_modules,
+                    "total_modules": titan_decision.total_modules,
+                    "should_trade": titan_decision.should_trade,
+                    "final_verdict": titan_decision.final_verdict,
+                    "edge_factors": titan_decision.edge_factors[:5] if titan_decision.edge_factors else [],
+                    "risk_factors": titan_decision.risk_factors[:5] if titan_decision.risk_factors else [],
+                }
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Titan Core analysis failed: {e}")
+        
+        # 🧠 SMART BRAIN CHECK
+        smart_multiplier = 1.0
+        if self.smart_brain:
+            side_for_check = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+            smart_decision = self.smart_brain.evaluate_entry(symbol, side_for_check)
+            
+            if not smart_decision.can_trade:
+                logger.warning(f"   🧠 SMART BRAIN BLOCKED:")
+                for reason in smart_decision.reasons:
+                    logger.warning(f"      {reason}")
+                return {
+                    "action": "BLOCKED_BY_BRAIN",
+                    "reason": "; ".join(smart_decision.reasons),
+                }
+            
+            smart_multiplier = smart_decision.risk_multiplier
+            
+            if smart_decision.insights:
+                for insight in smart_decision.insights:
+                    logger.info(f"   🧠 {insight}")
+            
+            logger.info(f"   🧠 Smart Multiplier: {smart_multiplier}x")
+        
+        # 🏆 PRO FEATURES CHECK
+        if self.pro_features:
+            # Get existing positions for correlation check
+            existing_positions = [
+                {"symbol": p.symbol, "side": p.side.value}
+                for p in self.trading_engine.positions.values()
+            ]
+            
+            # Determine side for check
+            side_for_check = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+            
+            pro_decision = self.pro_features.check_entry(
+                symbol=symbol,
+                side=side_for_check,
+                existing_positions=existing_positions,
+            )
+            
+            # Log session info
+            if pro_decision.session_info:
+                session = pro_decision.session_info
+                logger.info(f"   🕐 Session: {session.current_session.value} ({session.quality_score}%)")
+            
+            if not pro_decision.can_trade:
+                logger.warning(f"   🏆 PRO FEATURES BLOCKED:")
+                for reason in pro_decision.reasons:
+                    logger.warning(f"      {reason}")
+                return {
+                    "action": "BLOCKED_BY_PRO",
+                    "reason": "; ".join(pro_decision.reasons),
+                }
+            
+            if pro_decision.warnings:
+                for warning in pro_decision.warnings:
+                    logger.info(f"   💡 {warning}")
+            
+            # Apply position multiplier from Pro Features
+            position_multiplier_from_pro = pro_decision.position_multiplier
+            logger.info(f"   🏆 Pro Position Multiplier: {position_multiplier_from_pro}x")
+        else:
+            position_multiplier_from_pro = 1.0
+        
+        # 🛡️ RISK GUARDIAN CHECK
+        if self.risk_guardian:
+            balance = await self.trading_engine.broker.get_balance()
+            open_positions = [p.to_dict() for p in self.trading_engine.positions.values()]
+            
+            risk_assessment = self.risk_guardian.assess_risk(
+                current_balance=balance,
+                open_positions=open_positions,
+                proposed_trade={"symbol": symbol, "side": signal}
+            )
+            
+            if not risk_assessment.can_trade:
+                logger.warning(f"   🛡️ RISK GUARDIAN BLOCKED:")
+                for reason in risk_assessment.reasons:
+                    logger.warning(f"      {reason}")
+                return {
+                    "action": "BLOCKED_BY_RISK",
+                    "reason": "; ".join(risk_assessment.reasons),
+                    "risk_level": risk_assessment.level.value,
+                }
+            
+            if risk_assessment.warnings:
+                for warning in risk_assessment.warnings:
+                    logger.warning(f"   ⚠️ {warning}")
+            
+            # Adjust position size based on risk assessment
+            position_multiplier_from_risk = risk_assessment.max_position_size
+            logger.info(f"   🛡️ Risk Level: {risk_assessment.level.value}, Max Position: {position_multiplier_from_risk}x")
+        else:
+            position_multiplier_from_risk = 1.0
         
         # Skip if quality below threshold
         quality_order = ["SKIP", "LOW", "MEDIUM", "HIGH", "PREMIUM"]
@@ -842,9 +1806,51 @@ class AITradingBot:
         take_profit = risk_mgmt.get("take_profit")
         position_multiplier = risk_mgmt.get("position_size", 1.0)
         
-        # 🔒 MANDATORY STOP LOSS ENFORCEMENT
-        if not stop_loss or stop_loss <= 0:
-            # Auto-calculate Stop Loss (2% from current price)
+        # 🧠 Advanced Intelligence multiplier
+        position_multiplier = min(position_multiplier, intel_multiplier)
+        
+        # 🧠 Smart Brain multiplier (adaptive risk)
+        position_multiplier = min(position_multiplier, smart_multiplier)
+        
+        # 🏆 Pro Features position size limit
+        position_multiplier = min(position_multiplier, position_multiplier_from_pro)
+
+        # 🛡️ Risk Guardian position size limit
+        position_multiplier = min(position_multiplier, position_multiplier_from_risk)
+        
+        # 🧬 Neural Brain position size factor
+        position_multiplier = min(position_multiplier, neural_multiplier)
+        
+        # 🔮 Deep Intelligence position size factor
+        position_multiplier = min(position_multiplier, deep_multiplier)
+        
+        # ⚛️ Quantum Strategy position size factor
+        position_multiplier = min(position_multiplier, quantum_multiplier)
+        
+        # 🎯 Alpha Engine position size factor
+        position_multiplier = min(position_multiplier, alpha_multiplier)
+        
+        # 🧠⚡ Omega Brain position size factor
+        position_multiplier = min(position_multiplier, omega_multiplier)
+        
+        # 🏛️⚔️ Titan Core position size factor (Final)
+        position_multiplier = min(position_multiplier, titan_multiplier)
+        
+        logger.info(f"   📊 Final Position Multiplier: {position_multiplier:.2f}x")
+        logger.info(f"      Neural: {neural_multiplier}x | Deep: {deep_multiplier:.2f}x | Quantum: {quantum_multiplier:.2f}x")
+        logger.info(f"      Alpha: {alpha_multiplier:.2f}x | Omega: {omega_multiplier:.2f}x | Titan: {titan_multiplier:.2f}x")
+        
+        # 🔒 MANDATORY STOP LOSS - Use Risk Guardian to validate/fix
+        if self.risk_guardian:
+            stop_loss, sl_msg = self.risk_guardian.validate_stop_loss(
+                side=side.value,
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                atr=risk_mgmt.get("atr"),  # ATR from analysis if available
+            )
+            logger.info(f"   🛡️ SL Validation: {sl_msg}")
+        elif not stop_loss or stop_loss <= 0:
+            # Fallback: Auto-calculate Stop Loss (2% from current price)
             default_stop_percent = 0.02
             if side == OrderSide.BUY:
                 stop_loss = current_price * (1 - default_stop_percent)
@@ -860,17 +1866,26 @@ class AITradingBot:
             logger.error(f"❌ Invalid SL for SELL: SL ({stop_loss}) must be above price ({current_price})")
             return {"action": "SKIP", "reason": "Invalid SL direction for SELL"}
         
-        # Calculate position size
+        # 🛡️ Calculate position size using Risk Guardian
         balance = await self.trading_engine.broker.get_balance()
-        risk_amount = balance * (self.max_risk_percent / 100) * position_multiplier
         
-        if stop_loss:
+        if self.risk_guardian:
+            quantity, calc_details = self.risk_guardian.calculate_position_size(
+                balance=balance,
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                risk_multiplier=position_multiplier,
+            )
+            if quantity <= 0:
+                logger.error(f"❌ Risk Guardian rejected position: {calc_details.get('error', 'Unknown')}")
+                return {"action": "SKIP", "reason": calc_details.get('error', 'Position size rejected')}
+        else:
+            # Fallback calculation
+            risk_amount = balance * (self.max_risk_percent / 100) * position_multiplier
             stop_distance = abs(current_price - stop_loss)
             quantity = risk_amount / stop_distance if stop_distance > 0 else 0.001
-        else:
-            quantity = risk_amount / (current_price * 0.02)  # 2% default stop
         
-        quantity = round(max(0.001, quantity), 4)
+        quantity = round(max(0.01, quantity), 2)  # Min 0.01 lot
         
         # Create order
         order = Order(
@@ -913,6 +1928,43 @@ class AITradingBot:
             }
             self._trade_history.append(trade_record)
             
+            # 🧠 Record trade in Smart Brain
+            if self.smart_brain:
+                session_name = ""
+                if self.pro_features and self.pro_features.session_filter:
+                    session_info = self.pro_features.session_filter.get_session_info()
+                    session_name = session_info.current_session.value
+                
+                self.smart_brain.record_trade_open(
+                    trade_id=order.id,
+                    symbol=symbol,
+                    side=side.value,
+                    entry_price=result.order.filled_price if result.order else current_price,
+                    stop_loss=stop_loss,
+                    quantity=quantity,
+                    signal_quality=quality,
+                    pattern_confidence=analysis.get("enhanced_confidence", 0),
+                    session=session_name,
+                    market_regime=analysis.get("market_regime", ""),
+                )
+            
+            # 📚 Record factors for Continuous Learning
+            if self.learning_system and intel_decision:
+                # Store trade factors for later learning when closed
+                self._pending_trade_factors[order.id] = {
+                    "symbol": symbol,  # Important for learning
+                    "signal": signal,
+                    "pattern_confidence": analysis.get("enhanced_confidence", 0) > 70,
+                    "regime_aligned": intel_decision.regime.regime.value != "high_volatility" if intel_decision.regime else False,
+                    "mtf_aligned": intel_decision.mtf.can_trade if intel_decision.mtf else False,
+                    "momentum_aligned": intel_decision.momentum.combined_score > 0 if intel_decision.momentum else False,
+                    "near_sr": any(l.level_type == "support" for l in intel_decision.sr_levels[:3]) if intel_decision.sr_levels else False,
+                    "smart_money": True,  # Will be from actual check
+                    "session_quality": self.pro_features.session_filter.get_session_info().quality_score > 60 if self.pro_features else False,
+                    "quality": quality,
+                    "entry_time": datetime.now().isoformat(),
+                }
+            
             # Broadcast trade event
             await self._broadcast_update("trade", trade_record)
             
@@ -942,6 +1994,11 @@ class AITradingBot:
         logger.info("")
         
         self._running = True
+        
+        # 📚 Start background learner (ประหยัด CPU)
+        if self.learning_system and self.learning_system.enable_background:
+            await self.learning_system.start_background_learner()
+            logger.info("📚 Background Learner started (async mode)")
         
         # Broadcast bot status
         await self._broadcast_update("bot_status", {
@@ -988,6 +2045,30 @@ class AITradingBot:
                     logger.info(f"   💰 Price: ${price:,.2f}")
                     logger.info(f"   📈 Confidence: {confidence:.1f}%")
                     logger.info(f"   🌊 Regime: {regime}")
+                    
+                    # 📊 Store Signal History for API
+                    signal_record = {
+                        "id": f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                        "symbol": symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "signal": signal,
+                        "quality": quality,
+                        "confidence": confidence,
+                        "price": price,
+                        "regime": regime,
+                        "titan_grade": self._last_titan_decision.get("grade", "N/A"),
+                        "titan_score": self._last_titan_decision.get("titan_score", 0),
+                        "omega_grade": self._last_omega_result.get("grade", "N/A"),
+                        "omega_score": self._last_omega_result.get("omega_score", 0),
+                        "alpha_grade": self._last_alpha_result.get("grade", "N/A"),
+                        "alpha_score": self._last_alpha_result.get("alpha_score", 0),
+                    }
+                    self._signal_history.insert(0, signal_record)
+                    if len(self._signal_history) > 100:
+                        self._signal_history = self._signal_history[:100]
+                    
+                    # Store last analysis
+                    self._last_analysis = analysis
                     
                     # Broadcast signal update
                     await self._broadcast_update("signal", analysis)
@@ -1052,6 +2133,13 @@ class AITradingBot:
     async def stop(self):
         """Stop the bot"""
         self._running = False
+        
+        # 📚 Stop background learner and save state
+        if self.learning_system:
+            await self.learning_system.stop_background_learner()
+            await self.learning_system.save_all_state()
+            logger.info("📚 Learning state saved to Firebase")
+        
         if self.trading_engine:
             await self.trading_engine.stop()
         if self.data_provider:

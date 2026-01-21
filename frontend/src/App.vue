@@ -20,6 +20,13 @@
               Dashboard
             </router-link>
             <router-link
+              to="/intelligence"
+              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+              :class="{ 'text-white': $route.path === '/intelligence' }"
+            >
+              <span>🧠</span> Intelligence
+            </router-link>
+            <router-link
               to="/enhanced"
               class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
               :class="{ 'text-white': $route.path === '/enhanced' }"

@@ -674,3 +674,492 @@ async def get_cluster_nodes():
         "count": len(nodes),
         "this_node": position_manager.shared_state.node_id,
     }
+
+# =====================
+# Smart Brain Endpoints
+# =====================
+
+@router.get("/smart-brain/insights")
+async def get_smart_brain_insights():
+    """
+    🧠 Smart Brain Insights - ข้อมูลที่ Bot เรียนรู้
+    
+    Returns:
+    - performance_30d: สถิติ 30 วัน (win_rate, pnl, etc.)
+    - best_hours: ชั่วโมงที่เทรดดีที่สุด
+    - best_symbols: คู่เงินที่เทรดดีที่สุด
+    - adaptive_risk_mult: ตัวคูณ risk ปัจจุบัน
+    - patterns_in_memory: จำนวน patterns ที่จำได้
+    """
+    try:
+        from trading.smart_brain import get_smart_brain
+        brain = get_smart_brain()
+        insights = brain.get_insights()
+        return {
+            "success": True,
+            "insights": insights,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error getting Smart Brain insights: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "insights": None,
+        }
+
+
+@router.get("/smart-brain/journal")
+async def get_trade_journal(days: int = 30):
+    """
+    📔 Trade Journal - ประวัติเทรดทั้งหมด
+    """
+    try:
+        from trading.smart_brain import get_smart_brain
+        brain = get_smart_brain()
+        
+        # Get trades
+        trades = []
+        for t in brain.journal.trades[-100:]:  # Last 100
+            trades.append({
+                "trade_id": t.trade_id,
+                "symbol": t.symbol,
+                "side": t.side,
+                "entry_price": t.entry_price,
+                "exit_price": t.exit_price,
+                "pnl_percent": t.pnl_percent,
+                "entry_time": t.entry_time,
+                "exit_time": t.exit_time,
+                "session": t.session,
+                "exit_reason": t.exit_reason,
+                "is_win": t.is_win() if t.exit_price else None,
+            })
+        
+        stats = brain.journal.get_stats(days)
+        
+        return {
+            "success": True,
+            "trades": trades,
+            "stats": stats,
+            "total_trades": len(brain.journal.trades),
+        }
+    except Exception as e:
+        logger.error(f"Error getting trade journal: {e}")
+        return {"success": False, "error": str(e), "trades": []}
+
+
+@router.get("/smart-brain/patterns")
+async def get_pattern_memory():
+    """
+    🧩 Pattern Memory - patterns ที่จำได้และสถิติ
+    """
+    try:
+        from trading.smart_brain import get_smart_brain
+        brain = get_smart_brain()
+        
+        patterns = []
+        for pattern_id, pattern in brain.pattern_memory.patterns.items():
+            patterns.append({
+                "pattern_id": pattern_id,
+                "win_rate": pattern.win_rate,
+                "avg_pnl": pattern.avg_pnl,
+                "trade_count": pattern.trade_count,
+                "last_seen": pattern.last_seen,
+            })
+        
+        # Sort by trade count
+        patterns.sort(key=lambda x: x["trade_count"], reverse=True)
+        
+        return {
+            "success": True,
+            "patterns": patterns[:50],  # Top 50
+            "total_patterns": len(brain.pattern_memory.patterns),
+        }
+    except Exception as e:
+        logger.error(f"Error getting pattern memory: {e}")
+        return {"success": False, "error": str(e), "patterns": []}
+
+
+@router.get("/smart-brain/time-analysis")
+async def get_time_analysis():
+    """
+    ⏰ Time Analysis - สถิติตามชั่วโมง
+    """
+    try:
+        from trading.smart_brain import get_smart_brain
+        brain = get_smart_brain()
+        
+        best_hours = brain.time_analyzer.get_best_hours()
+        
+        # Get all hours stats
+        hours_stats = {}
+        for hour, stats in brain.time_analyzer.hour_stats.items():
+            if stats["trades"] > 0:
+                hours_stats[str(hour)] = {
+                    "trades": stats["trades"],
+                    "wins": stats["wins"],
+                    "win_rate": round((stats["wins"] / stats["trades"]) * 100, 1),
+                    "total_pnl": round(stats["total_pnl"], 2),
+                }
+        
+        return {
+            "success": True,
+            "best_hours": best_hours,
+            "all_hours": hours_stats,
+        }
+    except Exception as e:
+        logger.error(f"Error getting time analysis: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/smart-brain/symbol-analysis")
+async def get_symbol_analysis():
+    """
+    📊 Symbol Analysis - สถิติตามคู่เงิน
+    """
+    try:
+        from trading.smart_brain import get_smart_brain
+        brain = get_smart_brain()
+        
+        best_symbols = brain.symbol_analyzer.get_best_symbols()
+        
+        # Get all symbol stats
+        all_stats = {}
+        for symbol, stats in brain.symbol_analyzer.symbol_stats.items():
+            if stats["trades"] > 0:
+                all_stats[symbol] = {
+                    "trades": stats["trades"],
+                    "wins": stats["wins"],
+                    "win_rate": round((stats["wins"] / stats["trades"]) * 100, 1),
+                    "total_pnl": round(stats["total_pnl"], 2),
+                    "avg_holding_hours": round(stats["total_holding"] / stats["trades"], 1) if stats["trades"] > 0 else 0,
+                }
+        
+        return {
+            "success": True,
+            "best_symbols": best_symbols,
+            "all_symbols": all_stats,
+        }
+    except Exception as e:
+        logger.error(f"Error getting symbol analysis: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# =====================
+# Advanced Intelligence Endpoints
+# =====================
+
+@router.post("/intelligence/analyze")
+async def analyze_with_intelligence(
+    symbol: str,
+    side: str = "BUY",
+    pattern_confidence: float = 70.0,
+):
+    """
+    🧠 Advanced Intelligence Analysis
+    
+    วิเคราะห์ด้วย:
+    - Market Regime (Trend/Range/Volatile)
+    - Momentum (RSI/MACD/Stoch)
+    - Support/Resistance
+    - Kelly Criterion
+    - Confluence Score
+    """
+    try:
+        from trading.advanced_intelligence import get_intelligence
+        import numpy as np
+        
+        intel = get_intelligence()
+        
+        # Get data from MT5
+        if trading_engine and trading_engine.broker:
+            # This is simplified - in real use, get actual OHLC data
+            import MetaTrader5 as mt5
+            
+            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
+            if rates is not None and len(rates) > 50:
+                h1_data = {
+                    "open": np.array([r['open'] for r in rates], dtype=np.float32),
+                    "high": np.array([r['high'] for r in rates], dtype=np.float32),
+                    "low": np.array([r['low'] for r in rates], dtype=np.float32),
+                    "close": np.array([r['close'] for r in rates], dtype=np.float32),
+                }
+                
+                result = intel.analyze(
+                    signal_side=side,
+                    pattern_confidence=pattern_confidence,
+                    h1_data=h1_data,
+                )
+                
+                return {
+                    "success": True,
+                    "analysis": result.to_dict(),
+                    "timestamp": datetime.now().isoformat(),
+                }
+        
+        return {
+            "success": False,
+            "error": "Cannot get market data",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in intelligence analysis: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/intelligence/regime/{symbol}")
+async def get_market_regime(symbol: str):
+    """
+    🌡️ Get current market regime for a symbol
+    """
+    try:
+        from trading.advanced_intelligence import MarketRegimeDetector
+        import numpy as np
+        import MetaTrader5 as mt5
+        
+        detector = MarketRegimeDetector()
+        
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
+        if rates is None or len(rates) < 100:
+            return {"success": False, "error": "Cannot get data"}
+        
+        highs = np.array([r['high'] for r in rates], dtype=np.float32)
+        lows = np.array([r['low'] for r in rates], dtype=np.float32)
+        closes = np.array([r['close'] for r in rates], dtype=np.float32)
+        
+        regime = detector.detect(highs, lows, closes)
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "regime": regime.to_dict(),
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting market regime: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/intelligence/momentum/{symbol}")
+async def get_momentum_scan(symbol: str):
+    """
+    📈 Get momentum analysis for a symbol
+    """
+    try:
+        from trading.advanced_intelligence import MomentumScanner
+        import numpy as np
+        import MetaTrader5 as mt5
+        
+        scanner = MomentumScanner()
+        
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 100)
+        if rates is None or len(rates) < 50:
+            return {"success": False, "error": "Cannot get data"}
+        
+        highs = np.array([r['high'] for r in rates], dtype=np.float32)
+        lows = np.array([r['low'] for r in rates], dtype=np.float32)
+        closes = np.array([r['close'] for r in rates], dtype=np.float32)
+        
+        momentum = scanner.scan(closes, highs, lows)
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "momentum": momentum.to_dict(),
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting momentum: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/intelligence/sr-levels/{symbol}")
+async def get_sr_levels(symbol: str):
+    """
+    📊 Get Support/Resistance levels for a symbol
+    """
+    try:
+        from trading.advanced_intelligence import SupportResistanceFinder
+        import numpy as np
+        import MetaTrader5 as mt5
+        
+        finder = SupportResistanceFinder()
+        
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
+        if rates is None or len(rates) < 100:
+            return {"success": False, "error": "Cannot get data"}
+        
+        highs = np.array([r['high'] for r in rates], dtype=np.float32)
+        lows = np.array([r['low'] for r in rates], dtype=np.float32)
+        closes = np.array([r['close'] for r in rates], dtype=np.float32)
+        current_price = closes[-1]
+        
+        levels = finder.find_levels(highs, lows, closes)
+        support, resistance = finder.get_nearest_sr(current_price, levels)
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "current_price": float(current_price),
+            "nearest_support": support.to_dict() if support else None,
+            "nearest_resistance": resistance.to_dict() if resistance else None,
+            "all_levels": [l.to_dict() for l in levels[:10]],
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting S/R levels: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# =====================
+# 📚 Learning System Endpoints
+# =====================
+
+@router.get("/learning/stats")
+async def get_learning_statistics():
+    """
+    📊 Get continuous learning statistics
+    Shows what the bot has learned from trading
+    """
+    try:
+        from trading.continuous_learning import get_learning_system
+        
+        learning = get_learning_system()
+        if not learning:
+            return {"success": False, "error": "Learning system not initialized"}
+        
+        stats = learning.get_learning_summary()
+        
+        return {
+            "success": True,
+            "learning": stats,
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting learning stats: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/learning/factor-weights")
+async def get_factor_weights():
+    """
+    📊 Get learned factor weights
+    Shows which factors are most predictive
+    """
+    try:
+        from trading.continuous_learning import get_learning_system
+        
+        learning = get_learning_system()
+        if not learning:
+            return {"success": False, "error": "Learning system not initialized"}
+        
+        weights = learning.online_learner.factor_weights
+        
+        # Sort by importance
+        sorted_weights = dict(sorted(
+            weights.items(),
+            key=lambda x: abs(x[1]),
+            reverse=True
+        ))
+        
+        return {
+            "success": True,
+            "factor_weights": sorted_weights,
+            "total_trades_learned": learning.online_learner.sample_count,
+            "win_rate": learning.online_learner.ema_win_rate,
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting factor weights: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/learning/market-cycle")
+async def get_market_cycle():
+    """
+    🌊 Get current market cycle detection
+    """
+    try:
+        from trading.continuous_learning import get_learning_system
+        
+        learning = get_learning_system()
+        if not learning:
+            return {"success": False, "error": "Learning system not initialized"}
+        
+        cycle_info = learning.cycle_detector.detect()
+        
+        return {
+            "success": True,
+            "cycle": cycle_info.to_dict(),
+            "description": {
+                "ACCUMULATION": "Smart money buying - prepare for uptrend",
+                "MARKUP": "Uptrend in progress - good for longs",
+                "DISTRIBUTION": "Smart money selling - prepare for downtrend",
+                "MARKDOWN": "Downtrend in progress - good for shorts",
+                "UNKNOWN": "No clear cycle detected",
+            }.get(cycle_info.cycle.value, "Unknown"),
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting market cycle: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/learning/optimized-params")
+async def get_optimized_params():
+    """
+    ⚙️ Get auto-optimized strategy parameters
+    """
+    try:
+        from trading.continuous_learning import get_learning_system
+        
+        learning = get_learning_system()
+        if not learning:
+            return {"success": False, "error": "Learning system not initialized"}
+        
+        optimizer = learning.strategy_optimizer
+        
+        return {
+            "success": True,
+            "params": optimizer.best_params.to_dict(),
+            "optimization_status": optimizer.get_optimization_status(),
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting optimized params: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/learning/pattern-evolution")
+async def get_pattern_evolution():
+    """
+    📈 Get pattern evolution tracking
+    Shows how patterns perform over time
+    """
+    try:
+        from trading.continuous_learning import get_learning_system
+        
+        learning = get_learning_system()
+        if not learning:
+            return {"success": False, "error": "Learning system not initialized"}
+        
+        tracker = learning.pattern_tracker
+        
+        return {
+            "success": True,
+            "total_patterns_tracked": len(tracker.pattern_stats),
+            "evolution_summary": tracker.get_evolution_summary(),
+            "recent_patterns": tracker.get_recent_patterns(limit=20),
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting pattern evolution: {e}")
+        return {"success": False, "error": str(e)}

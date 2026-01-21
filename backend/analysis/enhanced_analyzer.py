@@ -150,6 +150,7 @@ class EnhancedSignalResult:
     quality: SignalQuality
     
     # Factor scores (0-100)
+    sentiment_score: float = 0.0   # NEW: Contrarian sentiment
     pattern_score: float = 0.0
     technical_score: float = 0.0
     volume_score: float = 0.0
@@ -157,6 +158,9 @@ class EnhancedSignalResult:
     regime_score: float = 0.0
     timing_score: float = 0.0
     momentum_score: float = 0.0
+    
+    # Smart Money Analysis
+    smart_money_signal: Optional[str] = None  # STRONG_BUY, BUY, NEUTRAL, SELL, STRONG_SELL
     
     # Analysis components
     indicators: Optional[TechnicalIndicators] = None
@@ -184,7 +188,9 @@ class EnhancedSignalResult:
             "base_confidence": round(self.base_confidence, 2),
             "enhanced_confidence": round(self.enhanced_confidence, 2),
             "quality": self.quality.value,
+            "smart_money_signal": self.smart_money_signal,
             "scores": {
+                "sentiment": round(self.sentiment_score, 2),  # NEW
                 "pattern": round(self.pattern_score, 2),
                 "technical": round(self.technical_score, 2),
                 "volume": round(self.volume_score, 2),
@@ -355,16 +361,23 @@ class EnhancedAnalyzer:
     """
     AI-Enhanced Pattern Analyzer
     เพิ่มปัจจัยหลายมิติเพื่อเพิ่ม Win Rate
+    
+    รวม Smart Money Concept:
+    - Contrarian Sentiment (สำคัญที่สุด!)
+    - Order Flow / Volume
+    - Market Structure
     """
     
     # Weight configuration for each factor
+    # ปรับให้ SENTIMENT มีน้ำหนักสูงสุด (Contrarian Strategy)
     FACTOR_WEIGHTS = {
-        "pattern": 0.25,     # Pattern matching score
-        "technical": 0.20,   # Technical indicators
-        "volume": 0.15,      # Volume confirmation
-        "mtf": 0.15,         # Multi-timeframe
-        "regime": 0.10,      # Market regime
-        "timing": 0.10,      # Session timing
+        "sentiment": 0.25,   # 🔴 Contrarian sentiment (NEW - สำคัญมาก!)
+        "pattern": 0.20,     # Pattern matching score
+        "technical": 0.15,   # Technical indicators
+        "volume": 0.12,      # Volume confirmation
+        "mtf": 0.10,         # Multi-timeframe
+        "regime": 0.08,      # Market regime
+        "timing": 0.05,      # Session timing
         "momentum": 0.05,    # Momentum
     }
     
@@ -382,6 +395,7 @@ class EnhancedAnalyzer:
         enable_volume_filter: bool = True,
         enable_mtf_filter: bool = True,
         enable_regime_filter: bool = True,
+        enable_sentiment_filter: bool = True,  # NEW: Contrarian sentiment
     ):
         """
         Initialize Enhanced Analyzer
@@ -391,33 +405,42 @@ class EnhancedAnalyzer:
             enable_volume_filter: Enable volume confirmation
             enable_mtf_filter: Enable multi-timeframe analysis
             enable_regime_filter: Enable market regime detection
+            enable_sentiment_filter: Enable contrarian sentiment analysis
         """
         self.min_quality = min_quality
         self.enable_volume_filter = enable_volume_filter
         self.enable_mtf_filter = enable_mtf_filter
         self.enable_regime_filter = enable_regime_filter
+        self.enable_sentiment_filter = enable_sentiment_filter
         
         self.indicator_calc = TechnicalIndicatorCalculator()
+        
+        # Initialize Smart Money Analyzer
+        if self.enable_sentiment_filter:
+            from .smart_money_analyzer import get_smart_money_analyzer
+            self.smart_money_analyzer = get_smart_money_analyzer()
     
-    def analyze(
+    async def analyze(
         self,
         base_signal: str,
         base_confidence: float,
         ohlcv_data: Dict[str, np.ndarray],
         current_price: float,
+        symbol: str = "UNKNOWN",  # NEW: For sentiment analysis
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         htf_data: Optional[Dict[str, np.ndarray]] = None,
         current_time: Optional[datetime] = None,
     ) -> EnhancedSignalResult:
         """
-        Perform enhanced analysis with AI factors
+        Perform enhanced analysis with AI factors + Smart Money
         
         Args:
             base_signal: Base signal from pattern matching (BUY/SELL/WAIT)
             base_confidence: Confidence from pattern matching (0-100)
             ohlcv_data: Dict with 'open', 'high', 'low', 'close', 'volume' arrays
             current_price: Current price
+            symbol: Trading symbol for sentiment analysis
             stop_loss: Base stop loss from pattern analysis
             take_profit: Base take profit from pattern analysis
             htf_data: Higher timeframe OHLCV data (optional)
@@ -436,6 +459,58 @@ class EnhancedAnalyzer:
         lows = ohlcv_data.get("low", np.array([]))
         closes = ohlcv_data.get("close", np.array([]))
         volumes = ohlcv_data.get("volume", np.array([]))
+        
+        # 0. SMART MONEY / SENTIMENT ANALYSIS (NEW - Most Important!)
+        sentiment_score = 50.0  # Default neutral
+        smart_money_signal = None
+        
+        if self.enable_sentiment_filter:
+            try:
+                from .smart_money_analyzer import SmartMoneySignal
+                
+                smart_money = await self.smart_money_analyzer.analyze(
+                    symbol=symbol,
+                    ohlcv=ohlcv_data,
+                    current_price=current_price,
+                    htf_ohlcv=htf_data,
+                )
+                
+                sentiment_score = smart_money.sentiment_score
+                smart_money_signal = smart_money.signal
+                
+                # Override base signal if sentiment is strong
+                if smart_money.signal == SmartMoneySignal.STRONG_SELL:
+                    bearish_factors.append(f"🔴 SMART MONEY: Retail {smart_money.sentiment.avg_long_percent:.0f}% Long → SELL")
+                    if base_signal == "BUY":
+                        # Contrarian override!
+                        skip_reasons.append("⚠️ Sentiment override: Retail too bullish for BUY")
+                        base_signal = "WAIT"
+                        
+                elif smart_money.signal == SmartMoneySignal.STRONG_BUY:
+                    bullish_factors.append(f"🟢 SMART MONEY: Retail {smart_money.sentiment.avg_short_percent:.0f}% Short → BUY")
+                    if base_signal == "SELL":
+                        # Contrarian override!
+                        skip_reasons.append("⚠️ Sentiment override: Retail too bearish for SELL")
+                        base_signal = "WAIT"
+                        
+                elif smart_money.signal == SmartMoneySignal.SELL:
+                    bearish_factors.append(f"Retail sentiment bearish edge ({smart_money.sentiment.avg_long_percent:.0f}% Long)")
+                    
+                elif smart_money.signal == SmartMoneySignal.BUY:
+                    bullish_factors.append(f"Retail sentiment bullish edge ({smart_money.sentiment.avg_short_percent:.0f}% Short)")
+                
+                # Add Smart Money reasons
+                for reason in smart_money.reasons[:3]:
+                    if "SELL" in reason or "bearish" in reason.lower():
+                        bearish_factors.append(reason)
+                    elif "BUY" in reason or "bullish" in reason.lower():
+                        bullish_factors.append(reason)
+                        
+                for warning in smart_money.warnings[:2]:
+                    skip_reasons.append(warning)
+                    
+            except Exception as e:
+                logger.warning(f"Smart Money analysis failed: {e}")
         
         # 1. Calculate Pattern Score
         pattern_score = self._calculate_pattern_score(base_confidence)
@@ -518,8 +593,9 @@ class EnhancedAnalyzer:
             else:
                 bearish_factors.append("Strong bearish momentum")
         
-        # Calculate weighted enhanced confidence
+        # Calculate weighted enhanced confidence (now includes sentiment!)
         enhanced_confidence = (
+            sentiment_score * self.FACTOR_WEIGHTS["sentiment"] +
             pattern_score * self.FACTOR_WEIGHTS["pattern"] +
             technical_score * self.FACTOR_WEIGHTS["technical"] +
             volume_score * self.FACTOR_WEIGHTS["volume"] +
@@ -579,6 +655,7 @@ class EnhancedAnalyzer:
             base_confidence=base_confidence,
             enhanced_confidence=enhanced_confidence,
             quality=quality,
+            sentiment_score=sentiment_score,  # NEW
             pattern_score=pattern_score,
             technical_score=technical_score,
             volume_score=volume_score,
@@ -586,6 +663,7 @@ class EnhancedAnalyzer:
             regime_score=regime_score,
             timing_score=timing_score,
             momentum_score=momentum_score,
+            smart_money_signal=smart_money_signal.value if smart_money_signal else None,  # NEW
             indicators=indicators,
             volume_analysis=volume_analysis,
             mtf_analysis=mtf_analysis,

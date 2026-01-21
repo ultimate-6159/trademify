@@ -24,6 +24,26 @@ from .enhanced_analyzer import (
     get_enhanced_analyzer,
 )
 
+from .sentiment_analyzer import (
+    SentimentAnalyzer,
+    SentimentSignal,
+    SentimentData,
+    AggregatedSentiment,
+    get_sentiment_analyzer,
+    analyze_sentiment,
+)
+
+from .smart_money_analyzer import (
+    SmartMoneyAnalyzer,
+    SmartMoneySignal,
+    SmartMoneyAnalysis,
+    MarketStructure,
+    LiquidityZone,
+    OrderBlock,
+    FairValueGap,
+    get_smart_money_analyzer,
+)
+
 __all__ = [
     # Voting System
     "VotingSystem",
@@ -44,4 +64,20 @@ __all__ = [
     "SignalQuality",
     "TechnicalIndicatorCalculator",
     "get_enhanced_analyzer",
+    # Sentiment Analyzer (Contrarian)
+    "SentimentAnalyzer",
+    "SentimentSignal",
+    "SentimentData",
+    "AggregatedSentiment",
+    "get_sentiment_analyzer",
+    "analyze_sentiment",
+    # Smart Money Analyzer
+    "SmartMoneyAnalyzer",
+    "SmartMoneySignal",
+    "SmartMoneyAnalysis",
+    "MarketStructure",
+    "LiquidityZone",
+    "OrderBlock",
+    "FairValueGap",
+    "get_smart_money_analyzer",
 ]

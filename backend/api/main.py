@@ -2223,6 +2223,352 @@ async def update_bot_settings_endpoint(request: BotSettingsRequest):
     }
 
 
+# =============================================================================
+# 16. INTELLIGENCE STATUS ENDPOINTS (16-Layer AI System)
+# =============================================================================
+
+@app.get("/api/v1/intelligence/status")
+async def get_intelligence_status():
+    """
+    Get status of all 16 intelligence layers
+    
+    Returns comprehensive status of:
+    - Titan Core (Meta-Intelligence)
+    - Omega Brain (Institutional)
+    - Alpha Engine (Professional)
+    - Quantum Strategy (Microstructure)
+    - Deep Intelligence (Cross-Asset)
+    - Neural Brain (Pattern DNA)
+    - Continuous Learning (Adaptation)
+    - Advanced Intelligence (Multi-TF)
+    - Smart Brain (Journal)
+    - Pro Trading (Sessions)
+    - Risk Guardian (Protection)
+    """
+    global _auto_bot
+    
+    if not _auto_bot:
+        # Return default status when bot not running
+        return {
+            "status": "bot_not_running",
+            "titan": { "active": False, "grade": "N/A" },
+            "omega": { "active": False, "grade": "N/A" },
+            "alpha": { "active": False, "grade": "N/A" },
+            "quantum": { "active": False },
+            "deep": { "active": False },
+            "neural": { "active": False },
+            "learning": { "active": False },
+            "advanced": { "active": False },
+            "smart": { "active": False },
+            "pro": { "active": False },
+            "risk": { "active": False, "level": "N/A" }
+        }
+    
+    # Get actual status from bot modules
+    status = {
+        "status": "running",
+        "titan": {
+            "active": _auto_bot.titan_core is not None if hasattr(_auto_bot, 'titan_core') else False,
+            "grade": "🏛️ TITAN ACTIVE" if hasattr(_auto_bot, 'titan_core') and _auto_bot.titan_core else "N/A",
+            "score": 0
+        },
+        "omega": {
+            "active": _auto_bot.omega_brain is not None if hasattr(_auto_bot, 'omega_brain') else False,
+            "grade": "Ω" if hasattr(_auto_bot, 'omega_brain') and _auto_bot.omega_brain else "N/A",
+            "score": 0
+        },
+        "alpha": {
+            "active": _auto_bot.alpha_engine is not None if hasattr(_auto_bot, 'alpha_engine') else False,
+            "grade": "A" if hasattr(_auto_bot, 'alpha_engine') and _auto_bot.alpha_engine else "N/A"
+        },
+        "quantum": {
+            "active": _auto_bot.quantum_strategy is not None if hasattr(_auto_bot, 'quantum_strategy') else False
+        },
+        "deep": {
+            "active": _auto_bot.deep_intelligence is not None if hasattr(_auto_bot, 'deep_intelligence') else False
+        },
+        "neural": {
+            "active": _auto_bot.neural_brain is not None if hasattr(_auto_bot, 'neural_brain') else False
+        },
+        "learning": {
+            "active": _auto_bot.learning_system is not None if hasattr(_auto_bot, 'learning_system') else False,
+            "cycles": 0
+        },
+        "advanced": {
+            "active": _auto_bot.intelligence is not None if hasattr(_auto_bot, 'intelligence') else False,
+            "regime": "N/A"
+        },
+        "smart": {
+            "active": _auto_bot.smart_brain is not None if hasattr(_auto_bot, 'smart_brain') else False,
+            "patterns": 0
+        },
+        "pro": {
+            "active": _auto_bot.pro_features is not None if hasattr(_auto_bot, 'pro_features') else False,
+            "session": "N/A"
+        },
+        "risk": {
+            "active": _auto_bot.risk_guardian is not None if hasattr(_auto_bot, 'risk_guardian') else False,
+            "level": "SAFE",
+            "daily_pnl": 0,
+            "can_trade": True
+        }
+    }
+    
+    # Get Risk Guardian status
+    if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
+        try:
+            risk_status = _auto_bot.risk_guardian.get_daily_stats()
+            if risk_status:
+                status["risk"]["daily_pnl"] = risk_status.total_pnl_percent if hasattr(risk_status, 'total_pnl_percent') else 0
+                status["risk"]["level"] = risk_status.risk_level.value if hasattr(risk_status, 'risk_level') else "SAFE"
+        except Exception:
+            pass
+    
+    return status
+
+
+@app.get("/api/v1/intelligence/titan")
+async def get_titan_data(symbol: str = "EURUSDm"):
+    """Get Titan Core analysis data from running bot"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "grade": "N/A",
+            "titan_score": 0,
+            "message": "Bot not running - start the bot to get analysis"
+        }
+    
+    if not hasattr(_auto_bot, 'titan_core') or not _auto_bot.titan_core:
+        return {
+            "status": "module_not_active",
+            "grade": "N/A",
+            "titan_score": 0,
+            "message": "Titan Core module not initialized"
+        }
+    
+    # Return last Titan decision from bot
+    last_titan = getattr(_auto_bot, '_last_titan_decision', {})
+    if not last_titan:
+        return {
+            "status": "no_analysis_yet",
+            "grade": "🏛️ WAITING",
+            "titan_score": 0,
+            "consensus": "N/A",
+            "market_condition": "WAITING",
+            "prediction": {"direction": "WAIT", "confidence": 0},
+            "position_multiplier": 1.0,
+            "message": "Waiting for first analysis cycle..."
+        }
+    
+    return {
+        "status": "active",
+        **last_titan
+    }
+
+
+@app.get("/api/v1/intelligence/omega")
+async def get_omega_data(symbol: str = "EURUSDm"):
+    """Get Omega Brain analysis data from running bot"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "grade": "N/A",
+            "omega_score": 0,
+            "message": "Bot not running - start the bot to get analysis"
+        }
+    
+    if not hasattr(_auto_bot, 'omega_brain') or not _auto_bot.omega_brain:
+        return {
+            "status": "module_not_active",
+            "grade": "N/A",
+            "omega_score": 0,
+            "message": "Omega Brain module not initialized"
+        }
+    
+    # Return last Omega decision from bot
+    last_omega = getattr(_auto_bot, '_last_omega_result', {})
+    if not last_omega:
+        return {
+            "status": "no_analysis_yet",
+            "grade": "Ω WAITING",
+            "omega_score": 0,
+            "institutional_flow": "N/A",
+            "manipulation": "NONE",
+            "sentiment": 0,
+            "message": "Waiting for first analysis cycle..."
+        }
+    
+    return {
+        "status": "active",
+        **last_omega
+    }
+
+
+@app.get("/api/v1/intelligence/risk")
+async def get_risk_data():
+    """Get comprehensive risk management data"""
+    global _auto_bot
+    
+    # Default risk data
+    risk_data = {
+        "risk_level": "SAFE",
+        "balance": 10000,
+        "equity": 10000,
+        "daily_pnl": 0,
+        "open_positions": 0,
+        "max_positions": 3,
+        "risk_per_trade": 2,
+        "max_daily_loss": 5,
+        "leverage": 2000,
+        "risk_score": 0,
+        "can_trade": True,
+        "can_open_position": True,
+        "daily_limit_hit": False,
+        "losing_streak_limit": False,
+        "losing_streak": 0,
+        "max_losing_streak": 5
+    }
+    
+    if not _auto_bot:
+        risk_data["message"] = "Bot not running"
+        return risk_data
+    
+    # Get account info from trading engine
+    if hasattr(_auto_bot, 'trading_engine') and _auto_bot.trading_engine:
+        try:
+            engine = _auto_bot.trading_engine
+            if engine.broker and engine.broker._connected:
+                import MetaTrader5 as mt5
+                info = mt5.account_info()
+                if info:
+                    risk_data["balance"] = info.balance
+                    risk_data["equity"] = info.equity
+                    risk_data["leverage"] = info.leverage
+            
+            risk_data["open_positions"] = len(engine.positions) if hasattr(engine, 'positions') else 0
+        except Exception:
+            pass
+    
+    # Get Risk Guardian status
+    if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
+        try:
+            rg = _auto_bot.risk_guardian
+            stats = rg.get_daily_stats()
+            if stats:
+                risk_data["daily_pnl"] = stats.total_pnl_percent if hasattr(stats, 'total_pnl_percent') else 0
+                risk_data["risk_level"] = stats.risk_level.value if hasattr(stats, 'risk_level') else "SAFE"
+                risk_data["losing_streak"] = stats.losing_streak if hasattr(stats, 'losing_streak') else 0
+            
+            assessment = rg.assess_trade_risk(0.01, risk_data.get("balance", 10000), "EURUSDm")
+            if assessment:
+                risk_data["can_trade"] = assessment.can_trade if hasattr(assessment, 'can_trade') else True
+        except Exception:
+            pass
+    
+    # Calculate risk score (0-100, higher = more risky)
+    risk_score = 0
+    if risk_data["daily_pnl"] < 0:
+        risk_score += min(40, abs(risk_data["daily_pnl"]) * 8)  # Max 40 from daily loss
+    risk_score += risk_data["losing_streak"] * 10  # 10 points per losing trade
+    risk_score += (risk_data["open_positions"] / max(1, risk_data["max_positions"])) * 20  # Max 20 from positions
+    risk_data["risk_score"] = min(100, risk_score)
+    
+    # Determine limits
+    risk_data["daily_limit_hit"] = risk_data["daily_pnl"] <= -risk_data["max_daily_loss"]
+    risk_data["losing_streak_limit"] = risk_data["losing_streak"] >= risk_data["max_losing_streak"]
+    risk_data["can_open_position"] = risk_data["open_positions"] < risk_data["max_positions"]
+    
+    return risk_data
+
+
+@app.get("/api/v1/intelligence/signals/history")
+async def get_signal_history(limit: int = 50):
+    """Get historical signal data from bot"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "signals": [],
+            "count": 0,
+            "message": "Bot not running - start the bot to collect signals"
+        }
+    
+    # Get signal history from bot
+    signal_history = getattr(_auto_bot, '_signal_history', [])
+    
+    return {
+        "status": "active",
+        "signals": signal_history[:limit],
+        "count": len(signal_history),
+        "total_available": len(signal_history)
+    }
+
+
+@app.get("/api/v1/intelligence/alpha")
+async def get_alpha_data(symbol: str = "EURUSDm"):
+    """Get Alpha Engine analysis data from running bot"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "grade": "N/A",
+            "alpha_score": 0,
+            "message": "Bot not running - start the bot to get analysis"
+        }
+    
+    if not hasattr(_auto_bot, 'alpha_engine') or not _auto_bot.alpha_engine:
+        return {
+            "status": "module_not_active",
+            "grade": "N/A",
+            "alpha_score": 0,
+            "message": "Alpha Engine module not initialized"
+        }
+    
+    # Return last Alpha decision from bot
+    last_alpha = getattr(_auto_bot, '_last_alpha_result', {})
+    if not last_alpha:
+        return {
+            "status": "no_analysis_yet",
+            "grade": "A WAITING",
+            "alpha_score": 0,
+            "order_flow_bias": "NEUTRAL",
+            "risk_reward": 0,
+            "message": "Waiting for first analysis cycle..."
+        }
+    
+    return {
+        "status": "active",
+        **last_alpha
+    }
+
+
+@app.get("/api/v1/intelligence/last-analysis")
+async def get_last_analysis():
+    """Get the most recent full analysis from bot"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "message": "Bot not running"
+        }
+    
+    return {
+        "status": "active",
+        "last_analysis": getattr(_auto_bot, '_last_analysis', {}),
+        "titan": getattr(_auto_bot, '_last_titan_decision', {}),
+        "omega": getattr(_auto_bot, '_last_omega_result', {}),
+        "alpha": getattr(_auto_bot, '_last_alpha_result', {}),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 # Run with: uvicorn api.main:app --reload
 if __name__ == "__main__":
     import uvicorn
