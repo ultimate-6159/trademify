@@ -825,17 +825,17 @@ const api = {
         order_flow_delta: 0.25,
         risk_reward: 2.5,
         position_multiplier: 0.9,
-        optimal_entry: 1.0850,
-        stop_loss: 1.0820,
-        targets: [1.0880, 1.0910, 1.0950],
-        market_profile: { poc: 1.0845, vah: 1.0870, val: 1.0820 },
+        optimal_entry: 1.085,
+        stop_loss: 1.082,
+        targets: [1.088, 1.091, 1.095],
+        market_profile: { poc: 1.0845, vah: 1.087, val: 1.082 },
         liquidity_zones: [
-          { type: "SUPPORT", price: 1.0820 },
-          { type: "RESISTANCE", price: 1.0900 }
+          { type: "SUPPORT", price: 1.082 },
+          { type: "RESISTANCE", price: 1.09 },
         ],
         should_trade: true,
         edge_factors: ["Strong order flow", "Good R:R ratio"],
-        risk_factors: []
+        risk_factors: [],
       }),
     );
   },
@@ -848,7 +848,7 @@ const api = {
         last_analysis: {},
         titan: mockData.titanData(),
         omega: mockData.omegaData(),
-        alpha: {}
+        alpha: {},
       }),
     );
   },

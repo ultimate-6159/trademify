@@ -458,6 +458,181 @@ class AITradingBot:
         
         return factors
 
+    async def _run_intelligence_analysis_for_display(
+        self,
+        symbol: str,
+        signal: str,
+        current_price: float,
+        df: pd.DataFrame
+    ):
+        """
+        Run 16-Layer Intelligence Analysis for Dashboard Display
+        This runs even for WAIT signals so Frontend always has data
+        """
+        try:
+            # Prepare price arrays
+            prices = df['close'].values.astype(np.float32) if len(df) > 0 else np.array([current_price])
+            volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns and len(df) > 0 else np.ones(len(prices)) * 1000
+            opens = df['open'].values.astype(np.float32) if 'open' in df.columns and len(df) > 0 else prices * 0.999
+            highs = df['high'].values.astype(np.float32) if 'high' in df.columns and len(df) > 0 else prices * 1.002
+            lows = df['low'].values.astype(np.float32) if 'low' in df.columns and len(df) > 0 else prices * 0.998
+            
+            side_for_analysis = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL" if signal in ["SELL", "STRONG_SELL"] else "NEUTRAL"
+            
+            # 🎯 ALPHA ENGINE ANALYSIS
+            if self.alpha_engine:
+                try:
+                    alpha_decision = self.alpha_engine.analyze(
+                        symbol=symbol,
+                        signal_direction=side_for_analysis if side_for_analysis != "NEUTRAL" else "BUY",
+                        opens=opens[-200:] if len(opens) > 200 else opens,
+                        highs=highs[-200:] if len(highs) > 200 else highs,
+                        lows=lows[-200:] if len(lows) > 200 else lows,
+                        closes=prices[-200:] if len(prices) > 200 else prices,
+                        volumes=volumes[-200:] if len(volumes) > 200 else volumes
+                    )
+                    
+                    self._last_alpha_result = {
+                        "symbol": symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "grade": alpha_decision.grade.value,
+                        "alpha_score": float(alpha_decision.alpha_score),
+                        "confidence": float(alpha_decision.confidence),
+                        "order_flow_bias": alpha_decision.order_flow.bias.value if alpha_decision.order_flow else "NEUTRAL",
+                        "order_flow_delta": float(alpha_decision.order_flow.delta) if alpha_decision.order_flow else 0,
+                        "risk_reward": float(alpha_decision.risk_reward),
+                        "position_multiplier": float(alpha_decision.position_multiplier),
+                        "optimal_entry": float(alpha_decision.optimal_entry) if alpha_decision.optimal_entry else 0,
+                        "stop_loss": float(alpha_decision.stop_loss) if alpha_decision.stop_loss else 0,
+                        "targets": [float(t) for t in alpha_decision.targets[:3]] if alpha_decision.targets else [],
+                        "market_profile": {
+                            "poc": float(alpha_decision.market_profile.poc) if alpha_decision.market_profile else 0,
+                            "vah": float(alpha_decision.market_profile.value_area_high) if alpha_decision.market_profile else 0,
+                            "val": float(alpha_decision.market_profile.value_area_low) if alpha_decision.market_profile else 0,
+                        } if alpha_decision.market_profile else None,
+                        "should_trade": alpha_decision.should_trade,
+                        "edge_factors": alpha_decision.edge_factors[:5] if alpha_decision.edge_factors else [],
+                        "risk_factors": alpha_decision.risk_factors[:5] if alpha_decision.risk_factors else [],
+                    }
+                    logger.debug(f"📊 Alpha Engine analyzed: Grade={alpha_decision.grade.value}, Score={alpha_decision.alpha_score:.1f}")
+                except Exception as e:
+                    logger.debug(f"Alpha analysis error: {e}")
+            
+            # 🧠⚡ OMEGA BRAIN ANALYSIS
+            if self.omega_brain:
+                try:
+                    omega_balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    
+                    omega_decision = self.omega_brain.analyze(
+                        symbol=symbol,
+                        signal_direction=side_for_analysis if side_for_analysis != "NEUTRAL" else "BUY",
+                        opens=opens[-200:] if len(opens) > 200 else opens,
+                        highs=highs[-200:] if len(highs) > 200 else highs,
+                        lows=lows[-200:] if len(lows) > 200 else lows,
+                        closes=prices[-200:] if len(prices) > 200 else prices,
+                        volumes=volumes[-200:] if len(volumes) > 200 else volumes,
+                        current_balance=omega_balance,
+                        other_symbols=self.symbols
+                    )
+                    
+                    self._last_omega_result = {
+                        "symbol": symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "grade": omega_decision.grade.value,
+                        "omega_score": float(omega_decision.omega_score),
+                        "confidence": float(omega_decision.confidence),
+                        "institutional_flow": omega_decision.institutional_flow.activity.value if omega_decision.institutional_flow else "N/A",
+                        "smart_money": omega_decision.institutional_flow.smart_money_direction if omega_decision.institutional_flow else "N/A",
+                        "manipulation_detected": omega_decision.manipulation_alert.manipulation_type.value if omega_decision.manipulation_alert else "NONE",
+                        "manipulation_probability": float(omega_decision.manipulation_alert.probability) if omega_decision.manipulation_alert else 0,
+                        "sentiment": float(omega_decision.sentiment.overall_sentiment) if omega_decision.sentiment else 0,
+                        "current_regime": omega_decision.regime_prediction.current_regime if omega_decision.regime_prediction else "N/A",
+                        "predicted_regime": omega_decision.regime_prediction.predicted_regime if omega_decision.regime_prediction else "N/A",
+                        "position_multiplier": float(omega_decision.position_multiplier),
+                        "risk_reward": float(omega_decision.risk_reward),
+                        "should_trade": omega_decision.should_trade,
+                        "final_verdict": omega_decision.final_verdict,
+                        "institutional_insight": omega_decision.institutional_insight,
+                        "edge_factors": omega_decision.edge_factors[:5] if omega_decision.edge_factors else [],
+                        "risk_factors": omega_decision.risk_factors[:5] if omega_decision.risk_factors else [],
+                    }
+                    logger.debug(f"📊 Omega Brain analyzed: Grade={omega_decision.grade.value}, Score={omega_decision.omega_score:.1f}")
+                except Exception as e:
+                    logger.debug(f"Omega analysis error: {e}")
+            
+            # 🏛️⚔️ TITAN CORE ANALYSIS
+            if self.titan_core:
+                try:
+                    from trading.titan_core import ModuleSignal
+                    
+                    # Collect module signals
+                    module_signals = []
+                    
+                    # Add Alpha signal
+                    if self._last_alpha_result:
+                        module_signals.append(ModuleSignal(
+                            module_name="AlphaEngine",
+                            should_trade=self._last_alpha_result.get("should_trade", False),
+                            direction=side_for_analysis if side_for_analysis != "NEUTRAL" else "BUY",
+                            confidence=self._last_alpha_result.get("alpha_score", 50),
+                            multiplier=self._last_alpha_result.get("position_multiplier", 1.0),
+                            score=self._last_alpha_result.get("alpha_score", 50),
+                            reasons=self._last_alpha_result.get("edge_factors", []),
+                            warnings=self._last_alpha_result.get("risk_factors", [])
+                        ))
+                    
+                    # Add Omega signal
+                    if self._last_omega_result:
+                        module_signals.append(ModuleSignal(
+                            module_name="OmegaBrain",
+                            should_trade=self._last_omega_result.get("should_trade", False),
+                            direction=side_for_analysis if side_for_analysis != "NEUTRAL" else "BUY",
+                            confidence=self._last_omega_result.get("omega_score", 50),
+                            multiplier=self._last_omega_result.get("position_multiplier", 1.0),
+                            score=self._last_omega_result.get("omega_score", 50),
+                            reasons=self._last_omega_result.get("edge_factors", []),
+                            warnings=self._last_omega_result.get("risk_factors", [])
+                        ))
+                    
+                    titan_decision = self.titan_core.synthesize(
+                        symbol=symbol,
+                        signal_direction=side_for_analysis if side_for_analysis != "NEUTRAL" else "BUY",
+                        closes=prices[-200:] if len(prices) > 200 else prices,
+                        highs=highs[-200:] if len(highs) > 200 else highs,
+                        lows=lows[-200:] if len(lows) > 200 else lows,
+                        volumes=volumes[-200:] if len(volumes) > 200 else volumes,
+                        module_signals=module_signals,
+                        current_price=current_price
+                    )
+                    
+                    self._last_titan_decision = {
+                        "symbol": symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "grade": titan_decision.grade.value,
+                        "titan_score": float(titan_decision.titan_score),
+                        "confidence": float(titan_decision.confidence),
+                        "consensus": titan_decision.consensus.level.value,
+                        "agreement_ratio": float(titan_decision.consensus.agreement_ratio),
+                        "market_condition": titan_decision.market_condition.value,
+                        "prediction": {
+                            "direction": titan_decision.prediction.final_prediction,
+                            "predicted_move": float(titan_decision.prediction.predicted_move),
+                        },
+                        "position_multiplier": float(titan_decision.position_multiplier),
+                        "agreeing_modules": titan_decision.agreeing_modules,
+                        "total_modules": titan_decision.total_modules,
+                        "should_trade": titan_decision.should_trade,
+                        "final_verdict": titan_decision.final_verdict,
+                        "edge_factors": titan_decision.edge_factors[:5] if titan_decision.edge_factors else [],
+                        "risk_factors": titan_decision.risk_factors[:5] if titan_decision.risk_factors else [],
+                    }
+                    logger.debug(f"📊 Titan Core analyzed: Grade={titan_decision.grade.value}, Score={titan_decision.titan_score:.1f}")
+                except Exception as e:
+                    logger.debug(f"Titan analysis error: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Intelligence analysis for display failed: {e}")
+
     async def _broadcast_update(self, event_type: str, data: dict):
         """Broadcast update to all subscribers"""
         # Convert numpy types for JSON
@@ -996,7 +1171,15 @@ class AITradingBot:
         logger.info(f"✅ {symbol}: Signal={enhanced_result.signal} | Confidence={enhanced_result.enhanced_confidence:.1f}% | Quality={enhanced_result.quality.value}")
         logger.info(f"   Scores: Pattern={enhanced_result.pattern_score:.0f} Tech={enhanced_result.technical_score:.0f} Vol={enhanced_result.volume_score:.0f} Mom={enhanced_result.momentum_score:.0f}")
         
-        # 📚 Feed market data to Continuous Learning System
+        # � Run 16-Layer Intelligence Analysis for Dashboard (even for WAIT signals)
+        await self._run_intelligence_analysis_for_display(
+            symbol=symbol,
+            signal=enhanced_result.signal,
+            current_price=current_price,
+            df=df
+        )
+        
+        # �📚 Feed market data to Continuous Learning System
         if self.learning_system and len(df) > 0:
             try:
                 # Feed latest close price to cycle detector
