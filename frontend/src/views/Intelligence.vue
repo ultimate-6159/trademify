@@ -285,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import IntelligencePanel from "../components/IntelligencePanel.vue";
 import TitanDashboard from "../components/TitanDashboard.vue";
 import OmegaPanel from "../components/OmegaPanel.vue";
@@ -296,6 +296,7 @@ import api from "../services/api";
 const isLoading = ref(false);
 const selectedSymbol = ref("EURUSDm");
 const activeTab = ref("overview");
+let refreshInterval = null;
 const symbols = ref([
   "EURUSDm",
   "GBPUSDm",
@@ -482,16 +483,100 @@ const refreshAll = async () => {
   isLoading.value = true;
   try {
     // Fetch real data from API
-    const [intelligence, botStatus] = await Promise.all([
+    const [intelligence, botStatus, titan, omega, risk, history] = await Promise.all([
       api.getIntelligenceStatus(),
       api.getBotStatus(),
+      api.getTitanData(selectedSymbol.value),
+      api.getOmegaData(selectedSymbol.value),
+      api.getRiskData(),
+      api.getSignalHistory(20),
     ]);
 
-    // Update data if not mock
-    if (!intelligence._isMock) {
-      // Update from real API response
-      console.log("Intelligence data:", intelligence);
+    console.log("API Data:", { intelligence, titan, omega, risk, history });
+
+    // Update Titan data
+    if (titan && !titan._isMock && titan.status === "active") {
+      titanData.value = {
+        ...titanData.value,
+        grade: titan.grade || "N/A",
+        titan_score: titan.titan_score || 0,
+        consensus: titan.consensus || "N/A",
+        market_condition: titan.market_condition || "UNKNOWN",
+        prediction: titan.prediction || { direction: "WAIT", confidence: 0 },
+        position_multiplier: titan.position_multiplier || 1.0,
+        agreeing_modules: titan.agreeing_modules || 0,
+        total_modules: titan.total_modules || 0,
+        edge_factors: titan.edge_factors || [],
+        risk_factors: titan.risk_factors || [],
+        final_verdict: titan.final_verdict || "",
+      };
     }
+
+    // Update Omega data
+    if (omega && !omega._isMock && omega.status === "active") {
+      omegaData.value = {
+        ...omegaData.value,
+        grade: omega.grade || "N/A",
+        omega_score: omega.omega_score || 0,
+        institutional_flow: omega.institutional_flow || "N/A",
+        smart_money: omega.smart_money || "N/A",
+        manipulation: omega.manipulation_detected || "NONE",
+        sentiment: omega.sentiment || 0,
+        current_regime: omega.current_regime || "N/A",
+        predicted_regime: omega.predicted_regime || "N/A",
+        position_multiplier: omega.position_multiplier || 1.0,
+        final_verdict: omega.final_verdict || "",
+        edge_factors: omega.edge_factors || [],
+        risk_factors: omega.risk_factors || [],
+      };
+    }
+
+    // Update Risk data
+    if (risk && !risk._isMock) {
+      riskData.value = {
+        ...riskData.value,
+        risk_level: risk.risk_level || "SAFE",
+        balance: risk.balance || 0,
+        equity: risk.equity || 0,
+        daily_pnl: risk.daily_pnl || 0,
+        open_positions: risk.open_positions || 0,
+        max_positions: risk.max_positions || 3,
+        risk_per_trade: risk.risk_per_trade || 2,
+        max_daily_loss: risk.max_daily_loss || 5,
+        leverage: risk.leverage || 2000,
+        risk_score: risk.risk_score || 0,
+        can_trade: risk.can_trade ?? true,
+        can_open_position: risk.can_open_position ?? true,
+        losing_streak: risk.losing_streak || 0,
+      };
+    }
+
+    // Update Signal History
+    if (history && history.signals && history.signals.length > 0) {
+      signalHistory.value = history.signals.map(s => ({
+        timestamp: new Date(s.timestamp),
+        symbol: s.symbol,
+        signal: s.signal,
+        titan_score: s.titan_score || 0,
+        omega_grade: s.omega_grade || "N/A",
+        result: s.result || "PENDING",
+      }));
+    }
+
+    // Update module analysis from intelligence status
+    if (intelligence && !intelligence._isMock) {
+      moduleAnalysis.value = [
+        { name: "Neural", icon: "🧠", signal: intelligence.neural?.active ? "ACTIVE" : "OFF", score: 0 },
+        { name: "Deep", icon: "🔮", signal: intelligence.deep?.active ? "ACTIVE" : "OFF", score: 0 },
+        { name: "Quantum", icon: "⚛️", signal: intelligence.quantum?.active ? "ACTIVE" : "OFF", score: 0 },
+        { name: "Alpha", icon: "🔶", signal: intelligence.alpha?.active ? "ACTIVE" : "OFF", score: intelligence.alpha?.score || 0 },
+        { name: "Omega", icon: "⚡", signal: intelligence.omega?.active ? "ACTIVE" : "OFF", score: intelligence.omega?.score || 0 },
+        { name: "Titan", icon: "🏛️", signal: intelligence.titan?.active ? "ACTIVE" : "OFF", score: intelligence.titan?.score || 0 },
+        { name: "Smart", icon: "💡", signal: intelligence.smart?.active ? "ACTIVE" : "OFF", score: 0 },
+        { name: "Pro", icon: "⭐", signal: intelligence.pro?.active ? "ACTIVE" : "OFF", score: 0 },
+      ];
+    }
+
   } catch (e) {
     console.error("Failed to refresh:", e);
   } finally {
@@ -551,7 +636,22 @@ const getResultClass = (result) => {
   return "text-gray-400";
 };
 
+// Watch for symbol changes
+watch(selectedSymbol, () => {
+  refreshAll();
+});
+
 onMounted(() => {
   refreshAll();
+  // Auto-refresh every 30 seconds
+  refreshInterval = setInterval(() => {
+    refreshAll();
+  }, 30000);
+});
+
+onUnmounted(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
 });
 </script>
