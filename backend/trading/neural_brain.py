@@ -573,12 +573,20 @@ class RiskIntelligence:
         self.trade_results: deque = deque(maxlen=100)
         self.drawdown_history: deque = deque(maxlen=100)
         
-        self.peak_balance = 10000.0  # Will be updated
-        self.current_balance = 10000.0
+        # Will be set to actual balance on first update
+        self.peak_balance = None
+        self.current_balance = None
+        self._initialized = False
     
     def update_balance(self, balance: float):
         """Update balance and track drawdown"""
         self.current_balance = balance
+        
+        # Initialize peak_balance from first actual balance
+        if not self._initialized or self.peak_balance is None:
+            self.peak_balance = balance
+            self._initialized = True
+            return
         
         if balance > self.peak_balance:
             self.peak_balance = balance
@@ -596,7 +604,8 @@ class RiskIntelligence:
     
     def calculate_risk_level(self) -> RiskLevel:
         """Calculate current risk level"""
-        if len(self.drawdown_history) == 0:
+        # If not initialized or no drawdown history, return MEDIUM (allow trading)
+        if not self._initialized or len(self.drawdown_history) == 0:
             return RiskLevel.MEDIUM
         
         current_dd = self.drawdown_history[-1] if self.drawdown_history else 0
@@ -698,8 +707,8 @@ class NeuralBrain:
         self.anomaly_detector = AnomalyDetector() if enable_anomaly else None
         self.risk_intel = RiskIntelligence() if enable_risk_intel else None
         
-        # Settings
-        self.min_confidence = 60.0
+        # Settings - lowered min_confidence for new patterns
+        self.min_confidence = 45.0  # Allow trading with less historical data
         self.min_dna_trades = 3
         
         # Load saved state

@@ -354,6 +354,10 @@ class AITradingBot:
         
         self._signal_history: List[Dict] = []  # Keep last 100 signals
         
+        # 🎯 Last Trade Result (for debugging why trades didn't execute)
+        self._last_trade_result_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_trade_result: Dict[str, Any] = {}  # Last execute_trade() result
+        
         # Subscribers for real-time updates (SSE)
         self._subscribers: List[asyncio.Queue] = []
     
@@ -954,7 +958,7 @@ class AITradingBot:
             enable_momentum=True,    # RSI, MACD, Stochastic
             enable_sr=True,          # Auto S/R Detection
             enable_kelly=True,       # Kelly Criterion Sizing
-            min_confluence=3,        # ต้องมี 3 ปัจจัยขึ้นไป
+            min_confluence=2,        # ลดลงเหลือ 2 ปัจจัยขึ้นไป (pattern + regime/momentum/sr)
         )
         logger.info("✓ Advanced Intelligence initialized:")
         logger.info("   - Market Regime Detection (Trend/Range/Volatile)")
@@ -962,7 +966,7 @@ class AITradingBot:
         logger.info("   - Momentum Scanner (RSI+MACD+Stoch)")
         logger.info("   - Auto S/R Detection")
         logger.info("   - Kelly Criterion Position Sizing")
-        logger.info("   - Confluence Scoring")
+        logger.info("   - Confluence Scoring (min 2 factors)")
         
         # 10. 📚 Continuous Learning - เรียนรู้ตลอดเวลา
         self.learning_system = ContinuousLearningSystem(
@@ -1423,18 +1427,28 @@ class AITradingBot:
         intel_decision = None
         if self.intelligence and analysis.get("market_data"):
             try:
-                # Get H1 data from analysis
-                market_data = analysis.get("market_data", {})
-                h1_data = {
-                    "open": np.array([market_data.get("open", current_price)]),
-                    "high": np.array([market_data.get("high", current_price)]),
-                    "low": np.array([market_data.get("low", current_price)]),
-                    "close": np.array([market_data.get("close", current_price)]),
-                }
-                
-                # Get more data if available
-                if hasattr(self, '_last_ohlcv') and symbol in self._last_ohlcv:
-                    h1_data = self._last_ohlcv[symbol]
+                # Get H1 data from data provider (need more than 1 candle for analysis)
+                h1_data = {}
+                try:
+                    df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                    if df is not None and len(df) > 30:
+                        h1_data = {
+                            "open": df['open'].values.astype(np.float32),
+                            "high": df['high'].values.astype(np.float32),
+                            "low": df['low'].values.astype(np.float32),
+                            "close": df['close'].values.astype(np.float32),
+                        }
+                        logger.info(f"   📊 Got {len(df)} candles for Intelligence analysis")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Failed to get klines: {e}")
+                    # Fallback to single candle
+                    market_data = analysis.get("market_data", {})
+                    h1_data = {
+                        "open": np.array([market_data.get("open", current_price)]),
+                        "high": np.array([market_data.get("high", current_price)]),
+                        "low": np.array([market_data.get("low", current_price)]),
+                        "close": np.array([market_data.get("close", current_price)]),
+                    }
                 
                 # Get Smart Brain stats for Kelly
                 win_rate, avg_win, avg_loss, total_trades = 0.5, 1.0, 1.0, 0
@@ -2310,7 +2324,20 @@ class AITradingBot:
             logger.error(f"❌ Invalid SL for SELL: SL ({stop_loss}) must be above price ({current_price})")
             return {"action": "SKIP", "reason": "Invalid SL direction for SELL"}
         
-        # 🛡️ Calculate position size using Risk Guardian
+        # � Validate and Fix Take Profit direction
+        if take_profit:
+            if side == OrderSide.BUY and take_profit <= current_price:
+                # TP ต้องสูงกว่า entry สำหรับ BUY
+                old_tp = take_profit
+                take_profit = current_price * 1.02  # Default 2% profit
+                logger.warning(f"⚠️ Fixed invalid TP for BUY: {old_tp:.5f} -> {take_profit:.5f}")
+            elif side == OrderSide.SELL and take_profit >= current_price:
+                # TP ต้องต่ำกว่า entry สำหรับ SELL
+                old_tp = take_profit
+                take_profit = current_price * 0.98  # Default 2% profit
+                logger.warning(f"⚠️ Fixed invalid TP for SELL: {old_tp:.5f} -> {take_profit:.5f}")
+        
+        # �🛡️ Calculate position size using Risk Guardian
         balance = await self.trading_engine.broker.get_balance()
         
         if self.risk_guardian:
@@ -2531,6 +2558,16 @@ class AITradingBot:
                         logger.info(f"   ✅ Conditions met! Executing trade...")
                         trade_result = await self.execute_trade(analysis)
                         logger.info(f"   🎯 Trade Result: {trade_result}")
+                        
+                        # 📊 Store trade result for debugging
+                        self._last_trade_result = {
+                            "symbol": symbol,
+                            "signal": signal,
+                            "quality": quality,
+                            "result": trade_result,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        self._last_trade_result_by_symbol[symbol] = self._last_trade_result
                         
                         # Broadcast trade result to frontend
                         if trade_result.get('action') == 'EXECUTED':

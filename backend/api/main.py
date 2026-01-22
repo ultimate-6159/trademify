@@ -2961,6 +2961,36 @@ async def get_signal_history(limit: int = 50):
     }
 
 
+@app.get("/api/v1/intelligence/last-trade-result")
+async def get_last_trade_result(symbol: str = None):
+    """Get the last trade execution result - useful for debugging why trades didn't execute"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "result": None,
+            "message": "Bot not running"
+        }
+    
+    if symbol:
+        result = getattr(_auto_bot, '_last_trade_result_by_symbol', {}).get(symbol)
+    else:
+        result = getattr(_auto_bot, '_last_trade_result', None)
+    
+    if not result:
+        return {
+            "status": "no_trade_attempted",
+            "result": None,
+            "message": "No trade has been attempted yet (signal may be WAIT or quality too low)"
+        }
+    
+    return {
+        "status": "available",
+        "result": convert_numpy_types(result),
+    }
+
+
 @app.get("/api/v1/intelligence/alpha")
 async def get_alpha_data(symbol: str = "EURUSDm"):
     """Get Alpha Engine analysis data from running bot"""

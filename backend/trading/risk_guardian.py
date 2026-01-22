@@ -336,9 +336,21 @@ class RiskGuardian:
         # Round to standard lot sizes (0.01 step for forex)
         lot_size = max(0.01, round(lot_size, 2))
         
-        # Cap at reasonable maximum
-        max_lot = min(10.0, balance / entry_price * 0.1)  # Max 10% of balance
+        # Cap at reasonable maximum - but ensure minimum 0.01 lot for micro accounts
+        # Note: entry_price comparison only valid for forex pairs (1.0-2.0 range)
+        # For Gold/Indices, use different formula
+        if entry_price < 100:  # Forex pairs like EURUSD (1.0-2.0)
+            max_lot = min(10.0, balance / entry_price * 0.1)
+        else:  # Gold, Indices, etc (high prices like 4000-5000)
+            # For small accounts, allow minimum lot regardless
+            max_lot = max(0.01, min(10.0, balance * 0.1))  # 10% of balance as max
+        
         lot_size = min(lot_size, max_lot)
+        
+        # Ensure minimum 0.01 for any trade (micro lot)
+        if lot_size < 0.01 and balance >= 1.0:  # Allow trading if at least $1 balance
+            lot_size = 0.01
+            logger.warning(f"⚠️ Position size capped at minimum 0.01 lot for small account")
         
         calculation = {
             "balance": balance,
