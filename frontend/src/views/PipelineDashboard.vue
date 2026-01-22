@@ -1364,7 +1364,7 @@ const intelligenceModules = computed(() => [
   {
     name: "Sentiment Analyzer",
     icon: "📰",
-    active: layers.value.sentiment?.level !== undefined,
+    active: layers.value.sentiment?.active || (layers.value.sentiment?.level && layers.value.sentiment?.level !== "N/A") || omegaData.value?.grade !== "N/A",
   },
 ]);
 

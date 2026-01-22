@@ -2600,16 +2600,16 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
             pass
     layers["risk"] = risk_status
     
-    # 16. Sentiment (Contrarian) - symbol-specific
-    sentiment_status = {}
-    if hasattr(_auto_bot, 'sentiment_analyzer'):
-        sentiment_by_symbol = getattr(_auto_bot, '_last_sentiment_result_by_symbol', {}) or {}
-        sentiment_result = sentiment_by_symbol.get(symbol, getattr(_auto_bot, '_last_sentiment_result', {})) or {}
-        sentiment_status = {
-            "level": sentiment_result.get("level", "N/A"),
-            "retail_sentiment": sentiment_result.get("retail_sentiment", 0),
-            "override": "YES" if sentiment_result.get("override_signal", False) else "NO"
-        }
+    # 16. Sentiment (Contrarian) - symbol-specific (data comes from Omega Brain)
+    sentiment_by_symbol = getattr(_auto_bot, '_last_sentiment_result_by_symbol', {}) or {}
+    sentiment_result = sentiment_by_symbol.get(symbol, getattr(_auto_bot, '_last_sentiment_result', {})) or {}
+    sentiment_status = {
+        "level": sentiment_result.get("level", "N/A"),
+        "retail_sentiment": sentiment_result.get("retail_sentiment", 0),
+        "override": "YES" if sentiment_result.get("override_signal", False) else "NO",
+        "source": "Omega Brain",
+        "active": len(sentiment_result) > 0
+    }
     layers["sentiment"] = sentiment_status
     
     # Current Signal (symbol-specific from last_analysis which is already symbol-filtered)
