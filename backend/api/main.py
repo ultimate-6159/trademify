@@ -2578,24 +2578,40 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 15. Risk Guardian
     risk_status = {
         "risk_level": "SAFE",
+        "balance": 0,
+        "equity": 0,
+        "leverage": 0,
         "daily_pnl": 0,
         "can_trade": True,
         "open_positions": len(_auto_bot.trading_engine.positions) if _auto_bot.trading_engine else 0,
-        "losing_streak": 0
+        "losing_streak": 0,
+        "max_positions": 3,
+        "max_losing_streak": 5,
+        "max_daily_loss": 5.0
     }
+    
+    # Get account info from MT5
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.account_info()
+        if info:
+            risk_status["balance"] = info.balance
+            risk_status["equity"] = info.equity
+            risk_status["leverage"] = info.leverage
+    except Exception:
+        pass
+    
     if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
         try:
             daily_stats = _auto_bot.risk_guardian.get_daily_stats()
             if daily_stats:
-                risk_status = {
-                    "risk_level": daily_stats.risk_level.value if hasattr(daily_stats, 'risk_level') else "SAFE",
-                    "daily_pnl": daily_stats.total_pnl_percent if hasattr(daily_stats, 'total_pnl_percent') else 0,
-                    "can_trade": daily_stats.can_trade if hasattr(daily_stats, 'can_trade') else True,
-                    "open_positions": daily_stats.open_positions if hasattr(daily_stats, 'open_positions') else 0,
-                    "losing_streak": daily_stats.losing_streak if hasattr(daily_stats, 'losing_streak') else 0,
-                    "max_losing_streak": _auto_bot.risk_guardian.max_losing_streak if hasattr(_auto_bot.risk_guardian, 'max_losing_streak') else 5,
-                    "max_daily_loss": _auto_bot.risk_guardian.max_daily_loss_percent if hasattr(_auto_bot.risk_guardian, 'max_daily_loss_percent') else 5.0
-                }
+                risk_status["risk_level"] = daily_stats.risk_level.value if hasattr(daily_stats, 'risk_level') else "SAFE"
+                risk_status["daily_pnl"] = daily_stats.total_pnl_percent if hasattr(daily_stats, 'total_pnl_percent') else 0
+                risk_status["can_trade"] = daily_stats.can_trade if hasattr(daily_stats, 'can_trade') else True
+                risk_status["open_positions"] = daily_stats.open_positions if hasattr(daily_stats, 'open_positions') else 0
+                risk_status["losing_streak"] = daily_stats.losing_streak if hasattr(daily_stats, 'losing_streak') else 0
+                risk_status["max_losing_streak"] = _auto_bot.risk_guardian.max_losing_streak if hasattr(_auto_bot.risk_guardian, 'max_losing_streak') else 5
+                risk_status["max_daily_loss"] = _auto_bot.risk_guardian.max_daily_loss_percent if hasattr(_auto_bot.risk_guardian, 'max_daily_loss_percent') else 5.0
         except Exception:
             pass
     layers["risk"] = risk_status

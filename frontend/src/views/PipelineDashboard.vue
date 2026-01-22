@@ -1523,9 +1523,12 @@ const refreshAll = async () => {
       }
     }
 
-    // Fallback: Update Risk from separate API if needed
-    if (riskRes && !riskRes._isMock) {
-      riskData.value = { ...riskData.value, ...riskRes };
+    // Update Risk from separate API (always use if has real balance)
+    if (riskRes) {
+      // Use riskRes if it has real data (balance > 0) or is not mock
+      if (!riskRes._isMock || riskRes.balance > 0) {
+        riskData.value = { ...riskData.value, ...riskRes };
+      }
     }
 
     // Update Positions
