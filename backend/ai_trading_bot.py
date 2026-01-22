@@ -1753,6 +1753,25 @@ class AITradingBot:
                     "risk_factors": omega_decision.risk_factors[:5] if omega_decision.risk_factors else [],
                 }
                 self._last_omega_result_by_symbol[symbol] = self._last_omega_result
+                
+                # 📰 Store Sentiment data (from Omega Brain) for frontend
+                if omega_decision.sentiment:
+                    sentiment_level = "EXTREME_FEAR" if omega_decision.sentiment.overall_sentiment < -50 else \
+                                      "FEAR" if omega_decision.sentiment.overall_sentiment < -20 else \
+                                      "NEUTRAL" if omega_decision.sentiment.overall_sentiment < 20 else \
+                                      "GREED" if omega_decision.sentiment.overall_sentiment < 50 else "EXTREME_GREED"
+                    
+                    self._last_sentiment_result = {
+                        "symbol": symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "level": sentiment_level,
+                        "retail_sentiment": float(omega_decision.sentiment.overall_sentiment),
+                        "dominant_narrative": omega_decision.sentiment.dominant_narrative if hasattr(omega_decision.sentiment, 'dominant_narrative') else "N/A",
+                        "fear_greed_index": 50 + float(omega_decision.sentiment.overall_sentiment) / 2,  # Convert to 0-100 scale
+                        "override_signal": abs(omega_decision.sentiment.overall_sentiment) > 70,  # Contrarian signal when extreme
+                        "source": "Omega Brain Sentiment Fusion"
+                    }
+                    self._last_sentiment_result_by_symbol[symbol] = self._last_sentiment_result
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Omega Brain analysis failed: {e}")

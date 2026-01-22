@@ -1297,22 +1297,30 @@ const intelligenceModules = computed(() => [
   {
     name: "Advanced Intelligence",
     icon: "🧠",
-    active: layers.value.advanced?.regime !== undefined || layers.value.advanced?.mtf_alignment !== undefined,
+    active:
+      layers.value.advanced?.regime !== undefined ||
+      layers.value.advanced?.mtf_alignment !== undefined,
   },
   {
     name: "Smart Brain",
     icon: "💡",
-    active: layers.value.smart !== undefined && Object.keys(layers.value.smart).length > 0,
+    active:
+      layers.value.smart !== undefined &&
+      Object.keys(layers.value.smart).length > 0,
   },
   {
     name: "Neural Brain",
     icon: "🧬",
-    active: layers.value.neural?.market_state !== undefined || layers.value.neural?.dna_score !== undefined,
+    active:
+      layers.value.neural?.market_state !== undefined ||
+      layers.value.neural?.dna_score !== undefined,
   },
   {
     name: "Deep Intelligence",
     icon: "🌊",
-    active: layers.value.deep?.session !== undefined || layers.value.deep?.correlation !== undefined,
+    active:
+      layers.value.deep?.session !== undefined ||
+      layers.value.deep?.correlation !== undefined,
   },
   {
     name: "Quantum Strategy",
@@ -1324,17 +1332,29 @@ const intelligenceModules = computed(() => [
     icon: "🚀",
     active: alphaData.value?.grade && alphaData.value?.grade !== "N/A",
   },
-  { name: "Omega Brain", icon: "🌟", active: omegaData.value?.grade && omegaData.value?.grade !== "N/A" },
-  { name: "Titan Core", icon: "⚔️", active: titanData.value?.grade && titanData.value?.grade !== "N/A" },
+  {
+    name: "Omega Brain",
+    icon: "🌟",
+    active: omegaData.value?.grade && omegaData.value?.grade !== "N/A",
+  },
+  {
+    name: "Titan Core",
+    icon: "⚔️",
+    active: titanData.value?.grade && titanData.value?.grade !== "N/A",
+  },
   {
     name: "Continuous Learning",
     icon: "📚",
-    active: layers.value.learning !== undefined && Object.keys(layers.value.learning).length > 0,
+    active:
+      layers.value.learning !== undefined &&
+      Object.keys(layers.value.learning).length > 0,
   },
   {
     name: "Pro Features",
     icon: "🏆",
-    active: layers.value.pro?.session !== undefined || layers.value.pro?.multiplier !== undefined,
+    active:
+      layers.value.pro?.session !== undefined ||
+      layers.value.pro?.multiplier !== undefined,
   },
   {
     name: "Risk Guardian",
@@ -1690,8 +1710,10 @@ const checkSystemHealth = async () => {
   isLoading.value = true;
   try {
     // Fetch bot status first (this always works if API is connected)
-    const botStatusRes = await api.getBotStatus().catch(() => ({ running: false, _isMock: true }));
-    
+    const botStatusRes = await api
+      .getBotStatus()
+      .catch(() => ({ running: false, _isMock: true }));
+
     // Try to get system health (optional - may not exist)
     let healthRes = {};
     try {
@@ -1699,21 +1721,27 @@ const checkSystemHealth = async () => {
     } catch (e) {
       console.log("System health endpoint not available, using fallback");
     }
-    
+
     // API is online if we got botStatus without _isMock
     const apiOnline = !botStatusRes._isMock;
-    
+
     // MT5 is connected if bot is running (bot requires MT5)
-    const mt5Connected = healthRes.mt5_connected ?? (botStatusRes.running && apiOnline);
+    const mt5Connected =
+      healthRes.mt5_connected ?? (botStatusRes.running && apiOnline);
 
     // Update system health
     systemHealth.value = {
       mt5_connected: mt5Connected,
       api_status: apiOnline ? "online" : "offline",
       bot_running: botStatusRes.running || false,
-      data_lake_ready: healthRes.data_lake_ready ?? (layers.value.data_lake?.status === "READY"),
-      faiss_loaded: healthRes.faiss_loaded ?? (layers.value.pattern_matcher?.status === "ACTIVE"),
-      intelligence_modules: healthRes.intelligence_modules ?? intelligenceModules.value.filter((m) => m.active).length,
+      data_lake_ready:
+        healthRes.data_lake_ready ?? layers.value.data_lake?.status === "READY",
+      faiss_loaded:
+        healthRes.faiss_loaded ??
+        layers.value.pattern_matcher?.status === "ACTIVE",
+      intelligence_modules:
+        healthRes.intelligence_modules ??
+        intelligenceModules.value.filter((m) => m.active).length,
       total_modules: 16,
       last_analysis_time: healthRes.last_analysis_time ?? lastUpdateTime.value,
       memory_usage: healthRes.memory_usage ?? 0,
