@@ -2847,7 +2847,10 @@ async def get_risk_data():
         "max_losing_streak": 5
     }
     
-    # Always get real account info from MT5 service (regardless of bot status)
+    # Get real account info - try multiple methods
+    account_fetched = False
+    
+    # Method 1: Try from MT5 service
     try:
         mt5_service = get_mt5_service()
         if mt5_service and mt5_service.is_connected():
@@ -2856,8 +2859,23 @@ async def get_risk_data():
                 risk_data["balance"] = account.get("balance", 0)
                 risk_data["equity"] = account.get("equity", 0)
                 risk_data["leverage"] = account.get("leverage", 0)
+                account_fetched = True
     except Exception as e:
-        logger.warning(f"Could not get MT5 account info: {e}")
+        logger.debug(f"MT5 service not available: {e}")
+    
+    # Method 2: Try direct MT5 if service not connected
+    if not account_fetched:
+        try:
+            import MetaTrader5 as mt5
+            # MT5 might already be initialized by the bot
+            info = mt5.account_info()
+            if info:
+                risk_data["balance"] = info.balance
+                risk_data["equity"] = info.equity
+                risk_data["leverage"] = info.leverage
+                account_fetched = True
+        except Exception as e:
+            logger.debug(f"Direct MT5 not available: {e}")
     
     if not _auto_bot:
         risk_data["message"] = "Bot not running"
