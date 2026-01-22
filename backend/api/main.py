@@ -355,8 +355,15 @@ async def get_system_health():
     """
     global _auto_bot
     
-    import psutil
     import time
+    
+    # Try to import psutil (optional)
+    memory_usage = 0
+    try:
+        import psutil
+        memory_usage = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+    except ImportError:
+        pass
     
     # Check MT5 connection
     mt5_connected = False
@@ -426,7 +433,7 @@ async def get_system_health():
         "intelligence_modules": intelligence_modules,
         "total_modules": 16,
         "last_analysis_time": last_analysis_time,
-        "memory_usage": psutil.Process().memory_info().rss / 1024 / 1024,  # MB
+        "memory_usage": memory_usage,
         "uptime": uptime,
         "patterns_loaded": list(pattern_matchers.keys()),
     }
