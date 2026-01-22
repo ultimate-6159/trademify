@@ -14,40 +14,22 @@
           <nav class="flex items-center space-x-6">
             <router-link
               to="/"
-              class="text-gray-400 hover:text-white transition-colors"
+              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
               :class="{ 'text-white': $route.path === '/' }"
             >
-              Dashboard
+              <span>🔬</span> Control Center
             </router-link>
             <router-link
-              to="/pipeline"
-              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-              :class="{ 'text-white': $route.path === '/pipeline' }"
-            >
-              <span>🔬</span> Pipeline
-            </router-link>
-            <router-link
-              to="/intelligence"
-              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-              :class="{ 'text-white': $route.path === '/intelligence' }"
-            >
-              <span>🧠</span> Intelligence
-            </router-link>
-            <router-link
-              to="/enhanced"
-              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-              :class="{ 'text-white': $route.path === '/enhanced' }"
-            >
-              <span>🤖</span> AI Bot
-            </router-link>
-            <router-link
-              to="/trading"
+              to="/settings"
               class="text-gray-400 hover:text-white transition-colors"
-              :class="{ 'text-white': $route.path === '/trading' }"
+              :class="{ 'text-white': $route.path === '/settings' }"
             >
-              Trading
+              Settings
             </router-link>
-            <router-link
+          </nav>
+        </div>
+      </div>
+    </header>
               to="/settings"
               class="text-gray-400 hover:text-white transition-colors"
               :class="{ 'text-white': $route.path === '/settings' }"

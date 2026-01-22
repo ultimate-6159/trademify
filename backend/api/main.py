@@ -340,6 +340,98 @@ async def health_check():
     )
 
 
+@app.get("/api/v1/system/health")
+async def get_system_health():
+    """
+    🏥 Comprehensive system health check
+    
+    Returns status of all system components:
+    - MT5 Connection
+    - API Server
+    - Bot Status
+    - Data Lake
+    - FAISS Index
+    - Intelligence Modules
+    """
+    global _auto_bot
+    
+    import psutil
+    import time
+    
+    # Check MT5 connection
+    mt5_connected = False
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            mt5_connected = True
+            mt5.shutdown()
+    except:
+        pass
+    
+    # Count active intelligence modules
+    intelligence_modules = 0
+    if _auto_bot:
+        if hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'alpha_engine') and _auto_bot.alpha_engine:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'omega_brain') and _auto_bot.omega_brain:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'titan_core') and _auto_bot.titan_core:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'learning_system') and _auto_bot.learning_system:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
+            intelligence_modules += 1
+        if hasattr(_auto_bot, 'sentiment_analyzer') and _auto_bot.sentiment_analyzer:
+            intelligence_modules += 1
+        # Add base modules (Data Lake, Pattern Matcher, Voting, Enhanced)
+        if _auto_bot.data_provider:
+            intelligence_modules += 1
+        if _auto_bot.pattern_matchers:
+            intelligence_modules += 1
+        if _auto_bot.voting_system:
+            intelligence_modules += 1
+        if _auto_bot.enhanced_analyzer:
+            intelligence_modules += 1
+    
+    # Get uptime
+    uptime = 0
+    if _auto_bot and hasattr(_auto_bot, '_start_time'):
+        uptime = int(time.time() - _auto_bot._start_time)
+    
+    # Get last analysis time
+    last_analysis_time = None
+    if _auto_bot and hasattr(_auto_bot, '_last_analysis'):
+        last_analysis = _auto_bot._last_analysis
+        if last_analysis and 'timestamp' in last_analysis:
+            last_analysis_time = last_analysis['timestamp']
+    
+    return {
+        "mt5_connected": mt5_connected,
+        "api_status": "online",
+        "bot_running": _auto_bot is not None and getattr(_auto_bot, '_running', False),
+        "data_lake_ready": _auto_bot is not None and _auto_bot.data_provider is not None,
+        "faiss_loaded": len(pattern_matchers) > 0 or (_auto_bot is not None and bool(_auto_bot.pattern_matchers)),
+        "intelligence_modules": intelligence_modules,
+        "total_modules": 16,
+        "last_analysis_time": last_analysis_time,
+        "memory_usage": psutil.Process().memory_info().rss / 1024 / 1024,  # MB
+        "uptime": uptime,
+        "patterns_loaded": list(pattern_matchers.keys()),
+    }
+
+
 @app.post("/api/v1/build-index", response_model=IndexStatusResponse)
 async def build_index(request: BuildIndexRequest, background_tasks: BackgroundTasks):
     """

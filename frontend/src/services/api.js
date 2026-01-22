@@ -955,7 +955,29 @@ const api = {
   },
 
   // ===========================================
-  // 14. UTILITY FUNCTIONS
+  // 15. SYSTEM HEALTH
+  // ===========================================
+
+  async getSystemHealth() {
+    return tryApiOrMock(
+      () => apiClient.get("/system/health"),
+      () => ({
+        mt5_connected: false,
+        api_status: "mock",
+        bot_running: false,
+        data_lake_ready: false,
+        faiss_loaded: false,
+        intelligence_modules: 0,
+        total_modules: 16,
+        last_analysis_time: null,
+        memory_usage: 0,
+        uptime: 0,
+      }),
+    );
+  },
+
+  // ===========================================
+  // 16. UTILITY FUNCTIONS
   // ===========================================
 
   getBaseUrl() {
