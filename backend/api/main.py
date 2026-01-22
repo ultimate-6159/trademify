@@ -2419,10 +2419,11 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     }
     
     # 3. Voting System
+    vote_details = last_analysis.get("vote_details") or {}
     layers["voting"] = {
         "signal": last_analysis.get("signal", "WAIT"),
-        "bullish": last_analysis.get("vote_details", {}).get("bullish", 0),
-        "bearish": last_analysis.get("vote_details", {}).get("bearish", 0),
+        "bullish": vote_details.get("bullish", 0),
+        "bearish": vote_details.get("bearish", 0),
         "confidence": last_analysis.get("confidence", 0)
     }
     
@@ -2438,8 +2439,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 5. Advanced Intelligence
     intel_status = {}
     if hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence:
-        intel_by_symbol = getattr(_auto_bot, '_last_intel_result_by_symbol', {})
-        intel_result = intel_by_symbol.get(symbol, getattr(_auto_bot, '_last_intel_result', {}))
+        intel_by_symbol = getattr(_auto_bot, '_last_intel_result_by_symbol', {}) or {}
+        intel_result = intel_by_symbol.get(symbol, getattr(_auto_bot, '_last_intel_result', {})) or {}
         intel_status = {
             "regime": intel_result.get("regime", "N/A"),
             "mtf_alignment": intel_result.get("mtf_alignment", "N/A"),
@@ -2451,8 +2452,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 6. Smart Brain
     smart_status = {}
     if hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain:
-        smart_by_symbol = getattr(_auto_bot, '_last_smart_result_by_symbol', {})
-        smart_result = smart_by_symbol.get(symbol, getattr(_auto_bot, '_last_smart_result', {}))
+        smart_by_symbol = getattr(_auto_bot, '_last_smart_result_by_symbol', {}) or {}
+        smart_result = smart_by_symbol.get(symbol, getattr(_auto_bot, '_last_smart_result', {})) or {}
         smart_status = {
             "pattern_count": getattr(_auto_bot.smart_brain, 'pattern_count', 0),
             "multiplier": smart_result.get("position_multiplier", 1.0),
@@ -2464,8 +2465,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 7. Neural Brain
     neural_status = {}
     if hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain:
-        neural_by_symbol = getattr(_auto_bot, '_last_neural_result_by_symbol', {})
-        neural_result = neural_by_symbol.get(symbol, getattr(_auto_bot, '_last_neural_result', {}))
+        neural_by_symbol = getattr(_auto_bot, '_last_neural_result_by_symbol', {}) or {}
+        neural_result = neural_by_symbol.get(symbol, getattr(_auto_bot, '_last_neural_result', {})) or {}
         neural_status = {
             "market_state": neural_result.get("market_state", "N/A"),
             "dna_score": neural_result.get("dna_score", 0),
@@ -2477,8 +2478,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 8. Deep Intelligence
     deep_status = {}
     if hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence:
-        deep_by_symbol = getattr(_auto_bot, '_last_deep_result_by_symbol', {})
-        deep_result = deep_by_symbol.get(symbol, getattr(_auto_bot, '_last_deep_result', {}))
+        deep_by_symbol = getattr(_auto_bot, '_last_deep_result_by_symbol', {}) or {}
+        deep_result = deep_by_symbol.get(symbol, getattr(_auto_bot, '_last_deep_result', {})) or {}
         deep_status = {
             "correlation": deep_result.get("correlation", 0),
             "session": deep_result.get("session", "N/A"),
@@ -2490,8 +2491,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 9. Quantum Strategy
     quantum_status = {}
     if hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy:
-        quantum_by_symbol = getattr(_auto_bot, '_last_quantum_result_by_symbol', {})
-        quantum_result = quantum_by_symbol.get(symbol, getattr(_auto_bot, '_last_quantum_result', {}))
+        quantum_by_symbol = getattr(_auto_bot, '_last_quantum_result_by_symbol', {}) or {}
+        quantum_result = quantum_by_symbol.get(symbol, getattr(_auto_bot, '_last_quantum_result', {})) or {}
         quantum_status = {
             "volatility_regime": quantum_result.get("volatility_regime", "N/A"),
             "fractal": quantum_result.get("fractal", "N/A"),
@@ -2558,12 +2559,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 14. Pro Features
     pro_status = {}
     if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
-        pro_result = getattr(_auto_bot, '_last_pro_result', {})
-    # 14. Pro Features
-    pro_status = {}
-    if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
-        pro_by_symbol = getattr(_auto_bot, '_last_pro_result_by_symbol', {})
-        pro_result = pro_by_symbol.get(symbol, getattr(_auto_bot, '_last_pro_result', {}))
+        pro_by_symbol = getattr(_auto_bot, '_last_pro_result_by_symbol', {}) or {}
+        pro_result = pro_by_symbol.get(symbol, getattr(_auto_bot, '_last_pro_result', {})) or {}
         pro_status = {
             "session": pro_result.get("session", "N/A"),
             "news_impact": pro_result.get("news_impact", "NONE"),
@@ -2599,8 +2596,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 16. Sentiment (Contrarian) - symbol-specific
     sentiment_status = {}
     if hasattr(_auto_bot, 'sentiment_analyzer'):
-        sentiment_by_symbol = getattr(_auto_bot, '_last_sentiment_result_by_symbol', {})
-        sentiment_result = sentiment_by_symbol.get(symbol, getattr(_auto_bot, '_last_sentiment_result', {}))
+        sentiment_by_symbol = getattr(_auto_bot, '_last_sentiment_result_by_symbol', {}) or {}
+        sentiment_result = sentiment_by_symbol.get(symbol, getattr(_auto_bot, '_last_sentiment_result', {})) or {}
         sentiment_status = {
             "level": sentiment_result.get("level", "N/A"),
             "retail_sentiment": sentiment_result.get("retail_sentiment", 0),
