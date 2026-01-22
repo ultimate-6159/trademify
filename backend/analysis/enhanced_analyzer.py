@@ -1087,13 +1087,17 @@ class EnhancedAnalyzer:
         quality: SignalQuality
     ) -> Tuple[Optional[float], Optional[float]]:
         """Adjust SL/TP based on ATR and quality"""
+        # Normalize signal to BUY/SELL
+        is_buy = signal in ["BUY", "STRONG_BUY"]
+        is_sell = signal in ["SELL", "STRONG_SELL"]
+        
         if not base_sl or not base_tp:
             # Default ATR-based SL/TP
             atr_multiplier = 2.0
-            if signal == "BUY":
+            if is_buy:
                 base_sl = current_price - (atr * atr_multiplier)
                 base_tp = current_price + (atr * atr_multiplier * 2)
-            elif signal == "SELL":
+            elif is_sell:
                 base_sl = current_price + (atr * atr_multiplier)
                 base_tp = current_price - (atr * atr_multiplier * 2)
             else:
@@ -1123,7 +1127,7 @@ class EnhancedAnalyzer:
         sl_distance = abs(current_price - base_sl)
         tp_distance = abs(base_tp - current_price)
         
-        if signal == "BUY":
+        if is_buy:
             adjusted_sl = current_price - (sl_distance * sl_mult)
             adjusted_tp = current_price + (tp_distance * tp_mult)
         else:
