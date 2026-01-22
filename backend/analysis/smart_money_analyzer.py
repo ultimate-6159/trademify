@@ -157,14 +157,16 @@ class SmartMoneyAnalyzer:
     3. Liquidity Hunt Zones
     4. Order Blocks (Supply/Demand)
     5. Fair Value Gaps
+    
+    🔥 STRICT MODE: Enhanced contrarian weight
     """
     
-    # Weight for each factor
+    # 🔥 STRICT Weight for each factor - Sentiment is KING
     WEIGHTS = {
-        "sentiment": 0.30,     # Contrarian sentiment (สำคัญมาก!)
+        "sentiment": 0.40,     # Contrarian sentiment (เพิ่มจาก 0.30!)
         "order_flow": 0.25,    # Volume/Order flow
-        "structure": 0.25,     # Market structure
-        "liquidity": 0.20,     # Liquidity zones
+        "structure": 0.20,     # Market structure (ลดลง)
+        "liquidity": 0.15,     # Liquidity zones (ลดลง)
     }
     
     def __init__(self):
@@ -198,42 +200,60 @@ class SmartMoneyAnalyzer:
         closes = ohlcv.get("close", np.array([]))
         volumes = ohlcv.get("volume", np.array([1.0] * len(closes)))
         
-        # 1. SENTIMENT ANALYSIS (Contrarian) - 30%
+        logger.info(f"=" * 60)
+        logger.info(f"🧠 [SMART MONEY] Analyzing {symbol} @ {current_price:.5f}")
+        logger.info(f"=" * 60)
+        
+        # 1. SENTIMENT ANALYSIS (Contrarian) - 40% (เพิ่มจาก 30%!)
         # นี่คือจุดสำคัญที่สุด!
         try:
             sentiment = await self.sentiment_analyzer.get_sentiment(symbol)
+            logger.info(f"📊 [SENTIMENT] Real data from {sentiment.sources_count} sources")
         except Exception as e:
             logger.warning(f"Sentiment fetch failed, using mock: {e}")
             sentiment = self.sentiment_analyzer.get_mock_sentiment(symbol)
+            logger.info(f"📊 [SENTIMENT] Using MOCK data")
         
         sentiment_score = self._calculate_sentiment_score(sentiment)
+        
+        # 🔥 STRICT LOGGING: Show exactly what sentiment says
+        logger.info(f"📊 [SENTIMENT] Retail Long: {sentiment.avg_long_percent:.1f}% | Short: {sentiment.avg_short_percent:.1f}%")
+        logger.info(f"📊 [SENTIMENT] Signal: {sentiment.signal.value} | Confidence: {sentiment.confidence:.1f}%")
+        logger.info(f"📊 [SENTIMENT] Score Weight: {sentiment_score:.1f} × {self.WEIGHTS['sentiment']:.2f} = {sentiment_score * self.WEIGHTS['sentiment']:.1f}")
         
         # Add sentiment reasoning
         if sentiment.signal == SentimentSignal.STRONG_BUY:
             reasons.append(f"🟢 Retail {sentiment.avg_short_percent:.0f}% Short - Extreme bearish = BUY")
+            logger.info(f"✅ [CONTRARIAN] Retail very SHORT → We should BUY!")
         elif sentiment.signal == SentimentSignal.STRONG_SELL:
             reasons.append(f"🔴 Retail {sentiment.avg_long_percent:.0f}% Long - Extreme bullish = SELL")
+            logger.info(f"✅ [CONTRARIAN] Retail very LONG → We should SELL!")
         elif sentiment.signal == SentimentSignal.BUY:
             reasons.append(f"🟢 Retail leaning short ({sentiment.avg_short_percent:.0f}%) - Contrarian BUY")
+            logger.info(f"✅ [CONTRARIAN] Retail leaning short → BUY edge")
         elif sentiment.signal == SentimentSignal.SELL:
             reasons.append(f"🔴 Retail leaning long ({sentiment.avg_long_percent:.0f}%) - Contrarian SELL")
+            logger.info(f"✅ [CONTRARIAN] Retail leaning long → SELL edge")
         else:
             warnings.append("Sentiment balanced - No clear contrarian edge")
+            logger.info(f"⚪ [CONTRARIAN] Sentiment balanced - No clear edge")
         
         # 2. ORDER FLOW ANALYSIS - 25%
         order_flow_score, volume_signal = self._analyze_order_flow(
             closes, volumes, current_price
         )
+        logger.info(f"📈 [ORDER FLOW] Volume Signal: {volume_signal} | Score: {order_flow_score:.1f}")
         
         if volume_signal == "BULLISH":
             reasons.append("📈 Volume shows buying pressure accumulation")
         elif volume_signal == "BEARISH":
             reasons.append("📉 Volume shows selling pressure distribution")
         
-        # 3. MARKET STRUCTURE - 25%
+        # 3. MARKET STRUCTURE - 20%
         market_structure, structure_score = self._analyze_market_structure(
             highs, lows, closes
         )
+        logger.info(f"📊 [STRUCTURE] {market_structure.value} | Score: {structure_score:.1f}")
         
         if market_structure == MarketStructure.BULLISH_BOS:
             reasons.append("📊 Bullish Break of Structure confirmed")
@@ -244,10 +264,11 @@ class SmartMoneyAnalyzer:
         elif market_structure == MarketStructure.BEARISH_CHOCH:
             reasons.append("🔄 Bearish Change of Character - Potential reversal down")
         
-        # 4. LIQUIDITY ZONES - 20%
+        # 4. LIQUIDITY ZONES - 15%
         liquidity_zones, liquidity_score = self._find_liquidity_zones(
             highs, lows, closes, current_price
         )
+        logger.info(f"💧 [LIQUIDITY] Found {len(liquidity_zones)} zones | Score: {liquidity_score:.1f}")
         
         # Check if price near liquidity
         for zone in liquidity_zones:
@@ -291,6 +312,14 @@ class SmartMoneyAnalyzer:
             liquidity_score * self.WEIGHTS["liquidity"]
         )
         
+        logger.info(f"-" * 50)
+        logger.info(f"📊 [SMART MONEY] Final Score Calculation:")
+        logger.info(f"   Sentiment: {sentiment_score:.1f} × {self.WEIGHTS['sentiment']:.2f} = {sentiment_score * self.WEIGHTS['sentiment']:.1f}")
+        logger.info(f"   Order Flow: {order_flow_score:.1f} × {self.WEIGHTS['order_flow']:.2f} = {order_flow_score * self.WEIGHTS['order_flow']:.1f}")
+        logger.info(f"   Structure: {structure_score:.1f} × {self.WEIGHTS['structure']:.2f} = {structure_score * self.WEIGHTS['structure']:.1f}")
+        logger.info(f"   Liquidity: {liquidity_score:.1f} × {self.WEIGHTS['liquidity']:.2f} = {liquidity_score * self.WEIGHTS['liquidity']:.1f}")
+        logger.info(f"   🎯 TOTAL WEIGHTED: {weighted_score:.1f}")
+        
         # Determine signal direction based on sentiment (primary) + confluence
         signal, confidence = self._determine_signal(
             sentiment, 
@@ -298,6 +327,13 @@ class SmartMoneyAnalyzer:
             order_flow_score,
             weighted_score
         )
+        
+        logger.info(f"-" * 50)
+        logger.info(f"🧠 [SMART MONEY DECISION]")
+        logger.info(f"   Signal: {signal.value}")
+        logger.info(f"   Confidence: {confidence:.1f}%")
+        logger.info(f"   Reasons: {len(reasons)} | Warnings: {len(warnings)}")
+        logger.info(f"=" * 60)
         
         # Calculate trade setup
         entry_zone, stop_loss, tp1, tp2 = self._calculate_trade_setup(

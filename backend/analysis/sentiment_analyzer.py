@@ -126,6 +126,8 @@ class SentimentAnalyzer:
     Strategy:
     - When retail is extremely long → Market likely to drop
     - When retail is extremely short → Market likely to rise
+    
+    🔥 STRICT MODE: More aggressive contrarian thresholds
     """
     
     # Symbol mapping for different data sources
@@ -144,10 +146,10 @@ class SentimentAnalyzer:
         "ETHUSDT": ["ETHUSD", "ETH/USD", "Ethereum"],
     }
     
-    # Sentiment thresholds for contrarian signals
-    EXTREME_THRESHOLD = 75  # Very high conviction
-    HIGH_THRESHOLD = 65     # High conviction
-    MODERATE_THRESHOLD = 55 # Slight edge
+    # 🔥 STRICT Sentiment thresholds (lowered for more aggressive contrarian)
+    EXTREME_THRESHOLD = 70  # Was 75 - Now trigger earlier
+    HIGH_THRESHOLD = 60     # Was 65 - More sensitive
+    MODERATE_THRESHOLD = 52 # Was 55 - Detect slight edge earlier
     
     def __init__(self):
         self.cache: Dict[str, AggregatedSentiment] = {}
@@ -212,19 +214,119 @@ class SentimentAnalyzer:
         tasks = [
             self._fetch_myfxbook(symbol),
             self._fetch_dailyfx(symbol),
-            # Add more sources here
+            self._fetch_investing_com(symbol),  # NEW
+            self._fetch_fxblue(symbol),         # NEW
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         valid_results = []
-        for r in results:
+        for i, r in enumerate(results):
             if isinstance(r, SentimentData):
                 valid_results.append(r)
+                logger.info(f"📊 [SENTIMENT] {r.source}: {symbol} Long={r.long_percent:.1f}% Short={r.short_percent:.1f}%")
             elif isinstance(r, Exception):
                 logger.debug(f"Source fetch failed: {r}")
         
+        if valid_results:
+            logger.info(f"✅ [SENTIMENT] Got {len(valid_results)} real sources for {symbol}")
+        else:
+            logger.warning(f"⚠️ [SENTIMENT] No real data for {symbol}, will use mock")
+        
         return valid_results
+    
+    async def _fetch_investing_com(self, symbol: str) -> Optional[SentimentData]:
+        """
+        Fetch sentiment from Investing.com Technical Summary
+        https://www.investing.com/technical/technical-summary
+        """
+        try:
+            session = await self._get_session()
+            normalized = self._normalize_symbol(symbol)
+            
+            # Map to Investing.com pair IDs
+            pair_ids = {
+                "EURUSD": "1",
+                "GBPUSD": "2",
+                "USDJPY": "3",
+                "XAUUSD": "8830",  # Gold
+            }
+            
+            pair_id = pair_ids.get(normalized)
+            if not pair_id:
+                return None
+            
+            url = f"https://www.investing.com/instruments/Service/GetTechSummary?pairID={pair_id}"
+            
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+            }
+            
+            async with session.get(url, headers=headers) as response:
+                if response.status != 200:
+                    return None
+                
+                try:
+                    data = await response.json()
+                    
+                    # Parse buy/sell signals as proxy for sentiment
+                    buy_signals = data.get("buy", 0)
+                    sell_signals = data.get("sell", 0)
+                    total = buy_signals + sell_signals
+                    
+                    if total > 0:
+                        # Invert: More buy signals = retail bullish = we sell
+                        long_pct = (buy_signals / total) * 100
+                        short_pct = (sell_signals / total) * 100
+                        
+                        return SentimentData(
+                            source="Investing.com",
+                            symbol=symbol,
+                            long_percent=long_pct,
+                            short_percent=short_pct,
+                        )
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.debug(f"Investing.com fetch error: {e}")
+        
+        return None
+    
+    async def _fetch_fxblue(self, symbol: str) -> Optional[SentimentData]:
+        """
+        Fetch sentiment from FXBlue Live Sentiment
+        https://www.fxblue.com/market-data/sentiment
+        """
+        try:
+            session = await self._get_session()
+            normalized = self._normalize_symbol(symbol)
+            
+            url = "https://www.fxblue.com/market-data/sentiment/data"
+            
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return None
+                
+                html = await response.text()
+                
+                # Look for JSON data
+                pattern = rf'"symbol"\s*:\s*"{normalized}"[^}}]*"longPercentage"\s*:\s*(\d+(?:\.\d+)?)[^}}]*"shortPercentage"\s*:\s*(\d+(?:\.\d+)?)'
+                match = re.search(pattern, html, re.IGNORECASE)
+                
+                if match:
+                    return SentimentData(
+                        source="FXBlue",
+                        symbol=symbol,
+                        long_percent=float(match.group(1)),
+                        short_percent=float(match.group(2)),
+                    )
+                    
+        except Exception as e:
+            logger.debug(f"FXBlue fetch error: {e}")
+        
+        return None
     
     async def _fetch_myfxbook(self, symbol: str) -> Optional[SentimentData]:
         """

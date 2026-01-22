@@ -483,6 +483,8 @@ class EnhancedAnalyzer:
                     bearish_factors.append(f"🔴 SMART MONEY: Retail {smart_money.sentiment.avg_long_percent:.0f}% Long → SELL")
                     if base_signal == "BUY":
                         # Contrarian override!
+                        logger.warning(f"🚫 [CONTRARIAN OVERRIDE] Original: BUY → Changed to: WAIT")
+                        logger.warning(f"   Reason: Retail {smart_money.sentiment.avg_long_percent:.0f}% Long - Too bullish!")
                         skip_reasons.append("⚠️ Sentiment override: Retail too bullish for BUY")
                         base_signal = "WAIT"
                         
@@ -490,14 +492,18 @@ class EnhancedAnalyzer:
                     bullish_factors.append(f"🟢 SMART MONEY: Retail {smart_money.sentiment.avg_short_percent:.0f}% Short → BUY")
                     if base_signal == "SELL":
                         # Contrarian override!
+                        logger.warning(f"🚫 [CONTRARIAN OVERRIDE] Original: SELL → Changed to: WAIT")
+                        logger.warning(f"   Reason: Retail {smart_money.sentiment.avg_short_percent:.0f}% Short - Too bearish!")
                         skip_reasons.append("⚠️ Sentiment override: Retail too bearish for SELL")
                         base_signal = "WAIT"
                         
                 elif smart_money.signal == SmartMoneySignal.SELL:
                     bearish_factors.append(f"Retail sentiment bearish edge ({smart_money.sentiment.avg_long_percent:.0f}% Long)")
+                    logger.info(f"📊 [SENTIMENT EDGE] Retail {smart_money.sentiment.avg_long_percent:.0f}% Long - Slight SELL edge")
                     
                 elif smart_money.signal == SmartMoneySignal.BUY:
                     bullish_factors.append(f"Retail sentiment bullish edge ({smart_money.sentiment.avg_short_percent:.0f}% Short)")
+                    logger.info(f"📊 [SENTIMENT EDGE] Retail {smart_money.sentiment.avg_short_percent:.0f}% Short - Slight BUY edge")
                 
                 # Add Smart Money reasons
                 for reason in smart_money.reasons[:3]:
