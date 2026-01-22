@@ -30,16 +30,6 @@
         </div>
       </div>
     </header>
-              to="/settings"
-              class="text-gray-400 hover:text-white transition-colors"
-              :class="{ 'text-white': $route.path === '/settings' }"
-            >
-              Settings
-            </router-link>
-          </nav>
-        </div>
-      </div>
-    </header>
 
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-6">
