@@ -654,6 +654,169 @@ class AITradingBot:
                     logger.debug(f"📊 Titan Core analyzed: Grade={titan_decision.grade.value}, Score={titan_decision.titan_score:.1f}")
                 except Exception as e:
                     logger.debug(f"Titan analysis error: {e}")
+            
+            # 🧠 ADVANCED INTELLIGENCE ANALYSIS (for display)
+            if self.intelligence:
+                try:
+                    side_for_intel = "BUY" if side_for_analysis != "SELL" else "SELL"
+                    
+                    # Build h1_data dict from DataFrame
+                    h1_data_dict = {
+                        "open": opens,
+                        "high": highs,
+                        "low": lows,
+                        "close": prices,
+                    }
+                    
+                    intel_decision = self.intelligence.analyze(
+                        signal_side=side_for_intel,
+                        pattern_confidence=70,  # Default for display
+                        h1_data=h1_data_dict,
+                        win_rate=0.5,
+                        avg_win=1.0,
+                        avg_loss=1.0,
+                        total_trades=0,
+                    )
+                    
+                    self._last_intel_result = {
+                        "regime": intel_decision.regime.regime.value if intel_decision.regime else "N/A",
+                        "trend_strength": intel_decision.regime.trend_strength if intel_decision.regime else 0,
+                        "mtf_alignment": "ALIGNED" if intel_decision.can_trade else "CONFLICTING",
+                        "position_size_factor": intel_decision.position_size_factor,
+                        "can_trade": intel_decision.can_trade,
+                        "momentum_state": intel_decision.momentum.momentum_state if intel_decision.momentum else "N/A",
+                        "rsi": intel_decision.momentum.rsi if intel_decision.momentum else 0,
+                    }
+                    self._last_intel_result_by_symbol[symbol] = self._last_intel_result
+                    logger.debug(f"📊 Intelligence analyzed: Regime={self._last_intel_result.get('regime')}")
+                except Exception as e:
+                    logger.warning(f"Intelligence analysis error: {e}")
+            
+            # 📚 SMART BRAIN ANALYSIS (for display)
+            if self.smart_brain:
+                try:
+                    smart_result = {
+                        "pattern_count": getattr(self.smart_brain, 'pattern_count', 0),
+                        "position_multiplier": 1.0,
+                        "win_rate": 0,
+                        "avg_rr": 0
+                    }
+                    # Get stats from journal if available
+                    if hasattr(self.smart_brain, 'journal') and self.smart_brain.journal:
+                        stats = self.smart_brain.journal.get_stats()
+                        if stats:
+                            smart_result["win_rate"] = stats.get("win_rate", 0)
+                            smart_result["avg_rr"] = stats.get("avg_rr", 0)
+                    
+                    self._last_smart_result = smart_result
+                    self._last_smart_result_by_symbol[symbol] = self._last_smart_result
+                    logger.debug(f"📊 Smart Brain analyzed")
+                except Exception as e:
+                    logger.warning(f"Smart analysis error: {e}")
+            
+            # 🧬 NEURAL BRAIN ANALYSIS (for display)
+            if self.neural_brain:
+                try:
+                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    
+                    neural_decision = self.neural_brain.analyze(
+                        signal_side="BUY" if side_for_analysis != "SELL" else "SELL",
+                        prices=prices,
+                        volumes=volumes,
+                        balance=balance,
+                    )
+                    
+                    self._last_neural_result = {
+                        "market_state": neural_decision.market_state.value,
+                        "pattern_quality": neural_decision.pattern_quality,
+                        "dna_score": neural_decision.confidence,
+                        "position_multiplier": neural_decision.position_size_factor,
+                        "can_trade": neural_decision.can_trade,
+                        "anomaly_detected": neural_decision.anomaly_detected,
+                    }
+                    self._last_neural_result_by_symbol[symbol] = self._last_neural_result
+                    logger.debug(f"📊 Neural Brain analyzed: State={neural_decision.market_state.value}")
+                except Exception as e:
+                    logger.debug(f"Neural analysis error: {e}")
+            
+            # 🔮 DEEP INTELLIGENCE ANALYSIS (for display)
+            if self.deep_intelligence:
+                try:
+                    # Build timeframe_data dict
+                    timeframe_data = {"H1": prices[-200:] if len(prices) > 200 else prices}
+                    
+                    deep_decision = self.deep_intelligence.analyze(
+                        symbol=symbol,
+                        signal_direction="BUY" if side_for_analysis != "SELL" else "SELL",
+                        timeframe_data=timeframe_data,
+                        current_params={},
+                        other_symbols_direction=None,
+                    )
+                    
+                    self._last_deep_result = {
+                        "correlation": deep_decision.correlation_score if hasattr(deep_decision, 'correlation_score') else 0,
+                        "session": deep_decision.session_score if hasattr(deep_decision, 'session_score') else "N/A",
+                        "position_multiplier": deep_decision.position_multiplier if hasattr(deep_decision, 'position_multiplier') else 1.0,
+                        "cross_asset_signal": "N/A",
+                        "deep_score": deep_decision.confidence if hasattr(deep_decision, 'confidence') else 0,
+                        "confidence": deep_decision.confidence if hasattr(deep_decision, 'confidence') else 0,
+                        "should_trade": deep_decision.should_trade if hasattr(deep_decision, 'should_trade') else False,
+                        "timeframe_score": deep_decision.timeframe_score if hasattr(deep_decision, 'timeframe_score') else 0,
+                        "confluence_level": deep_decision.confluence_level.value if hasattr(deep_decision, 'confluence_level') else "N/A",
+                    }
+                    self._last_deep_result_by_symbol[symbol] = self._last_deep_result
+                    logger.debug(f"📊 Deep Intelligence analyzed: Score={self._last_deep_result.get('confidence', 0):.1f}")
+                except Exception as e:
+                    logger.warning(f"Deep analysis error: {e}")
+            
+            # ⚛️ QUANTUM STRATEGY ANALYSIS (for display)
+            if self.quantum_strategy:
+                try:
+                    quantum_decision = self.quantum_strategy.analyze(
+                        symbol=symbol,
+                        signal_direction="BUY" if side_for_analysis != "SELL" else "SELL",
+                        prices=prices[-200:] if len(prices) > 200 else prices,
+                        volumes=volumes[-200:] if len(volumes) > 200 else volumes,
+                        entry_price=current_price,
+                    )
+                    
+                    self._last_quantum_result = {
+                        "volatility_regime": quantum_decision.volatility.regime.value if quantum_decision.volatility else "N/A",
+                        "fractal": f"H={quantum_decision.fractal.hurst_exponent:.2f}" if quantum_decision.fractal else "N/A",
+                        "position_multiplier": quantum_decision.position_multiplier,
+                        "microstructure_signal": quantum_decision.microstructure.smart_money_signal if quantum_decision.microstructure else "N/A",
+                        "quantum_score": quantum_decision.quantum_score,
+                        "confidence": quantum_decision.confidence,
+                        "should_trade": quantum_decision.should_trade,
+                    }
+                    self._last_quantum_result_by_symbol[symbol] = self._last_quantum_result
+                    logger.debug(f"📊 Quantum Strategy analyzed: Score={quantum_decision.quantum_score:.1f}")
+                except Exception as e:
+                    logger.debug(f"Quantum analysis error: {e}")
+            
+            # 🏆 PRO TRADING FEATURES (for display)
+            if self.pro_features:
+                try:
+                    # Use session_filter from ProTradingFeatures
+                    if hasattr(self.pro_features, 'session_filter'):
+                        session_info = self.pro_features.session_filter.get_session_info()
+                        self._last_pro_result = {
+                            "session": session_info.current_session.value if hasattr(session_info, 'current_session') else "N/A",
+                            "session_quality": session_info.quality_score if hasattr(session_info, 'quality_score') else 0,
+                            "news_impact": "NONE",
+                            "position_multiplier": 1.0,
+                        }
+                    else:
+                        self._last_pro_result = {
+                            "session": "N/A",
+                            "session_quality": 0,
+                            "news_impact": "NONE",
+                            "position_multiplier": 1.0,
+                        }
+                    self._last_pro_result_by_symbol[symbol] = self._last_pro_result
+                    logger.debug(f"📊 Pro Features analyzed: Session={self._last_pro_result.get('session')}")
+                except Exception as e:
+                    logger.warning(f"Pro features error: {e}")
                     
         except Exception as e:
             logger.warning(f"Intelligence analysis for display failed: {e}")
