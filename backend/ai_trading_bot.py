@@ -1335,6 +1335,7 @@ class AITradingBot:
                     "confluence_agreeing": intel_decision.confluence.agreeing_factors if intel_decision.confluence else 0,
                     "confluence_total": intel_decision.confluence.total_factors if intel_decision.confluence else 0,
                 }
+                self._last_intel_result_by_symbol[symbol] = self._last_intel_result
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Intelligence analysis failed: {e}")
@@ -1390,6 +1391,7 @@ class AITradingBot:
                     "can_trade": neural_decision.can_trade,
                     "anomaly_detected": neural_decision.anomaly_detected,
                 }
+                self._last_neural_result_by_symbol[symbol] = self._last_neural_result
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Neural Brain analysis failed: {e}")
@@ -1463,6 +1465,7 @@ class AITradingBot:
                     "should_trade": quantum_decision.should_trade,
                     "risk_reward": quantum_decision.risk_reward,
                 }
+                self._last_quantum_result_by_symbol[symbol] = self._last_quantum_result
                         
             except Exception as e:
                 logger.warning(f"   ⚠️ Quantum Strategy analysis failed: {e}")
@@ -1550,6 +1553,7 @@ class AITradingBot:
                     "position_multiplier": deep_multiplier,
                     "should_trade": deep_decision.should_trade,
                 }
+                self._last_deep_result_by_symbol[symbol] = self._last_deep_result
                         
             except Exception as e:
                 logger.warning(f"   ⚠️ Deep Intelligence analysis failed: {e}")

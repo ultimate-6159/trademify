@@ -1364,7 +1364,11 @@ const intelligenceModules = computed(() => [
   {
     name: "Sentiment Analyzer",
     icon: "📰",
-    active: layers.value.sentiment?.active || (layers.value.sentiment?.level && layers.value.sentiment?.level !== "N/A") || omegaData.value?.grade !== "N/A",
+    active:
+      layers.value.sentiment?.active ||
+      (layers.value.sentiment?.level &&
+        layers.value.sentiment?.level !== "N/A") ||
+      omegaData.value?.grade !== "N/A",
   },
 ]);
 
@@ -1743,7 +1747,8 @@ const checkSystemHealth = async () => {
         healthRes.faiss_loaded ??
         layers.value.pattern_matcher?.status === "ACTIVE",
       // Always use frontend count to match the displayed list
-      intelligence_modules: intelligenceModules.value.filter((m) => m.active).length,
+      intelligence_modules: intelligenceModules.value.filter((m) => m.active)
+        .length,
       total_modules: 16,
       last_analysis_time: healthRes.last_analysis_time ?? lastUpdateTime.value,
       memory_usage: healthRes.memory_usage ?? 0,
