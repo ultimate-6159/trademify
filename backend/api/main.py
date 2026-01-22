@@ -403,13 +403,13 @@ async def get_system_health():
         if hasattr(_auto_bot, 'sentiment_analyzer') and _auto_bot.sentiment_analyzer:
             intelligence_modules += 1
         # Add base modules (Data Lake, Pattern Matcher, Voting, Enhanced)
-        if _auto_bot.data_provider:
+        if hasattr(_auto_bot, 'data_provider') and _auto_bot.data_provider:
             intelligence_modules += 1
-        if _auto_bot.pattern_matchers:
+        if hasattr(_auto_bot, 'pattern_matchers') and _auto_bot.pattern_matchers:
             intelligence_modules += 1
-        if _auto_bot.voting_system:
+        if hasattr(_auto_bot, 'voting_system') and _auto_bot.voting_system:
             intelligence_modules += 1
-        if _auto_bot.enhanced_analyzer:
+        if hasattr(_auto_bot, 'enhanced_analyzer') and _auto_bot.enhanced_analyzer:
             intelligence_modules += 1
     
     # Get uptime
@@ -428,8 +428,8 @@ async def get_system_health():
         "mt5_connected": mt5_connected,
         "api_status": "online",
         "bot_running": _auto_bot is not None and getattr(_auto_bot, '_running', False),
-        "data_lake_ready": _auto_bot is not None and _auto_bot.data_provider is not None,
-        "faiss_loaded": len(pattern_matchers) > 0 or (_auto_bot is not None and bool(_auto_bot.pattern_matchers)),
+        "data_lake_ready": _auto_bot is not None and getattr(_auto_bot, 'data_provider', None) is not None,
+        "faiss_loaded": len(pattern_matchers) > 0 or (_auto_bot is not None and bool(getattr(_auto_bot, 'pattern_matchers', None))),
         "intelligence_modules": intelligence_modules,
         "total_modules": 16,
         "last_analysis_time": last_analysis_time,
