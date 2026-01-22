@@ -330,6 +330,17 @@ class AITradingBot:
         self._last_titan_decision: Dict[str, Any] = {}
         self._last_omega_result: Dict[str, Any] = {}
         self._last_alpha_result: Dict[str, Any] = {}
+        
+        # 🔬 Additional Layer Results for Pipeline Dashboard
+        self._last_intel_result: Dict[str, Any] = {}      # Advanced Intelligence
+        self._last_smart_result: Dict[str, Any] = {}      # Smart Brain
+        self._last_neural_result: Dict[str, Any] = {}     # Neural Brain
+        self._last_deep_result: Dict[str, Any] = {}       # Deep Intelligence
+        self._last_quantum_result: Dict[str, Any] = {}    # Quantum Strategy
+        self._last_pro_result: Dict[str, Any] = {}        # Pro Features
+        self._last_sentiment_result: Dict[str, Any] = {}  # Sentiment Analyzer
+        self._last_candle_count: int = 0                  # For data lake status
+        
         self._signal_history: List[Dict] = []  # Keep last 100 signals
         
         # Subscribers for real-time updates (SSE)
@@ -1114,6 +1125,7 @@ class AITradingBot:
             base_confidence=base_confidence,
             ohlcv_data=ohlcv_data,
             current_price=current_price,
+            symbol=symbol,  # Pass symbol for sentiment analysis
             stop_loss=price_projection.get("stop_loss"),
             take_profit=price_projection.get("take_profit"),
             htf_data=htf_data,
@@ -1298,6 +1310,17 @@ class AITradingBot:
                 
                 for reason in intel_decision.reasons:
                     logger.info(f"   ✅ {reason}")
+                
+                # Store for API
+                self._last_intel_result = {
+                    "regime": intel_decision.regime.regime.value if intel_decision.regime else "N/A",
+                    "trend_strength": intel_decision.regime.trend_strength if intel_decision.regime else 0,
+                    "mtf_alignment": "ALIGNED" if intel_decision.can_trade else "CONFLICTING",
+                    "position_size_factor": intel_multiplier,
+                    "can_trade": intel_decision.can_trade,
+                    "confluence_agreeing": intel_decision.confluence.agreeing_factors if intel_decision.confluence else 0,
+                    "confluence_total": intel_decision.confluence.total_factors if intel_decision.confluence else 0,
+                }
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Intelligence analysis failed: {e}")
@@ -1343,6 +1366,16 @@ class AITradingBot:
                 
                 for reason in neural_decision.reasons:
                     logger.info(f"   🧬 {reason}")
+                
+                # Store for API
+                self._last_neural_result = {
+                    "market_state": neural_decision.market_state.value,
+                    "pattern_quality": neural_decision.pattern_quality,
+                    "dna_score": neural_decision.confidence,
+                    "position_multiplier": neural_multiplier,
+                    "can_trade": neural_decision.can_trade,
+                    "anomaly_detected": neural_decision.anomaly_detected,
+                }
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Neural Brain analysis failed: {e}")
@@ -1404,6 +1437,18 @@ class AITradingBot:
                 if quantum_decision.warnings:
                     for warning in quantum_decision.warnings:
                         logger.info(f"   ⚠️ {warning}")
+                
+                # Store for API
+                self._last_quantum_result = {
+                    "quantum_score": quantum_decision.quantum_score,
+                    "confidence": quantum_decision.confidence,
+                    "volatility_regime": quantum_decision.volatility.regime.value if quantum_decision.volatility else "N/A",
+                    "fractal": f"H={quantum_decision.fractal.hurst_exponent:.2f}" if quantum_decision.fractal else "N/A",
+                    "microstructure_signal": quantum_decision.microstructure.smart_money_signal if quantum_decision.microstructure else "N/A",
+                    "position_multiplier": quantum_multiplier,
+                    "should_trade": quantum_decision.should_trade,
+                    "risk_reward": quantum_decision.risk_reward,
+                }
                         
             except Exception as e:
                 logger.warning(f"   ⚠️ Quantum Strategy analysis failed: {e}")
@@ -1478,6 +1523,19 @@ class AITradingBot:
                 if deep_decision.warnings:
                     for warning in deep_decision.warnings:
                         logger.info(f"   ⚠️ {warning}")
+                
+                # Store for API
+                self._last_deep_result = {
+                    "confluence": deep_decision.confluence_level.value,
+                    "confidence": deep_decision.confidence,
+                    "timeframe_score": deep_decision.timeframe_score,
+                    "session_score": deep_decision.session_score,
+                    "correlation": deep_decision.prediction_score,
+                    "session": getattr(deep_decision, 'session', 'N/A'),
+                    "cross_asset_signal": deep_decision.confluence_level.value,
+                    "position_multiplier": deep_multiplier,
+                    "should_trade": deep_decision.should_trade,
+                }
                         
             except Exception as e:
                 logger.warning(f"   ⚠️ Deep Intelligence analysis failed: {e}")

@@ -800,6 +800,19 @@ const api = {
     );
   },
 
+  async getPipelineData(symbol = "EURUSDm") {
+    return tryApiOrMock(
+      () => apiClient.get(`/intelligence/pipeline?symbol=${symbol}`),
+      () => ({
+        status: "mock",
+        symbol,
+        layers: {},
+        current_signal: { signal: "WAIT", quality: null },
+        final_decision: { action: "WAITING", position_multiplier: 1, verdict: "Mock data" },
+      }),
+    );
+  },
+
   async getTitanData(symbol = "EURUSDm") {
     return tryApiOrMock(
       () => apiClient.get(`/intelligence/titan?symbol=${symbol}`),

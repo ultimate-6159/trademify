@@ -2237,6 +2237,252 @@ async def update_bot_settings_endpoint(request: BotSettingsRequest):
 # 16. INTELLIGENCE STATUS ENDPOINTS (16-Layer AI System)
 # =============================================================================
 
+@app.get("/api/v1/intelligence/pipeline")
+async def get_pipeline_data(symbol: str = "EURUSDm"):
+    """
+    Get complete 16-Layer Pipeline data for Dashboard display
+    Returns real-time data from all intelligence modules
+    """
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "message": "Start the bot to see pipeline data",
+            "layers": {},
+            "current_signal": {},
+            "final_decision": {}
+        }
+    
+    # Gather all layer data
+    layers = {}
+    
+    # 1. Data Lake
+    layers["data_lake"] = {
+        "status": "READY" if _auto_bot.data_provider else "NOT_INITIALIZED",
+        "candles": getattr(_auto_bot, '_last_candle_count', 0),
+        "source": _auto_bot.broker_type
+    }
+    
+    # 2. Pattern Matcher (FAISS)
+    last_analysis = getattr(_auto_bot, '_last_analysis', {})
+    layers["pattern_matcher"] = {
+        "matches": last_analysis.get("n_matches", 0),
+        "similarity": last_analysis.get("similarity", 0),
+        "status": "ACTIVE" if _auto_bot.pattern_matchers else "NOT_INITIALIZED"
+    }
+    
+    # 3. Voting System
+    layers["voting"] = {
+        "signal": last_analysis.get("signal", "WAIT"),
+        "bullish": last_analysis.get("vote_details", {}).get("bullish", 0),
+        "bearish": last_analysis.get("vote_details", {}).get("bearish", 0),
+        "confidence": last_analysis.get("confidence", 0)
+    }
+    
+    # 4. Enhanced Analyzer
+    layers["enhanced"] = {
+        "quality": last_analysis.get("quality", None),
+        "score": last_analysis.get("enhanced_confidence", 0),
+        "pattern_score": last_analysis.get("pattern_score", 0),
+        "technical_score": last_analysis.get("technical_score", 0),
+        "volume_score": last_analysis.get("volume_score", 0)
+    }
+    
+    # 5. Advanced Intelligence
+    intel_status = {}
+    if hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence:
+        intel_result = getattr(_auto_bot, '_last_intel_result', {})
+        intel_status = {
+            "regime": intel_result.get("regime", "N/A"),
+            "mtf_alignment": intel_result.get("mtf_alignment", "N/A"),
+            "multiplier": intel_result.get("position_size_factor", 1.0),
+            "trend_strength": intel_result.get("trend_strength", 0)
+        }
+    layers["advanced"] = intel_status
+    
+    # 6. Smart Brain
+    smart_status = {}
+    if hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain:
+        smart_result = getattr(_auto_bot, '_last_smart_result', {})
+        smart_status = {
+            "pattern_count": getattr(_auto_bot.smart_brain, 'pattern_count', 0),
+            "multiplier": smart_result.get("position_multiplier", 1.0),
+            "win_rate": smart_result.get("win_rate", 0),
+            "avg_rr": smart_result.get("avg_rr", 0)
+        }
+    layers["smart"] = smart_status
+    
+    # 7. Neural Brain
+    neural_status = {}
+    if hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain:
+        neural_result = getattr(_auto_bot, '_last_neural_result', {})
+        neural_status = {
+            "market_state": neural_result.get("market_state", "N/A"),
+            "dna_score": neural_result.get("dna_score", 0),
+            "multiplier": neural_result.get("position_multiplier", 1.0),
+            "pattern_quality": neural_result.get("pattern_quality", "N/A")
+        }
+    layers["neural"] = neural_status
+    
+    # 8. Deep Intelligence
+    deep_status = {}
+    if hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence:
+        deep_result = getattr(_auto_bot, '_last_deep_result', {})
+        deep_status = {
+            "correlation": deep_result.get("correlation", 0),
+            "session": deep_result.get("session", "N/A"),
+            "multiplier": deep_result.get("position_multiplier", 1.0),
+            "cross_asset_signal": deep_result.get("cross_asset_signal", "N/A")
+        }
+    layers["deep"] = deep_status
+    
+    # 9. Quantum Strategy
+    quantum_status = {}
+    if hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy:
+        quantum_result = getattr(_auto_bot, '_last_quantum_result', {})
+        quantum_status = {
+            "volatility_regime": quantum_result.get("volatility_regime", "N/A"),
+            "fractal": quantum_result.get("fractal", "N/A"),
+            "multiplier": quantum_result.get("position_multiplier", 1.0),
+            "microstructure_signal": quantum_result.get("microstructure_signal", "N/A")
+        }
+    layers["quantum"] = quantum_status
+    
+    # 10. Alpha Engine
+    alpha_data = getattr(_auto_bot, '_last_alpha_result', {})
+    layers["alpha"] = {
+        "grade": alpha_data.get("grade", "N/A"),
+        "alpha_score": alpha_data.get("alpha_score", 0),
+        "order_flow_bias": alpha_data.get("order_flow_bias", "N/A"),
+        "risk_reward": alpha_data.get("risk_reward", 0),
+        "position_multiplier": alpha_data.get("position_multiplier", 1.0),
+        "should_trade": alpha_data.get("should_trade", False),
+        "edge_factors": alpha_data.get("edge_factors", []),
+        "risk_factors": alpha_data.get("risk_factors", [])
+    }
+    
+    # 11. Omega Brain
+    omega_data = getattr(_auto_bot, '_last_omega_result', {})
+    layers["omega"] = {
+        "grade": omega_data.get("grade", "N/A"),
+        "omega_score": omega_data.get("omega_score", 0),
+        "institutional_flow": omega_data.get("institutional_flow", "N/A"),
+        "smart_money": omega_data.get("smart_money", "N/A"),
+        "manipulation_detected": omega_data.get("manipulation_detected", "NONE"),
+        "sentiment": omega_data.get("sentiment", 0),
+        "current_regime": omega_data.get("current_regime", "N/A"),
+        "predicted_regime": omega_data.get("predicted_regime", "N/A"),
+        "position_multiplier": omega_data.get("position_multiplier", 1.0),
+        "should_trade": omega_data.get("should_trade", False),
+        "edge_factors": omega_data.get("edge_factors", []),
+        "risk_factors": omega_data.get("risk_factors", [])
+    }
+    
+    # 12. Titan Core
+    titan_data = getattr(_auto_bot, '_last_titan_decision', {})
+    layers["titan"] = {
+        "grade": titan_data.get("grade", "N/A"),
+        "titan_score": titan_data.get("titan_score", 0),
+        "consensus": titan_data.get("consensus", "N/A"),
+        "agreement_ratio": titan_data.get("agreement_ratio", 0),
+        "market_condition": titan_data.get("market_condition", "N/A"),
+        "prediction": titan_data.get("prediction", {}),
+        "position_multiplier": titan_data.get("position_multiplier", 1.0),
+        "agreeing_modules": titan_data.get("agreeing_modules", 0),
+        "total_modules": titan_data.get("total_modules", 0),
+        "should_trade": titan_data.get("should_trade", False),
+        "final_verdict": titan_data.get("final_verdict", ""),
+        "edge_factors": titan_data.get("edge_factors", []),
+        "risk_factors": titan_data.get("risk_factors", [])
+    }
+    
+    # 13. Continuous Learning
+    learning_status = {}
+    if hasattr(_auto_bot, 'learning_system') and _auto_bot.learning_system:
+        learning_status = {
+            "market_cycle": getattr(_auto_bot.learning_system, 'current_market_cycle', 'N/A'),
+            "cycles": getattr(_auto_bot.learning_system, 'learning_cycles', 0),
+            "adaptations": getattr(_auto_bot.learning_system, 'adaptations', 0)
+        }
+    layers["learning"] = learning_status
+    
+    # 14. Pro Features
+    pro_status = {}
+    if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
+        pro_result = getattr(_auto_bot, '_last_pro_result', {})
+        pro_status = {
+            "session": pro_result.get("session", "N/A"),
+            "news_impact": pro_result.get("news_impact", "NONE"),
+            "multiplier": pro_result.get("position_multiplier", 1.0)
+        }
+    layers["pro"] = pro_status
+    
+    # 15. Risk Guardian
+    risk_status = {
+        "risk_level": "SAFE",
+        "daily_pnl": 0,
+        "can_trade": True,
+        "open_positions": len(_auto_bot.trading_engine.positions) if _auto_bot.trading_engine else 0,
+        "losing_streak": 0
+    }
+    if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
+        try:
+            daily_stats = _auto_bot.risk_guardian.get_daily_stats()
+            if daily_stats:
+                risk_status = {
+                    "risk_level": daily_stats.risk_level.value if hasattr(daily_stats, 'risk_level') else "SAFE",
+                    "daily_pnl": daily_stats.total_pnl_percent if hasattr(daily_stats, 'total_pnl_percent') else 0,
+                    "can_trade": daily_stats.can_trade if hasattr(daily_stats, 'can_trade') else True,
+                    "open_positions": daily_stats.open_positions if hasattr(daily_stats, 'open_positions') else 0,
+                    "losing_streak": daily_stats.losing_streak if hasattr(daily_stats, 'losing_streak') else 0,
+                    "max_losing_streak": _auto_bot.risk_guardian.max_losing_streak if hasattr(_auto_bot.risk_guardian, 'max_losing_streak') else 5,
+                    "max_daily_loss": _auto_bot.risk_guardian.max_daily_loss_percent if hasattr(_auto_bot.risk_guardian, 'max_daily_loss_percent') else 5.0
+                }
+        except Exception:
+            pass
+    layers["risk"] = risk_status
+    
+    # 16. Sentiment (Contrarian)
+    sentiment_status = {}
+    if hasattr(_auto_bot, 'sentiment_analyzer'):
+        sentiment_result = getattr(_auto_bot, '_last_sentiment_result', {})
+        sentiment_status = {
+            "level": sentiment_result.get("level", "N/A"),
+            "retail_sentiment": sentiment_result.get("retail_sentiment", 0),
+            "override": "YES" if sentiment_result.get("override_signal", False) else "NO"
+        }
+    layers["sentiment"] = sentiment_status
+    
+    # Current Signal
+    current_signal = {
+        "signal": last_analysis.get("signal", "WAIT"),
+        "symbol": last_analysis.get("symbol", symbol),
+        "quality": last_analysis.get("quality", None),
+        "confidence": last_analysis.get("confidence", 0),
+        "entry": last_analysis.get("current_price", 0),
+        "stop_loss": last_analysis.get("stop_loss", 0),
+        "take_profit": last_analysis.get("take_profit", 0)
+    }
+    
+    # Final Decision
+    final_decision = {
+        "action": titan_data.get("should_trade", False) and last_analysis.get("signal", "WAIT") != "WAIT",
+        "signal": last_analysis.get("signal", "WAIT") if titan_data.get("should_trade", False) else "BLOCKED",
+        "position_multiplier": titan_data.get("position_multiplier", 1.0),
+        "verdict": titan_data.get("final_verdict", "Waiting for analysis...")
+    }
+    
+    return convert_numpy_types({
+        "status": "active",
+        "symbol": symbol,
+        "layers": layers,
+        "current_signal": current_signal,
+        "final_decision": final_decision,
+        "timestamp": datetime.now().isoformat()
+    })
+
+
 @app.get("/api/v1/intelligence/status")
 async def get_intelligence_status():
     """

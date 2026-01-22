@@ -10,6 +10,11 @@ const router = createRouter({
       component: Dashboard,
     },
     {
+      path: "/pipeline",
+      name: "pipeline",
+      component: () => import("../views/PipelineDashboard.vue"),
+    },
+    {
       path: "/analysis/:symbol?",
       name: "analysis",
       component: () => import("../views/Analysis.vue"),

@@ -20,6 +20,13 @@
               Dashboard
             </router-link>
             <router-link
+              to="/pipeline"
+              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+              :class="{ 'text-white': $route.path === '/pipeline' }"
+            >
+              <span>🔬</span> Pipeline
+            </router-link>
+            <router-link
               to="/intelligence"
               class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
               :class="{ 'text-white': $route.path === '/intelligence' }"
@@ -32,13 +39,6 @@
               :class="{ 'text-white': $route.path === '/enhanced' }"
             >
               <span>🤖</span> AI Bot
-            </router-link>
-            <router-link
-              to="/analysis"
-              class="text-gray-400 hover:text-white transition-colors"
-              :class="{ 'text-white': $route.path.startsWith('/analysis') }"
-            >
-              Analysis
             </router-link>
             <router-link
               to="/trading"
