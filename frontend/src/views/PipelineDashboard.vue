@@ -1297,54 +1297,54 @@ const intelligenceModules = computed(() => [
   {
     name: "Advanced Intelligence",
     icon: "🧠",
-    active: layers.value.advanced?.regime !== null,
+    active: layers.value.advanced?.regime !== undefined || layers.value.advanced?.mtf_alignment !== undefined,
   },
   {
     name: "Smart Brain",
     icon: "💡",
-    active: layers.value.smart?.pattern_count > 0,
+    active: layers.value.smart !== undefined && Object.keys(layers.value.smart).length > 0,
   },
   {
     name: "Neural Brain",
     icon: "🧬",
-    active: layers.value.neural?.market_state !== null,
+    active: layers.value.neural?.market_state !== undefined || layers.value.neural?.dna_score !== undefined,
   },
   {
     name: "Deep Intelligence",
     icon: "🌊",
-    active: layers.value.deep?.session !== null,
+    active: layers.value.deep?.session !== undefined || layers.value.deep?.correlation !== undefined,
   },
   {
     name: "Quantum Strategy",
     icon: "⚛️",
-    active: layers.value.quantum?.volatility_regime !== null,
+    active: layers.value.quantum?.volatility_regime !== undefined,
   },
   {
     name: "Alpha Engine",
     icon: "🚀",
-    active: alphaData.value?.grade !== "N/A",
+    active: alphaData.value?.grade && alphaData.value?.grade !== "N/A",
   },
-  { name: "Omega Brain", icon: "🌟", active: omegaData.value?.grade !== "N/A" },
-  { name: "Titan Core", icon: "⚔️", active: titanData.value?.grade !== "N/A" },
+  { name: "Omega Brain", icon: "🌟", active: omegaData.value?.grade && omegaData.value?.grade !== "N/A" },
+  { name: "Titan Core", icon: "⚔️", active: titanData.value?.grade && titanData.value?.grade !== "N/A" },
   {
     name: "Continuous Learning",
     icon: "📚",
-    active: layers.value.learning?.cycles > 0,
+    active: layers.value.learning !== undefined && Object.keys(layers.value.learning).length > 0,
   },
   {
     name: "Pro Features",
     icon: "🏆",
-    active: layers.value.pro?.session !== null,
+    active: layers.value.pro?.session !== undefined || layers.value.pro?.multiplier !== undefined,
   },
   {
     name: "Risk Guardian",
     icon: "🛡️",
-    active: riskData.value.can_trade !== undefined,
+    active: riskData.value?.can_trade !== undefined,
   },
   {
     name: "Sentiment Analyzer",
     icon: "📰",
-    active: layers.value.sentiment?.level !== null,
+    active: layers.value.sentiment?.level !== undefined,
   },
 ]);
 
