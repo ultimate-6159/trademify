@@ -2393,16 +2393,16 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     
     # Get symbol-specific analysis (fallback to latest)
     last_analysis_by_symbol = getattr(_auto_bot, '_last_analysis_by_symbol', {})
-    last_analysis = last_analysis_by_symbol.get(symbol, getattr(_auto_bot, '_last_analysis', {}))
+    last_analysis = last_analysis_by_symbol.get(symbol, getattr(_auto_bot, '_last_analysis', {})) or {}
     
     # Get symbol-specific layer results
     titan_by_symbol = getattr(_auto_bot, '_last_titan_decision_by_symbol', {})
     omega_by_symbol = getattr(_auto_bot, '_last_omega_result_by_symbol', {})
     alpha_by_symbol = getattr(_auto_bot, '_last_alpha_result_by_symbol', {})
     
-    titan_data = titan_by_symbol.get(symbol, getattr(_auto_bot, '_last_titan_decision', {}))
-    omega_data = omega_by_symbol.get(symbol, getattr(_auto_bot, '_last_omega_result', {}))
-    alpha_data = alpha_by_symbol.get(symbol, getattr(_auto_bot, '_last_alpha_result', {}))
+    titan_data = titan_by_symbol.get(symbol, getattr(_auto_bot, '_last_titan_decision', {})) or {}
+    omega_data = omega_by_symbol.get(symbol, getattr(_auto_bot, '_last_omega_result', {})) or {}
+    alpha_data = alpha_by_symbol.get(symbol, getattr(_auto_bot, '_last_alpha_result', {})) or {}
     
     # 1. Data Lake
     layers["data_lake"] = {
