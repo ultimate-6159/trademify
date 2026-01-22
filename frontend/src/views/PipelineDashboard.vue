@@ -1739,9 +1739,8 @@ const checkSystemHealth = async () => {
       faiss_loaded:
         healthRes.faiss_loaded ??
         layers.value.pattern_matcher?.status === "ACTIVE",
-      intelligence_modules:
-        healthRes.intelligence_modules ??
-        intelligenceModules.value.filter((m) => m.active).length,
+      // Always use frontend count to match the displayed list
+      intelligence_modules: intelligenceModules.value.filter((m) => m.active).length,
       total_modules: 16,
       last_analysis_time: healthRes.last_analysis_time ?? lastUpdateTime.value,
       memory_usage: healthRes.memory_usage ?? 0,
