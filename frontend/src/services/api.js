@@ -808,7 +808,11 @@ const api = {
         symbol,
         layers: {},
         current_signal: { signal: "WAIT", quality: null },
-        final_decision: { action: "WAITING", position_multiplier: 1, verdict: "Mock data" },
+        final_decision: {
+          action: "WAITING",
+          position_multiplier: 1,
+          verdict: "Mock data",
+        },
       }),
     );
   },

@@ -51,27 +51,53 @@ BOT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'bot_s
 
 def convert_numpy_types(obj):
     """Convert numpy types to Python native types for JSON serialization"""
-    if isinstance(obj, dict):
-        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    from enum import Enum
+    from datetime import datetime, date
+    
+    if obj is None:
+        return None
+    elif isinstance(obj, dict):
+        return {str(k): convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [convert_numpy_types(v) for v in obj]
     elif isinstance(obj, tuple):
-        return tuple(convert_numpy_types(v) for v in obj)
-    elif isinstance(obj, np.bool_):
+        return list(convert_numpy_types(v) for v in obj)
+    elif isinstance(obj, (np.bool_, bool)):
         return bool(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.integer):
+    elif isinstance(obj, (np.floating, float)):
+        val = float(obj)
+        # Handle NaN and Inf
+        if np.isnan(val) or np.isinf(val):
+            return 0.0
+        return val
+    elif isinstance(obj, (np.integer, int)):
         return int(obj)
     elif isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return convert_numpy_types(obj.tolist())
+    elif isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, str):
+        return obj
+    elif hasattr(obj, 'to_dict'):
+        # Handle dataclasses with to_dict method
+        try:
+            return convert_numpy_types(obj.to_dict())
+        except Exception:
+            return str(obj)
     elif hasattr(obj, '__dict__'):
         # Handle dataclasses and custom objects
         try:
             return convert_numpy_types(vars(obj))
         except TypeError:
             return str(obj)
-    return obj
+    else:
+        # Fallback to string representation
+        try:
+            return str(obj)
+        except Exception:
+            return "N/A"
 
 def load_bot_settings():
     """Load saved bot settings"""
@@ -2039,12 +2065,28 @@ async def get_bot_status():
 
 
 @app.get("/api/v1/bot/signals")
-async def get_bot_signals():
+async def get_bot_signals(limit: int = 20):
     """📈 Get latest signals from bot"""
     if not _auto_bot:
-        return {"signals": {}}
+        return {"signals": [], "count": 0}
     
-    return {"signals": _auto_bot._last_signals}
+    try:
+        signals = getattr(_auto_bot, '_last_signals', {})
+        # Convert to list and apply numpy conversion
+        signals_list = []
+        for symbol, signal_data in signals.items():
+            if signal_data:
+                safe_signal = convert_numpy_types(signal_data)
+                safe_signal['symbol'] = str(symbol)
+                signals_list.append(safe_signal)
+        
+        return convert_numpy_types({
+            "signals": signals_list[:limit],
+            "count": len(signals_list)
+        })
+    except Exception as e:
+        logger.error(f"Error getting bot signals: {e}")
+        return {"signals": [], "count": 0, "error": str(e)}
 
 
 @app.get("/api/v1/bot/diagnostic")

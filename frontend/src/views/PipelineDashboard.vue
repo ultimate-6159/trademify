@@ -7,7 +7,9 @@
           <span class="text-4xl">🔬</span>
           AI Pipeline Dashboard
         </h1>
-        <p class="text-gray-400 mt-1">Real-time 16-Layer Analysis → Signal → Execution</p>
+        <p class="text-gray-400 mt-1">
+          Real-time 16-Layer Analysis → Signal → Execution
+        </p>
       </div>
 
       <div class="flex items-center gap-4">
@@ -27,8 +29,11 @@
             class="w-3 h-3 rounded-full"
             :class="isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'"
           ></span>
-          <span class="text-sm" :class="isConnected ? 'text-green-400' : 'text-red-400'">
-            {{ isConnected ? 'Connected' : 'Disconnected' }}
+          <span
+            class="text-sm"
+            :class="isConnected ? 'text-green-400' : 'text-red-400'"
+          >
+            {{ isConnected ? "Connected" : "Disconnected" }}
           </span>
         </div>
 
@@ -53,15 +58,19 @@
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">🤖</span> AI Bot Control
           </h2>
-          
+
           <!-- Bot Status -->
           <div class="flex items-center justify-between mb-4">
             <span class="text-gray-400">Status:</span>
             <span
               class="px-3 py-1 rounded-full text-sm font-bold"
-              :class="botStatus.running ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-gray-600/20 text-gray-400 border border-gray-500/50'"
+              :class="
+                botStatus.running
+                  ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                  : 'bg-gray-600/20 text-gray-400 border border-gray-500/50'
+              "
             >
-              {{ botStatus.running ? '🟢 RUNNING' : '⭕ STOPPED' }}
+              {{ botStatus.running ? "🟢 RUNNING" : "⭕ STOPPED" }}
             </span>
           </div>
 
@@ -70,30 +79,46 @@
             @click="toggleBot"
             :disabled="isBotLoading"
             class="w-full py-3 rounded-lg font-bold text-lg transition-all"
-            :class="botStatus.running 
-              ? 'bg-red-600 hover:bg-red-700 text-white' 
-              : 'bg-green-600 hover:bg-green-700 text-white'"
+            :class="
+              botStatus.running
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                : 'bg-green-600 hover:bg-green-700 text-white'
+            "
           >
-            {{ isBotLoading ? '⏳ Processing...' : (botStatus.running ? '🛑 Stop Bot' : '🚀 Start Bot') }}
+            {{
+              isBotLoading
+                ? "⏳ Processing..."
+                : botStatus.running
+                  ? "🛑 Stop Bot"
+                  : "🚀 Start Bot"
+            }}
           </button>
 
           <!-- Bot Config -->
           <div class="mt-4 space-y-2 text-sm">
             <div class="flex justify-between">
               <span class="text-gray-400">Symbols:</span>
-              <span class="text-white">{{ botStatus.config?.symbols?.join(', ') || 'N/A' }}</span>
+              <span class="text-white">{{
+                botStatus.config?.symbols?.join(", ") || "N/A"
+              }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Timeframe:</span>
-              <span class="text-white">{{ botStatus.config?.timeframe || 'H1' }}</span>
+              <span class="text-white">{{
+                botStatus.config?.timeframe || "H1"
+              }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Mode:</span>
-              <span class="text-yellow-400">{{ botStatus.config?.quality || 'HIGH' }}</span>
+              <span class="text-yellow-400">{{
+                botStatus.config?.quality || "HIGH"
+              }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Interval:</span>
-              <span class="text-white">{{ botStatus.config?.interval || 60 }}s</span>
+              <span class="text-white"
+                >{{ botStatus.config?.interval || 60 }}s</span
+              >
             </div>
           </div>
         </div>
@@ -103,37 +128,49 @@
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">📡</span> Current Signal
           </h2>
-          
-          <div 
+
+          <div
             class="text-center p-4 rounded-lg mb-4"
             :class="getSignalBgClass(currentSignal.signal)"
           >
-            <div class="text-4xl font-bold mb-1">{{ currentSignal.signal || 'WAIT' }}</div>
-            <div class="text-sm text-gray-300">{{ currentSignal.symbol || selectedSymbol }}</div>
+            <div class="text-4xl font-bold mb-1">
+              {{ currentSignal.signal || "WAIT" }}
+            </div>
+            <div class="text-sm text-gray-300">
+              {{ currentSignal.symbol || selectedSymbol }}
+            </div>
           </div>
 
           <div class="space-y-2 text-sm">
             <div class="flex justify-between">
               <span class="text-gray-400">Quality:</span>
               <span :class="getQualityClass(currentSignal.quality)">
-                {{ currentSignal.quality || 'N/A' }}
+                {{ currentSignal.quality || "N/A" }}
               </span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Confidence:</span>
-              <span class="text-white">{{ currentSignal.confidence?.toFixed(1) || 0 }}%</span>
+              <span class="text-white"
+                >{{ currentSignal.confidence?.toFixed(1) || 0 }}%</span
+              >
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Entry:</span>
-              <span class="text-white font-mono">{{ formatPrice(currentSignal.entry) }}</span>
+              <span class="text-white font-mono">{{
+                formatPrice(currentSignal.entry)
+              }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Stop Loss:</span>
-              <span class="text-red-400 font-mono">{{ formatPrice(currentSignal.stop_loss) }}</span>
+              <span class="text-red-400 font-mono">{{
+                formatPrice(currentSignal.stop_loss)
+              }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Take Profit:</span>
-              <span class="text-green-400 font-mono">{{ formatPrice(currentSignal.take_profit) }}</span>
+              <span class="text-green-400 font-mono">{{
+                formatPrice(currentSignal.take_profit)
+              }}</span>
             </div>
           </div>
         </div>
@@ -143,30 +180,47 @@
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">💰</span> Account
           </h2>
-          
+
           <div class="space-y-2 text-sm">
             <div class="flex justify-between">
               <span class="text-gray-400">Balance:</span>
-              <span class="text-white font-bold">${{ formatNumber(riskData.balance) }}</span>
+              <span class="text-white font-bold"
+                >${{ formatNumber(riskData.balance) }}</span
+              >
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Equity:</span>
-              <span class="text-white">${{ formatNumber(riskData.equity) }}</span>
+              <span class="text-white"
+                >${{ formatNumber(riskData.equity) }}</span
+              >
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Daily P&L:</span>
-              <span :class="riskData.daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'">
-                {{ riskData.daily_pnl >= 0 ? '+' : '' }}{{ riskData.daily_pnl?.toFixed(2) || 0 }}%
+              <span
+                :class="
+                  riskData.daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'
+                "
+              >
+                {{ riskData.daily_pnl >= 0 ? "+" : ""
+                }}{{ riskData.daily_pnl?.toFixed(2) || 0 }}%
               </span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Open Positions:</span>
-              <span class="text-white">{{ riskData.open_positions || 0 }} / {{ riskData.max_positions || 3 }}</span>
+              <span class="text-white"
+                >{{ riskData.open_positions || 0 }} /
+                {{ riskData.max_positions || 3 }}</span
+              >
             </div>
             <div class="flex justify-between">
               <span class="text-gray-400">Losing Streak:</span>
-              <span :class="riskData.losing_streak > 2 ? 'text-red-400' : 'text-white'">
-                {{ riskData.losing_streak || 0 }} / {{ riskData.max_losing_streak || 5 }}
+              <span
+                :class="
+                  riskData.losing_streak > 2 ? 'text-red-400' : 'text-white'
+                "
+              >
+                {{ riskData.losing_streak || 0 }} /
+                {{ riskData.max_losing_streak || 5 }}
               </span>
             </div>
           </div>
@@ -192,7 +246,7 @@
                 <div class="flex justify-between items-center">
                   <span class="font-medium">1. Data Lake</span>
                   <span :class="getLayerStatusClass(layers.data_lake)">
-                    {{ layers.data_lake?.status || 'READY' }}
+                    {{ layers.data_lake?.status || "READY" }}
                   </span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
@@ -212,7 +266,10 @@
                   </span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Similarity: {{ (layers.pattern_matcher?.similarity * 100)?.toFixed(1) || 0 }}%
+                  Similarity:
+                  {{
+                    (layers.pattern_matcher?.similarity * 100)?.toFixed(1) || 0
+                  }}%
                 </div>
               </div>
             </div>
@@ -224,11 +281,12 @@
                 <div class="flex justify-between items-center">
                   <span class="font-medium">3. Voting System</span>
                   <span :class="getSignalClass(layers.voting?.signal)">
-                    {{ layers.voting?.signal || 'WAIT' }}
+                    {{ layers.voting?.signal || "WAIT" }}
                   </span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Bullish: {{ layers.voting?.bullish || 0 }} | Bearish: {{ layers.voting?.bearish || 0 }}
+                  Bullish: {{ layers.voting?.bullish || 0 }} | Bearish:
+                  {{ layers.voting?.bearish || 0 }}
                 </div>
               </div>
             </div>
@@ -240,7 +298,7 @@
                 <div class="flex justify-between items-center">
                   <span class="font-medium">4. Enhanced Analyzer</span>
                   <span :class="getQualityClass(layers.enhanced?.quality)">
-                    {{ layers.enhanced?.quality || 'N/A' }}
+                    {{ layers.enhanced?.quality || "N/A" }}
                   </span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
@@ -251,18 +309,26 @@
 
             <!-- Divider -->
             <div class="border-t border-gray-600 my-2"></div>
-            <div class="text-xs text-center text-gray-500 -my-1">⬇️ Deep Intelligence Modules ⬇️</div>
+            <div class="text-xs text-center text-gray-500 -my-1">
+              ⬇️ Deep Intelligence Modules ⬇️
+            </div>
 
             <!-- Advanced Intelligence -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🧠</div>
-              <div class="flex-1 bg-blue-900/30 rounded p-2 border border-blue-500/30">
+              <div
+                class="flex-1 bg-blue-900/30 rounded p-2 border border-blue-500/30"
+              >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">5. Advanced Intelligence</span>
-                  <span class="text-blue-400">{{ layers.advanced?.regime || 'N/A' }}</span>
+                  <span class="text-blue-400">{{
+                    layers.advanced?.regime || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  MTF: {{ layers.advanced?.mtf_alignment || 'N/A' }} | Multiplier: {{ layers.advanced?.multiplier?.toFixed(2) || 1 }}x
+                  MTF: {{ layers.advanced?.mtf_alignment || "N/A" }} |
+                  Multiplier:
+                  {{ layers.advanced?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -270,13 +336,18 @@
             <!-- Smart Brain -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">💡</div>
-              <div class="flex-1 bg-blue-900/30 rounded p-2 border border-blue-500/30">
+              <div
+                class="flex-1 bg-blue-900/30 rounded p-2 border border-blue-500/30"
+              >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">6. Smart Brain</span>
-                  <span class="text-blue-400">{{ layers.smart?.pattern_count || 0 }} patterns</span>
+                  <span class="text-blue-400"
+                    >{{ layers.smart?.pattern_count || 0 }} patterns</span
+                  >
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Adaptive Risk: {{ layers.smart?.multiplier?.toFixed(2) || 1 }}x
+                  Adaptive Risk:
+                  {{ layers.smart?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -284,13 +355,18 @@
             <!-- Neural Brain -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🧬</div>
-              <div class="flex-1 bg-purple-900/30 rounded p-2 border border-purple-500/30">
+              <div
+                class="flex-1 bg-purple-900/30 rounded p-2 border border-purple-500/30"
+              >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">7. Neural Brain (Pattern DNA)</span>
-                  <span class="text-purple-400">{{ layers.neural?.market_state || 'N/A' }}</span>
+                  <span class="text-purple-400">{{
+                    layers.neural?.market_state || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  DNA Score: {{ layers.neural?.dna_score?.toFixed(1) || 0 }}% | Multiplier: {{ layers.neural?.multiplier?.toFixed(2) || 1 }}x
+                  DNA Score: {{ layers.neural?.dna_score?.toFixed(1) || 0 }}% |
+                  Multiplier: {{ layers.neural?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -298,13 +374,21 @@
             <!-- Deep Intelligence -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🔮</div>
-              <div class="flex-1 bg-purple-900/30 rounded p-2 border border-purple-500/30">
+              <div
+                class="flex-1 bg-purple-900/30 rounded p-2 border border-purple-500/30"
+              >
                 <div class="flex justify-between items-center">
-                  <span class="font-medium">8. Deep Intelligence (Cross-Asset)</span>
-                  <span class="text-purple-400">{{ (layers.deep?.correlation * 100)?.toFixed(0) || 0 }}% corr</span>
+                  <span class="font-medium"
+                    >8. Deep Intelligence (Cross-Asset)</span
+                  >
+                  <span class="text-purple-400"
+                    >{{ (layers.deep?.correlation * 100)?.toFixed(0) || 0 }}%
+                    corr</span
+                  >
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Session: {{ layers.deep?.session || 'N/A' }} | Multiplier: {{ layers.deep?.multiplier?.toFixed(2) || 1 }}x
+                  Session: {{ layers.deep?.session || "N/A" }} | Multiplier:
+                  {{ layers.deep?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -312,34 +396,49 @@
             <!-- Quantum Strategy -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">⚛️</div>
-              <div class="flex-1 bg-cyan-900/30 rounded p-2 border border-cyan-500/30">
+              <div
+                class="flex-1 bg-cyan-900/30 rounded p-2 border border-cyan-500/30"
+              >
                 <div class="flex justify-between items-center">
-                  <span class="font-medium">9. Quantum Strategy (Microstructure)</span>
-                  <span class="text-cyan-400">{{ layers.quantum?.volatility_regime || 'N/A' }}</span>
+                  <span class="font-medium"
+                    >9. Quantum Strategy (Microstructure)</span
+                  >
+                  <span class="text-cyan-400">{{
+                    layers.quantum?.volatility_regime || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Fractal: {{ layers.quantum?.fractal || 'N/A' }} | Multiplier: {{ layers.quantum?.multiplier?.toFixed(2) || 1 }}x
+                  Fractal: {{ layers.quantum?.fractal || "N/A" }} | Multiplier:
+                  {{ layers.quantum?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
 
             <!-- Divider -->
             <div class="border-t border-gray-600 my-2"></div>
-            <div class="text-xs text-center text-gray-500 -my-1">⬇️ Professional Grade Modules ⬇️</div>
+            <div class="text-xs text-center text-gray-500 -my-1">
+              ⬇️ Professional Grade Modules ⬇️
+            </div>
 
             <!-- Alpha Engine -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🔶</div>
-              <div class="flex-1 bg-orange-900/30 rounded p-2 border border-orange-500/30">
+              <div
+                class="flex-1 bg-orange-900/30 rounded p-2 border border-orange-500/30"
+              >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">10. Alpha Engine</span>
-                  <span class="text-orange-400 font-bold">{{ alphaData.grade || 'N/A' }}</span>
+                  <span class="text-orange-400 font-bold">{{
+                    alphaData.grade || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Score: {{ alphaData.alpha_score?.toFixed(1) || 0 }}% | Flow: {{ alphaData.order_flow_bias || 'N/A' }}
+                  Score: {{ alphaData.alpha_score?.toFixed(1) || 0 }}% | Flow:
+                  {{ alphaData.order_flow_bias || "N/A" }}
                 </div>
                 <div class="text-xs text-gray-400">
-                  R:R {{ alphaData.risk_reward?.toFixed(1) || 0 }} | Multiplier: {{ alphaData.position_multiplier?.toFixed(2) || 1 }}x
+                  R:R {{ alphaData.risk_reward?.toFixed(1) || 0 }} | Multiplier:
+                  {{ alphaData.position_multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -347,47 +446,73 @@
             <!-- Omega Brain -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">⚡</div>
-              <div class="flex-1 bg-indigo-900/30 rounded p-2 border border-indigo-500/30">
+              <div
+                class="flex-1 bg-indigo-900/30 rounded p-2 border border-indigo-500/30"
+              >
                 <div class="flex justify-between items-center">
-                  <span class="font-medium">11. Omega Brain (Institutional)</span>
-                  <span class="text-indigo-400 font-bold">{{ omegaData.grade || 'N/A' }}</span>
+                  <span class="font-medium"
+                    >11. Omega Brain (Institutional)</span
+                  >
+                  <span class="text-indigo-400 font-bold">{{
+                    omegaData.grade || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Score: {{ omegaData.omega_score?.toFixed(1) || 0 }}% | Flow: {{ omegaData.institutional_flow || 'N/A' }}
+                  Score: {{ omegaData.omega_score?.toFixed(1) || 0 }}% | Flow:
+                  {{ omegaData.institutional_flow || "N/A" }}
                 </div>
                 <div class="text-xs text-gray-400">
-                  Smart Money: {{ omegaData.smart_money || 'N/A' }} | Manipulation: {{ omegaData.manipulation_detected || 'NONE' }}
+                  Smart Money: {{ omegaData.smart_money || "N/A" }} |
+                  Manipulation: {{ omegaData.manipulation_detected || "NONE" }}
                 </div>
               </div>
             </div>
 
             <!-- Divider -->
             <div class="border-t border-gray-600 my-2"></div>
-            <div class="text-xs text-center text-gray-500 -my-1">⬇️ Meta-Intelligence Synthesis ⬇️</div>
+            <div class="text-xs text-center text-gray-500 -my-1">
+              ⬇️ Meta-Intelligence Synthesis ⬇️
+            </div>
 
             <!-- Titan Core -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🏛️</div>
-              <div class="flex-1 bg-gradient-to-r from-purple-900/50 to-yellow-900/50 rounded p-2 border border-yellow-500/50">
+              <div
+                class="flex-1 bg-gradient-to-r from-purple-900/50 to-yellow-900/50 rounded p-2 border border-yellow-500/50"
+              >
                 <div class="flex justify-between items-center">
-                  <span class="font-medium">12. TITAN CORE (Meta-Intelligence)</span>
-                  <span class="text-yellow-400 font-bold text-lg">{{ titanData.grade || 'N/A' }}</span>
+                  <span class="font-medium"
+                    >12. TITAN CORE (Meta-Intelligence)</span
+                  >
+                  <span class="text-yellow-400 font-bold text-lg">{{
+                    titanData.grade || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Score: {{ titanData.titan_score?.toFixed(1) || 0 }}% | Consensus: {{ titanData.consensus || 'N/A' }}
+                  Score: {{ titanData.titan_score?.toFixed(1) || 0 }}% |
+                  Consensus: {{ titanData.consensus || "N/A" }}
                 </div>
                 <div class="text-xs text-gray-400">
-                  Prediction: {{ titanData.prediction?.direction || 'WAIT' }} ({{ titanData.prediction?.predicted_move?.toFixed(2) || 0 }}%)
+                  Prediction:
+                  {{ titanData.prediction?.direction || "WAIT" }} ({{
+                    titanData.prediction?.predicted_move?.toFixed(2) || 0
+                  }}%)
                 </div>
                 <div class="text-xs text-gray-400">
-                  Modules: {{ titanData.agreeing_modules || 0 }}/{{ titanData.total_modules || 0 }} agree | Multiplier: {{ titanData.position_multiplier?.toFixed(2) || 1 }}x
+                  Modules: {{ titanData.agreeing_modules || 0 }}/{{
+                    titanData.total_modules || 0
+                  }}
+                  agree | Multiplier:
+                  {{ titanData.position_multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
 
             <!-- Divider -->
             <div class="border-t border-gray-600 my-2"></div>
-            <div class="text-xs text-center text-gray-500 -my-1">⬇️ Risk & Protection Layer ⬇️</div>
+            <div class="text-xs text-center text-gray-500 -my-1">
+              ⬇️ Risk & Protection Layer ⬇️
+            </div>
 
             <!-- Continuous Learning -->
             <div class="flex items-center gap-2">
@@ -395,10 +520,13 @@
               <div class="flex-1 bg-gray-700/50 rounded p-2">
                 <div class="flex justify-between items-center">
                   <span class="font-medium">13. Continuous Learning</span>
-                  <span class="text-gray-400">{{ layers.learning?.market_cycle || 'N/A' }}</span>
+                  <span class="text-gray-400">{{
+                    layers.learning?.market_cycle || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Cycles: {{ layers.learning?.cycles || 0 }} | Adaptations: {{ layers.learning?.adaptations || 0 }}
+                  Cycles: {{ layers.learning?.cycles || 0 }} | Adaptations:
+                  {{ layers.learning?.adaptations || 0 }}
                 </div>
               </div>
             </div>
@@ -409,10 +537,13 @@
               <div class="flex-1 bg-gray-700/50 rounded p-2">
                 <div class="flex justify-between items-center">
                   <span class="font-medium">14. Pro Features (Sessions)</span>
-                  <span class="text-gray-400">{{ layers.pro?.session || 'N/A' }}</span>
+                  <span class="text-gray-400">{{
+                    layers.pro?.session || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  News Impact: {{ layers.pro?.news_impact || 'NONE' }} | Multiplier: {{ layers.pro?.multiplier?.toFixed(2) || 1 }}x
+                  News Impact: {{ layers.pro?.news_impact || "NONE" }} |
+                  Multiplier: {{ layers.pro?.multiplier?.toFixed(2) || 1 }}x
                 </div>
               </div>
             </div>
@@ -420,22 +551,24 @@
             <!-- Risk Guardian -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">🛡️</div>
-              <div 
+              <div
                 class="flex-1 rounded p-2 border"
                 :class="getRiskBgClass(riskData.risk_level)"
               >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">15. Risk Guardian</span>
-                  <span 
+                  <span
                     class="font-bold"
                     :class="getRiskTextClass(riskData.risk_level)"
                   >
-                    {{ riskData.risk_level || 'SAFE' }}
+                    {{ riskData.risk_level || "SAFE" }}
                   </span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Can Trade: {{ riskData.can_trade ? '✅ YES' : '❌ NO' }} | 
-                  Daily: {{ riskData.daily_pnl?.toFixed(2) || 0 }}% / -{{ riskData.max_daily_loss || 5 }}%
+                  Can Trade: {{ riskData.can_trade ? "✅ YES" : "❌ NO" }} |
+                  Daily: {{ riskData.daily_pnl?.toFixed(2) || 0 }}% / -{{
+                    riskData.max_daily_loss || 5
+                  }}%
                 </div>
               </div>
             </div>
@@ -443,37 +576,47 @@
             <!-- Sentiment Analyzer (Contrarian) -->
             <div class="flex items-center gap-2">
               <div class="w-8 text-center text-lg">😈</div>
-              <div class="flex-1 bg-pink-900/30 rounded p-2 border border-pink-500/30">
+              <div
+                class="flex-1 bg-pink-900/30 rounded p-2 border border-pink-500/30"
+              >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">16. Contrarian (Anti-Retail)</span>
-                  <span class="text-pink-400">{{ layers.sentiment?.level || 'N/A' }}</span>
+                  <span class="text-pink-400">{{
+                    layers.sentiment?.level || "N/A"
+                  }}</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">
-                  Retail Sentiment: {{ layers.sentiment?.retail_sentiment || 0 }}% | 
-                  Override: {{ layers.sentiment?.override || 'NO' }}
+                  Retail Sentiment:
+                  {{ layers.sentiment?.retail_sentiment || 0 }}% | Override:
+                  {{ layers.sentiment?.override || "NO" }}
                 </div>
               </div>
             </div>
 
             <!-- Final Decision -->
-            <div class="mt-4 p-4 rounded-lg bg-gradient-to-r from-gray-700 to-gray-800 border-2"
-                 :class="getFinalDecisionBorderClass(finalDecision.action)">
+            <div
+              class="mt-4 p-4 rounded-lg bg-gradient-to-r from-gray-700 to-gray-800 border-2"
+              :class="getFinalDecisionBorderClass(finalDecision.action)"
+            >
               <div class="flex items-center justify-between">
                 <div>
                   <div class="text-sm text-gray-400">FINAL DECISION</div>
-                  <div class="text-2xl font-bold" :class="getFinalDecisionClass(finalDecision.action)">
-                    {{ finalDecision.action || 'WAITING' }}
+                  <div
+                    class="text-2xl font-bold"
+                    :class="getFinalDecisionClass(finalDecision.action)"
+                  >
+                    {{ finalDecision.action || "WAITING" }}
                   </div>
                 </div>
                 <div class="text-right">
                   <div class="text-sm text-gray-400">Position Size</div>
                   <div class="text-xl font-bold text-white">
-                    {{ finalDecision.position_multiplier?.toFixed(2) || 1.00 }}x
+                    {{ finalDecision.position_multiplier?.toFixed(2) || 1.0 }}x
                   </div>
                 </div>
               </div>
               <div class="mt-2 text-xs text-gray-400">
-                {{ finalDecision.verdict || 'Waiting for analysis...' }}
+                {{ finalDecision.verdict || "Waiting for analysis..." }}
               </div>
             </div>
           </div>
@@ -490,33 +633,42 @@
               {{ positions.length }}
             </span>
           </h2>
-          
-          <div v-if="positions.length === 0" class="text-center text-gray-400 py-8">
+
+          <div
+            v-if="positions.length === 0"
+            class="text-center text-gray-400 py-8"
+          >
             No open positions
           </div>
-          
+
           <div v-else class="space-y-2 max-h-60 overflow-y-auto">
             <div
               v-for="pos in positions"
               :key="pos.id"
               class="p-3 rounded bg-gray-700/50 border"
-              :class="pos.pnl >= 0 ? 'border-green-500/30' : 'border-red-500/30'"
+              :class="
+                pos.pnl >= 0 ? 'border-green-500/30' : 'border-red-500/30'
+              "
             >
               <div class="flex justify-between items-center">
                 <div>
                   <span class="font-bold">{{ pos.symbol }}</span>
-                  <span 
+                  <span
                     class="ml-2 text-xs px-2 py-0.5 rounded"
-                    :class="pos.side === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'"
+                    :class="
+                      pos.side === 'BUY'
+                        ? 'bg-green-500/20 text-green-400'
+                        : 'bg-red-500/20 text-red-400'
+                    "
                   >
                     {{ pos.side }}
                   </span>
                 </div>
-                <span 
+                <span
                   class="font-bold"
                   :class="pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'"
                 >
-                  {{ pos.pnl >= 0 ? '+' : '' }}${{ pos.pnl?.toFixed(2) || 0 }}
+                  {{ pos.pnl >= 0 ? "+" : "" }}${{ pos.pnl?.toFixed(2) || 0 }}
                 </span>
               </div>
               <div class="text-xs text-gray-400 mt-1 flex justify-between">
@@ -524,8 +676,12 @@
                 <span>Entry: {{ pos.entry_price?.toFixed(5) }}</span>
               </div>
               <div class="text-xs text-gray-400 flex justify-between">
-                <span class="text-red-400">SL: {{ pos.stop_loss?.toFixed(5) || 'N/A' }}</span>
-                <span class="text-green-400">TP: {{ pos.take_profit?.toFixed(5) || 'N/A' }}</span>
+                <span class="text-red-400"
+                  >SL: {{ pos.stop_loss?.toFixed(5) || "N/A" }}</span
+                >
+                <span class="text-green-400"
+                  >TP: {{ pos.take_profit?.toFixed(5) || "N/A" }}</span
+                >
               </div>
             </div>
           </div>
@@ -536,11 +692,14 @@
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">📜</span> Recent Trades
           </h2>
-          
-          <div v-if="tradeHistory.length === 0" class="text-center text-gray-400 py-8">
+
+          <div
+            v-if="tradeHistory.length === 0"
+            class="text-center text-gray-400 py-8"
+          >
             No trades yet
           </div>
-          
+
           <div v-else class="space-y-2 max-h-80 overflow-y-auto">
             <div
               v-for="trade in tradeHistory"
@@ -549,11 +708,13 @@
             >
               <div class="flex justify-between items-center">
                 <span class="font-medium">{{ trade.symbol }}</span>
-                <span 
+                <span
                   class="font-bold"
                   :class="trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'"
                 >
-                  {{ trade.pnl >= 0 ? '+' : '' }}${{ trade.pnl?.toFixed(2) || 0 }}
+                  {{ trade.pnl >= 0 ? "+" : "" }}${{
+                    trade.pnl?.toFixed(2) || 0
+                  }}
                 </span>
               </div>
               <div class="text-xs text-gray-400 flex justify-between mt-1">
@@ -569,11 +730,14 @@
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">📡</span> Signal History
           </h2>
-          
-          <div v-if="signalHistory.length === 0" class="text-center text-gray-400 py-4">
+
+          <div
+            v-if="signalHistory.length === 0"
+            class="text-center text-gray-400 py-4"
+          >
             No signals yet
           </div>
-          
+
           <div v-else class="space-y-2 max-h-40 overflow-y-auto">
             <div
               v-for="sig in signalHistory.slice(0, 10)"
@@ -582,7 +746,9 @@
             >
               <span class="text-gray-400">{{ sig.symbol }}</span>
               <span :class="getSignalClass(sig.signal)">{{ sig.signal }}</span>
-              <span class="text-xs text-gray-500">{{ formatTime(sig.timestamp) }}</span>
+              <span class="text-xs text-gray-500">{{
+                formatTime(sig.timestamp)
+              }}</span>
             </div>
           </div>
         </div>
@@ -591,63 +757,88 @@
 
     <!-- Footer Stats -->
     <div class="mt-4 grid grid-cols-6 gap-4">
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Total Trades</div>
-        <div class="text-xl font-bold text-white">{{ stats.total_trades || 0 }}</div>
+        <div class="text-xl font-bold text-white">
+          {{ stats.total_trades || 0 }}
+        </div>
       </div>
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Win Rate</div>
-        <div class="text-xl font-bold text-green-400">{{ stats.win_rate?.toFixed(1) || 0 }}%</div>
+        <div class="text-xl font-bold text-green-400">
+          {{ stats.win_rate?.toFixed(1) || 0 }}%
+        </div>
       </div>
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Profit Factor</div>
-        <div class="text-xl font-bold text-blue-400">{{ stats.profit_factor?.toFixed(2) || 0 }}</div>
+        <div class="text-xl font-bold text-blue-400">
+          {{ stats.profit_factor?.toFixed(2) || 0 }}
+        </div>
       </div>
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Total P&L</div>
-        <div class="text-xl font-bold" :class="stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'">
+        <div
+          class="text-xl font-bold"
+          :class="stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'"
+        >
           ${{ formatNumber(stats.total_pnl || 0) }}
         </div>
       </div>
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Avg Win</div>
-        <div class="text-xl font-bold text-green-400">${{ formatNumber(stats.avg_win || 0) }}</div>
+        <div class="text-xl font-bold text-green-400">
+          ${{ formatNumber(stats.avg_win || 0) }}
+        </div>
       </div>
-      <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+      <div
+        class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+      >
         <div class="text-xs text-gray-400">Avg Loss</div>
-        <div class="text-xl font-bold text-red-400">${{ formatNumber(stats.avg_loss || 0) }}</div>
+        <div class="text-xl font-bold text-red-400">
+          ${{ formatNumber(stats.avg_loss || 0) }}
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import api from '@/services/api';
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import api from "@/services/api";
 
 // State
-const symbols = ref(['EURUSDm', 'GBPUSDm', 'XAUUSDm']);
-const selectedSymbol = ref('EURUSDm');
+const symbols = ref(["EURUSDm", "GBPUSDm", "XAUUSDm"]);
+const selectedSymbol = ref("EURUSDm");
 const isLoading = ref(false);
 const isBotLoading = ref(false);
 const isConnected = ref(false);
-const lastUpdateTime = ref('--:--:--');
+const lastUpdateTime = ref("--:--:--");
 
 // Bot Status
 const botStatus = ref({
   running: false,
-  config: {}
+  config: {},
 });
 
 // Current Signal
 const currentSignal = ref({
-  signal: 'WAIT',
-  symbol: '',
+  signal: "WAIT",
+  symbol: "",
   quality: null,
   confidence: 0,
   entry: null,
   stop_loss: null,
-  take_profit: null
+  take_profit: null,
 });
 
 // Intelligence Data
@@ -655,7 +846,7 @@ const titanData = ref({});
 const omegaData = ref({});
 const alphaData = ref({});
 const riskData = ref({
-  risk_level: 'SAFE',
+  risk_level: "SAFE",
   balance: 0,
   equity: 0,
   daily_pnl: 0,
@@ -664,14 +855,14 @@ const riskData = ref({
   can_trade: true,
   losing_streak: 0,
   max_losing_streak: 5,
-  max_daily_loss: 5
+  max_daily_loss: 5,
 });
 
 // Layer statuses
 const layers = ref({
-  data_lake: { status: 'READY', candles: 0 },
+  data_lake: { status: "READY", candles: 0 },
   pattern_matcher: { matches: 0, similarity: 0 },
-  voting: { signal: 'WAIT', bullish: 0, bearish: 0 },
+  voting: { signal: "WAIT", bullish: 0, bearish: 0 },
   enhanced: { quality: null, score: 0 },
   advanced: { regime: null, mtf_alignment: null, multiplier: 1 },
   smart: { pattern_count: 0, multiplier: 1 },
@@ -680,14 +871,14 @@ const layers = ref({
   quantum: { volatility_regime: null, fractal: null, multiplier: 1 },
   learning: { market_cycle: null, cycles: 0, adaptations: 0 },
   pro: { session: null, news_impact: null, multiplier: 1 },
-  sentiment: { level: null, retail_sentiment: 0, override: 'NO' }
+  sentiment: { level: null, retail_sentiment: 0, override: "NO" },
 });
 
 // Final Decision
 const finalDecision = ref({
-  action: 'WAITING',
+  action: "WAITING",
   position_multiplier: 1,
-  verdict: 'Waiting for analysis...'
+  verdict: "Waiting for analysis...",
 });
 
 // Positions & History
@@ -700,7 +891,7 @@ const stats = ref({
   profit_factor: 0,
   total_pnl: 0,
   avg_win: 0,
-  avg_loss: 0
+  avg_loss: 0,
 });
 
 // Refresh interval
@@ -711,19 +902,14 @@ const refreshAll = async () => {
   isLoading.value = true;
   try {
     // Parallel fetch all data
-    const [
-      botStatusRes,
-      pipelineRes,
-      riskRes,
-      positionsRes,
-      historyRes
-    ] = await Promise.all([
-      api.getBotStatus(),
-      api.getPipelineData(selectedSymbol.value),
-      api.getRiskData(),
-      api.getPositions(),
-      api.getTradeHistory(20)
-    ]);
+    const [botStatusRes, pipelineRes, riskRes, positionsRes, historyRes] =
+      await Promise.all([
+        api.getBotStatus(),
+        api.getPipelineData(selectedSymbol.value),
+        api.getRiskData(),
+        api.getPositions(),
+        api.getTradeHistory(20),
+      ]);
 
     // Check connection
     isConnected.value = !botStatusRes._isMock;
@@ -732,108 +918,113 @@ const refreshAll = async () => {
     if (botStatusRes && !botStatusRes._isMock) {
       botStatus.value = {
         running: botStatusRes.running || false,
-        config: botStatusRes.config || {}
+        config: botStatusRes.config || {},
       };
     }
 
     // Update from Pipeline API (comprehensive data)
-    if (pipelineRes && !pipelineRes._isMock && pipelineRes.status === 'active') {
+    if (
+      pipelineRes &&
+      !pipelineRes._isMock &&
+      pipelineRes.status === "active"
+    ) {
       // Update all layers
       if (pipelineRes.layers) {
         const pl = pipelineRes.layers;
-        
+
         // Data Lake
         if (pl.data_lake) {
           layers.value.data_lake = pl.data_lake;
         }
-        
+
         // Pattern Matcher
         if (pl.pattern_matcher) {
           layers.value.pattern_matcher = pl.pattern_matcher;
         }
-        
+
         // Voting
         if (pl.voting) {
           layers.value.voting = pl.voting;
         }
-        
+
         // Enhanced
         if (pl.enhanced) {
           layers.value.enhanced = pl.enhanced;
         }
-        
+
         // Advanced Intelligence
         if (pl.advanced) {
           layers.value.advanced = pl.advanced;
         }
-        
+
         // Smart Brain
         if (pl.smart) {
           layers.value.smart = pl.smart;
         }
-        
+
         // Neural Brain
         if (pl.neural) {
           layers.value.neural = pl.neural;
         }
-        
+
         // Deep Intelligence
         if (pl.deep) {
           layers.value.deep = pl.deep;
         }
-        
+
         // Quantum Strategy
         if (pl.quantum) {
           layers.value.quantum = pl.quantum;
         }
-        
+
         // Alpha Engine
         if (pl.alpha) {
           alphaData.value = pl.alpha;
         }
-        
+
         // Omega Brain
         if (pl.omega) {
           omegaData.value = pl.omega;
         }
-        
+
         // Titan Core
         if (pl.titan) {
           titanData.value = pl.titan;
         }
-        
+
         // Continuous Learning
         if (pl.learning) {
           layers.value.learning = pl.learning;
         }
-        
+
         // Pro Features
         if (pl.pro) {
           layers.value.pro = pl.pro;
         }
-        
+
         // Risk Guardian
         if (pl.risk) {
           riskData.value = { ...riskData.value, ...pl.risk };
         }
-        
+
         // Sentiment
         if (pl.sentiment) {
           layers.value.sentiment = pl.sentiment;
         }
       }
-      
+
       // Update Current Signal
       if (pipelineRes.current_signal) {
         currentSignal.value = pipelineRes.current_signal;
       }
-      
+
       // Update Final Decision
       if (pipelineRes.final_decision) {
         finalDecision.value = {
-          action: pipelineRes.final_decision.signal || 'WAITING',
-          position_multiplier: pipelineRes.final_decision.position_multiplier || 1,
-          verdict: pipelineRes.final_decision.verdict || ''
+          action: pipelineRes.final_decision.signal || "WAITING",
+          position_multiplier:
+            pipelineRes.final_decision.position_multiplier || 1,
+          verdict: pipelineRes.final_decision.verdict || "",
         };
       }
     }
@@ -851,19 +1042,30 @@ const refreshAll = async () => {
     // Update Trade History
     if (historyRes && historyRes.trades) {
       tradeHistory.value = historyRes.trades;
-      
+
       // Calculate stats
-      const wins = historyRes.trades.filter(t => t.pnl > 0);
-      const losses = historyRes.trades.filter(t => t.pnl < 0);
+      const wins = historyRes.trades.filter((t) => t.pnl > 0);
+      const losses = historyRes.trades.filter((t) => t.pnl < 0);
       stats.value = {
         total_trades: historyRes.trades.length,
-        win_rate: historyRes.trades.length > 0 ? (wins.length / historyRes.trades.length) * 100 : 0,
-        profit_factor: losses.reduce((s, t) => s + Math.abs(t.pnl), 0) > 0 
-          ? wins.reduce((s, t) => s + t.pnl, 0) / losses.reduce((s, t) => s + Math.abs(t.pnl), 0) 
-          : 0,
+        win_rate:
+          historyRes.trades.length > 0
+            ? (wins.length / historyRes.trades.length) * 100
+            : 0,
+        profit_factor:
+          losses.reduce((s, t) => s + Math.abs(t.pnl), 0) > 0
+            ? wins.reduce((s, t) => s + t.pnl, 0) /
+              losses.reduce((s, t) => s + Math.abs(t.pnl), 0)
+            : 0,
         total_pnl: historyRes.trades.reduce((s, t) => s + (t.pnl || 0), 0),
-        avg_win: wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0,
-        avg_loss: losses.length > 0 ? losses.reduce((s, t) => s + Math.abs(t.pnl), 0) / losses.length : 0
+        avg_win:
+          wins.length > 0
+            ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length
+            : 0,
+        avg_loss:
+          losses.length > 0
+            ? losses.reduce((s, t) => s + Math.abs(t.pnl), 0) / losses.length
+            : 0,
       };
     }
 
@@ -875,7 +1077,7 @@ const refreshAll = async () => {
 
     lastUpdateTime.value = new Date().toLocaleTimeString();
   } catch (error) {
-    console.error('Refresh failed:', error);
+    console.error("Refresh failed:", error);
     isConnected.value = false;
   } finally {
     isLoading.value = false;
@@ -890,15 +1092,15 @@ const toggleBot = async () => {
     } else {
       await api.startBot({
         symbols: symbols.value,
-        timeframe: 'H1',
-        quality: 'HIGH',
-        interval: 60
+        timeframe: "H1",
+        quality: "HIGH",
+        interval: 60,
       });
     }
     // Refresh status
     await refreshAll();
   } catch (error) {
-    console.error('Bot toggle failed:', error);
+    console.error("Bot toggle failed:", error);
   } finally {
     isBotLoading.value = false;
   }
@@ -906,78 +1108,87 @@ const toggleBot = async () => {
 
 // Helper functions
 const formatPrice = (price) => {
-  if (!price) return 'N/A';
+  if (!price) return "N/A";
   return price.toFixed(5);
 };
 
 const formatNumber = (num) => {
-  if (!num) return '0';
-  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!num) return "0";
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 };
 
 const formatTime = (timestamp) => {
-  if (!timestamp) return '--:--';
+  if (!timestamp) return "--:--";
   const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const getSignalBgClass = (signal) => {
-  if (!signal) return 'bg-gray-700';
-  if (signal === 'STRONG_BUY' || signal === 'BUY') return 'bg-green-900/50 border border-green-500/50';
-  if (signal === 'STRONG_SELL' || signal === 'SELL') return 'bg-red-900/50 border border-red-500/50';
-  return 'bg-gray-700 border border-gray-500/50';
+  if (!signal) return "bg-gray-700";
+  if (signal === "STRONG_BUY" || signal === "BUY")
+    return "bg-green-900/50 border border-green-500/50";
+  if (signal === "STRONG_SELL" || signal === "SELL")
+    return "bg-red-900/50 border border-red-500/50";
+  return "bg-gray-700 border border-gray-500/50";
 };
 
 const getSignalClass = (signal) => {
-  if (!signal) return 'text-gray-400';
-  if (signal === 'STRONG_BUY' || signal === 'BUY') return 'text-green-400';
-  if (signal === 'STRONG_SELL' || signal === 'SELL') return 'text-red-400';
-  return 'text-yellow-400';
+  if (!signal) return "text-gray-400";
+  if (signal === "STRONG_BUY" || signal === "BUY") return "text-green-400";
+  if (signal === "STRONG_SELL" || signal === "SELL") return "text-red-400";
+  return "text-yellow-400";
 };
 
 const getQualityClass = (quality) => {
-  if (!quality) return 'text-gray-400';
-  if (quality === 'PREMIUM') return 'text-purple-400 font-bold';
-  if (quality === 'HIGH') return 'text-green-400 font-bold';
-  if (quality === 'MEDIUM') return 'text-yellow-400';
-  return 'text-gray-400';
+  if (!quality) return "text-gray-400";
+  if (quality === "PREMIUM") return "text-purple-400 font-bold";
+  if (quality === "HIGH") return "text-green-400 font-bold";
+  if (quality === "MEDIUM") return "text-yellow-400";
+  return "text-gray-400";
 };
 
 const getLayerStatusClass = (layer) => {
-  if (!layer) return 'text-gray-400';
-  if (layer.status === 'READY' || layer.status === 'ACTIVE') return 'text-green-400';
-  if (layer.status === 'ERROR') return 'text-red-400';
-  return 'text-yellow-400';
+  if (!layer) return "text-gray-400";
+  if (layer.status === "READY" || layer.status === "ACTIVE")
+    return "text-green-400";
+  if (layer.status === "ERROR") return "text-red-400";
+  return "text-yellow-400";
 };
 
 const getRiskBgClass = (level) => {
-  if (level === 'SAFE') return 'bg-green-900/30 border-green-500/50';
-  if (level === 'CAUTION') return 'bg-yellow-900/30 border-yellow-500/50';
-  if (level === 'WARNING') return 'bg-orange-900/30 border-orange-500/50';
-  if (level === 'DANGER') return 'bg-red-900/30 border-red-500/50';
-  return 'bg-gray-700/30 border-gray-500/50';
+  if (level === "SAFE") return "bg-green-900/30 border-green-500/50";
+  if (level === "CAUTION") return "bg-yellow-900/30 border-yellow-500/50";
+  if (level === "WARNING") return "bg-orange-900/30 border-orange-500/50";
+  if (level === "DANGER") return "bg-red-900/30 border-red-500/50";
+  return "bg-gray-700/30 border-gray-500/50";
 };
 
 const getRiskTextClass = (level) => {
-  if (level === 'SAFE') return 'text-green-400';
-  if (level === 'CAUTION') return 'text-yellow-400';
-  if (level === 'WARNING') return 'text-orange-400';
-  if (level === 'DANGER') return 'text-red-400';
-  return 'text-gray-400';
+  if (level === "SAFE") return "text-green-400";
+  if (level === "CAUTION") return "text-yellow-400";
+  if (level === "WARNING") return "text-orange-400";
+  if (level === "DANGER") return "text-red-400";
+  return "text-gray-400";
 };
 
 const getFinalDecisionClass = (action) => {
-  if (action === 'STRONG_BUY' || action === 'BUY') return 'text-green-400';
-  if (action === 'STRONG_SELL' || action === 'SELL') return 'text-red-400';
-  if (action === 'BLOCKED') return 'text-orange-400';
-  return 'text-yellow-400';
+  if (action === "STRONG_BUY" || action === "BUY") return "text-green-400";
+  if (action === "STRONG_SELL" || action === "SELL") return "text-red-400";
+  if (action === "BLOCKED") return "text-orange-400";
+  return "text-yellow-400";
 };
 
 const getFinalDecisionBorderClass = (action) => {
-  if (action === 'STRONG_BUY' || action === 'BUY') return 'border-green-500';
-  if (action === 'STRONG_SELL' || action === 'SELL') return 'border-red-500';
-  if (action === 'BLOCKED') return 'border-orange-500';
-  return 'border-yellow-500';
+  if (action === "STRONG_BUY" || action === "BUY") return "border-green-500";
+  if (action === "STRONG_SELL" || action === "SELL") return "border-red-500";
+  if (action === "BLOCKED") return "border-orange-500";
+  return "border-yellow-500";
 };
 
 // Watch symbol change
