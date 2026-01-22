@@ -297,6 +297,7 @@ class RiskGuardian:
         entry_price: float,
         stop_loss: float,
         risk_multiplier: float = 1.0,  # From quality assessment
+        symbol: str = None,  # Optional symbol for dynamic min SL
     ) -> Tuple[float, dict]:
         """
         คำนวณ Position Size ตามความเสี่ยงที่ยอมรับได้
@@ -313,10 +314,22 @@ class RiskGuardian:
         stop_distance = abs(entry_price - stop_loss)
         stop_distance_percent = (stop_distance / entry_price) * 100
         
+        # Dynamic min SL based on instrument type
+        # Gold/Indices need tighter SL due to high price
+        min_sl_pct = self.min_stop_loss_percent
+        if symbol:
+            symbol_upper = symbol.upper()
+            if "XAU" in symbol_upper or "GOLD" in symbol_upper:
+                min_sl_pct = 0.03  # Gold: 0.03% (~1.5 points at 4800)
+            elif "US30" in symbol_upper or "NAS" in symbol_upper or "SPX" in symbol_upper:
+                min_sl_pct = 0.02  # Indices: 0.02%
+            elif "BTC" in symbol_upper or "ETH" in symbol_upper:
+                min_sl_pct = 0.05  # Crypto: 0.05%
+        
         # Validate stop distance
-        if stop_distance_percent < self.min_stop_loss_percent:
+        if stop_distance_percent < min_sl_pct:
             return 0.0, {
-                "error": f"Stop loss too tight: {stop_distance_percent:.2f}% (min: {self.min_stop_loss_percent}%)"
+                "error": f"Stop loss too tight: {stop_distance_percent:.2f}% (min: {min_sl_pct}%)"
             }
         
         if stop_distance_percent > self.max_stop_loss_percent:

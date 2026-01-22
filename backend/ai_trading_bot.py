@@ -2346,6 +2346,7 @@ class AITradingBot:
                 entry_price=current_price,
                 stop_loss=stop_loss,
                 risk_multiplier=position_multiplier,
+                symbol=symbol,  # Pass symbol for dynamic min SL
             )
             if quantity <= 0:
                 logger.error(f"❌ Risk Guardian rejected position: {calc_details.get('error', 'Unknown')}")
