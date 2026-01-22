@@ -2830,14 +2830,14 @@ async def get_risk_data():
     # Default risk data
     risk_data = {
         "risk_level": "SAFE",
-        "balance": 10000,
-        "equity": 10000,
+        "balance": 0,
+        "equity": 0,
         "daily_pnl": 0,
         "open_positions": 0,
         "max_positions": 3,
         "risk_per_trade": 2,
         "max_daily_loss": 5,
-        "leverage": 2000,
+        "leverage": 0,
         "risk_score": 0,
         "can_trade": True,
         "can_open_position": True,
@@ -2847,22 +2847,26 @@ async def get_risk_data():
         "max_losing_streak": 5
     }
     
+    # Always get real account info from MT5 service (regardless of bot status)
+    try:
+        mt5_service = get_mt5_service()
+        if mt5_service and mt5_service.is_connected():
+            account = await mt5_service.get_account_info()
+            if account and account.get("connected") and not account.get("error"):
+                risk_data["balance"] = account.get("balance", 0)
+                risk_data["equity"] = account.get("equity", 0)
+                risk_data["leverage"] = account.get("leverage", 0)
+    except Exception as e:
+        logger.warning(f"Could not get MT5 account info: {e}")
+    
     if not _auto_bot:
         risk_data["message"] = "Bot not running"
         return risk_data
     
-    # Get account info from trading engine
+    # Get positions from trading engine
     if hasattr(_auto_bot, 'trading_engine') and _auto_bot.trading_engine:
         try:
             engine = _auto_bot.trading_engine
-            if engine.broker and engine.broker._connected:
-                import MetaTrader5 as mt5
-                info = mt5.account_info()
-                if info:
-                    risk_data["balance"] = info.balance
-                    risk_data["equity"] = info.equity
-                    risk_data["leverage"] = info.leverage
-            
             risk_data["open_positions"] = len(engine.positions) if hasattr(engine, 'positions') else 0
         except Exception:
             pass
