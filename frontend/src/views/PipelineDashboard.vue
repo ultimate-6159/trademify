@@ -14,14 +14,22 @@
 
       <div class="flex items-center gap-4">
         <!-- Symbol Selector -->
-        <select
-          v-model="selectedSymbol"
-          class="bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-        >
-          <option v-for="symbol in symbols" :key="symbol" :value="symbol">
-            {{ symbol }}
-          </option>
-        </select>
+        <div class="relative">
+          <select
+            v-model="selectedSymbol"
+            @change="onSymbolChange"
+            class="bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 pr-8 text-white font-semibold focus:outline-none focus:border-blue-500 cursor-pointer appearance-none"
+            :disabled="isLoading"
+          >
+            <option v-for="symbol in symbols" :key="symbol" :value="symbol">
+              {{ symbol }}
+            </option>
+          </select>
+          <!-- Dropdown Arrow -->
+          <div class="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+            ▼
+          </div>
+        </div>
 
         <!-- Connection Status -->
         <div class="flex items-center gap-2">
@@ -229,9 +237,23 @@
 
       <!-- CENTER: 16-Layer Pipeline (6 cols) -->
       <div class="col-span-6">
-        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 relative">
+          <!-- Loading Overlay -->
+          <div
+            v-if="isLoading"
+            class="absolute inset-0 bg-gray-800/80 rounded-xl flex items-center justify-center z-10"
+          >
+            <div class="text-center">
+              <div class="text-4xl animate-spin mb-2">⚙️</div>
+              <div class="text-gray-300">Loading {{ selectedSymbol }}...</div>
+            </div>
+          </div>
+
           <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
             <span class="text-2xl">🔬</span> 16-Layer Intelligence Pipeline
+            <span class="text-sm font-normal px-2 py-0.5 rounded bg-blue-600/30 text-blue-400">
+              {{ selectedSymbol }}
+            </span>
             <span class="text-xs text-gray-400 ml-auto">
               Last Update: {{ lastUpdateTime }}
             </span>
@@ -1193,8 +1215,14 @@ const getFinalDecisionBorderClass = (action) => {
 
 // Watch symbol change
 watch(selectedSymbol, () => {
+  console.log("🔄 Symbol changed to:", selectedSymbol.value);
   refreshAll();
 });
+
+// Handle symbol change
+const onSymbolChange = () => {
+  console.log("📊 Selected symbol:", selectedSymbol.value);
+};
 
 // Lifecycle
 onMounted(() => {
