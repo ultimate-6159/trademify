@@ -325,19 +325,30 @@ class AITradingBot:
             "date": datetime.now().date().isoformat()
         }
         
-        # 📊 Last Analysis Results (for Frontend API)
-        self._last_analysis: Dict[str, Any] = {}
+        # 📊 Last Analysis Results (for Frontend API) - keyed by symbol
+        self._last_analysis_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_analysis: Dict[str, Any] = {}  # Latest analysis (any symbol)
+        self._last_titan_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_titan_decision: Dict[str, Any] = {}
+        self._last_omega_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_omega_result: Dict[str, Any] = {}
+        self._last_alpha_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_alpha_result: Dict[str, Any] = {}
         
-        # 🔬 Additional Layer Results for Pipeline Dashboard
+        # 🔬 Additional Layer Results for Pipeline Dashboard (keyed by symbol)
+        self._last_intel_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_intel_result: Dict[str, Any] = {}      # Advanced Intelligence
+        self._last_smart_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_smart_result: Dict[str, Any] = {}      # Smart Brain
+        self._last_neural_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_neural_result: Dict[str, Any] = {}     # Neural Brain
+        self._last_deep_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_deep_result: Dict[str, Any] = {}       # Deep Intelligence
+        self._last_quantum_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_quantum_result: Dict[str, Any] = {}    # Quantum Strategy
+        self._last_pro_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_pro_result: Dict[str, Any] = {}        # Pro Features
+        self._last_sentiment_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_sentiment_result: Dict[str, Any] = {}  # Sentiment Analyzer
         self._last_candle_count: int = 0                  # For data lake status
         
@@ -525,6 +536,7 @@ class AITradingBot:
                         "edge_factors": alpha_decision.edge_factors[:5] if alpha_decision.edge_factors else [],
                         "risk_factors": alpha_decision.risk_factors[:5] if alpha_decision.risk_factors else [],
                     }
+                    self._last_alpha_result_by_symbol[symbol] = self._last_alpha_result
                     logger.debug(f"📊 Alpha Engine analyzed: Grade={alpha_decision.grade.value}, Score={alpha_decision.alpha_score:.1f}")
                 except Exception as e:
                     logger.debug(f"Alpha analysis error: {e}")
@@ -567,6 +579,7 @@ class AITradingBot:
                         "edge_factors": omega_decision.edge_factors[:5] if omega_decision.edge_factors else [],
                         "risk_factors": omega_decision.risk_factors[:5] if omega_decision.risk_factors else [],
                     }
+                    self._last_omega_result_by_symbol[symbol] = self._last_omega_result
                     logger.debug(f"📊 Omega Brain analyzed: Grade={omega_decision.grade.value}, Score={omega_decision.omega_score:.1f}")
                 except Exception as e:
                     logger.debug(f"Omega analysis error: {e}")
@@ -637,6 +650,7 @@ class AITradingBot:
                         "edge_factors": titan_decision.edge_factors[:5] if titan_decision.edge_factors else [],
                         "risk_factors": titan_decision.risk_factors[:5] if titan_decision.risk_factors else [],
                     }
+                    self._last_titan_decision_by_symbol[symbol] = self._last_titan_decision
                     logger.debug(f"📊 Titan Core analyzed: Grade={titan_decision.grade.value}, Score={titan_decision.titan_score:.1f}")
                 except Exception as e:
                     logger.debug(f"Titan analysis error: {e}")
@@ -1638,6 +1652,7 @@ class AITradingBot:
                     "edge_factors": alpha_decision.edge_factors[:5] if alpha_decision.edge_factors else [],
                     "risk_factors": alpha_decision.risk_factors[:5] if alpha_decision.risk_factors else [],
                 }
+                self._last_alpha_result_by_symbol[symbol] = self._last_alpha_result
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Alpha Engine analysis failed: {e}")
@@ -1737,6 +1752,7 @@ class AITradingBot:
                     "edge_factors": omega_decision.edge_factors[:5] if omega_decision.edge_factors else [],
                     "risk_factors": omega_decision.risk_factors[:5] if omega_decision.risk_factors else [],
                 }
+                self._last_omega_result_by_symbol[symbol] = self._last_omega_result
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Omega Brain analysis failed: {e}")
@@ -1892,6 +1908,7 @@ class AITradingBot:
                     "edge_factors": titan_decision.edge_factors[:5] if titan_decision.edge_factors else [],
                     "risk_factors": titan_decision.risk_factors[:5] if titan_decision.risk_factors else [],
                 }
+                self._last_titan_decision_by_symbol[symbol] = self._last_titan_decision
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Titan Core analysis failed: {e}")
@@ -2308,8 +2325,9 @@ class AITradingBot:
                     if len(self._signal_history) > 100:
                         self._signal_history = self._signal_history[:100]
                     
-                    # Store last analysis
+                    # Store last analysis (both global and by symbol)
                     self._last_analysis = analysis
+                    self._last_analysis_by_symbol[symbol] = analysis
                     
                     # Broadcast signal update
                     await self._broadcast_update("signal", analysis)

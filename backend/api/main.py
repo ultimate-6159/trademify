@@ -2283,7 +2283,7 @@ async def update_bot_settings_endpoint(request: BotSettingsRequest):
 async def get_pipeline_data(symbol: str = "EURUSDm"):
     """
     Get complete 16-Layer Pipeline data for Dashboard display
-    Returns real-time data from all intelligence modules
+    Returns real-time data from all intelligence modules for the selected symbol
     """
     global _auto_bot
     
@@ -2299,6 +2299,19 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # Gather all layer data
     layers = {}
     
+    # Get symbol-specific analysis (fallback to latest)
+    last_analysis_by_symbol = getattr(_auto_bot, '_last_analysis_by_symbol', {})
+    last_analysis = last_analysis_by_symbol.get(symbol, getattr(_auto_bot, '_last_analysis', {}))
+    
+    # Get symbol-specific layer results
+    titan_by_symbol = getattr(_auto_bot, '_last_titan_decision_by_symbol', {})
+    omega_by_symbol = getattr(_auto_bot, '_last_omega_result_by_symbol', {})
+    alpha_by_symbol = getattr(_auto_bot, '_last_alpha_result_by_symbol', {})
+    
+    titan_data = titan_by_symbol.get(symbol, getattr(_auto_bot, '_last_titan_decision', {}))
+    omega_data = omega_by_symbol.get(symbol, getattr(_auto_bot, '_last_omega_result', {}))
+    alpha_data = alpha_by_symbol.get(symbol, getattr(_auto_bot, '_last_alpha_result', {}))
+    
     # 1. Data Lake
     layers["data_lake"] = {
         "status": "READY" if _auto_bot.data_provider else "NOT_INITIALIZED",
@@ -2307,7 +2320,6 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     }
     
     # 2. Pattern Matcher (FAISS)
-    last_analysis = getattr(_auto_bot, '_last_analysis', {})
     layers["pattern_matcher"] = {
         "matches": last_analysis.get("n_matches", 0),
         "similarity": last_analysis.get("similarity", 0),
@@ -2334,7 +2346,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 5. Advanced Intelligence
     intel_status = {}
     if hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence:
-        intel_result = getattr(_auto_bot, '_last_intel_result', {})
+        intel_by_symbol = getattr(_auto_bot, '_last_intel_result_by_symbol', {})
+        intel_result = intel_by_symbol.get(symbol, getattr(_auto_bot, '_last_intel_result', {}))
         intel_status = {
             "regime": intel_result.get("regime", "N/A"),
             "mtf_alignment": intel_result.get("mtf_alignment", "N/A"),
@@ -2346,7 +2359,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 6. Smart Brain
     smart_status = {}
     if hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain:
-        smart_result = getattr(_auto_bot, '_last_smart_result', {})
+        smart_by_symbol = getattr(_auto_bot, '_last_smart_result_by_symbol', {})
+        smart_result = smart_by_symbol.get(symbol, getattr(_auto_bot, '_last_smart_result', {}))
         smart_status = {
             "pattern_count": getattr(_auto_bot.smart_brain, 'pattern_count', 0),
             "multiplier": smart_result.get("position_multiplier", 1.0),
@@ -2358,7 +2372,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 7. Neural Brain
     neural_status = {}
     if hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain:
-        neural_result = getattr(_auto_bot, '_last_neural_result', {})
+        neural_by_symbol = getattr(_auto_bot, '_last_neural_result_by_symbol', {})
+        neural_result = neural_by_symbol.get(symbol, getattr(_auto_bot, '_last_neural_result', {}))
         neural_status = {
             "market_state": neural_result.get("market_state", "N/A"),
             "dna_score": neural_result.get("dna_score", 0),
@@ -2370,7 +2385,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 8. Deep Intelligence
     deep_status = {}
     if hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence:
-        deep_result = getattr(_auto_bot, '_last_deep_result', {})
+        deep_by_symbol = getattr(_auto_bot, '_last_deep_result_by_symbol', {})
+        deep_result = deep_by_symbol.get(symbol, getattr(_auto_bot, '_last_deep_result', {}))
         deep_status = {
             "correlation": deep_result.get("correlation", 0),
             "session": deep_result.get("session", "N/A"),
@@ -2382,7 +2398,8 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     # 9. Quantum Strategy
     quantum_status = {}
     if hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy:
-        quantum_result = getattr(_auto_bot, '_last_quantum_result', {})
+        quantum_by_symbol = getattr(_auto_bot, '_last_quantum_result_by_symbol', {})
+        quantum_result = quantum_by_symbol.get(symbol, getattr(_auto_bot, '_last_quantum_result', {}))
         quantum_status = {
             "volatility_regime": quantum_result.get("volatility_regime", "N/A"),
             "fractal": quantum_result.get("fractal", "N/A"),
@@ -2391,8 +2408,7 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         }
     layers["quantum"] = quantum_status
     
-    # 10. Alpha Engine
-    alpha_data = getattr(_auto_bot, '_last_alpha_result', {})
+    # 10. Alpha Engine (already symbol-specific from earlier)
     layers["alpha"] = {
         "grade": alpha_data.get("grade", "N/A"),
         "alpha_score": alpha_data.get("alpha_score", 0),
@@ -2404,8 +2420,7 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         "risk_factors": alpha_data.get("risk_factors", [])
     }
     
-    # 11. Omega Brain
-    omega_data = getattr(_auto_bot, '_last_omega_result', {})
+    # 11. Omega Brain (already symbol-specific from variable declared above)
     layers["omega"] = {
         "grade": omega_data.get("grade", "N/A"),
         "omega_score": omega_data.get("omega_score", 0),
@@ -2421,8 +2436,7 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         "risk_factors": omega_data.get("risk_factors", [])
     }
     
-    # 12. Titan Core
-    titan_data = getattr(_auto_bot, '_last_titan_decision', {})
+    # 12. Titan Core (already symbol-specific from variable declared above)
     layers["titan"] = {
         "grade": titan_data.get("grade", "N/A"),
         "titan_score": titan_data.get("titan_score", 0),
@@ -2453,6 +2467,11 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
     pro_status = {}
     if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
         pro_result = getattr(_auto_bot, '_last_pro_result', {})
+    # 14. Pro Features
+    pro_status = {}
+    if hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features:
+        pro_by_symbol = getattr(_auto_bot, '_last_pro_result_by_symbol', {})
+        pro_result = pro_by_symbol.get(symbol, getattr(_auto_bot, '_last_pro_result', {}))
         pro_status = {
             "session": pro_result.get("session", "N/A"),
             "news_impact": pro_result.get("news_impact", "NONE"),
@@ -2485,10 +2504,11 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
             pass
     layers["risk"] = risk_status
     
-    # 16. Sentiment (Contrarian)
+    # 16. Sentiment (Contrarian) - symbol-specific
     sentiment_status = {}
     if hasattr(_auto_bot, 'sentiment_analyzer'):
-        sentiment_result = getattr(_auto_bot, '_last_sentiment_result', {})
+        sentiment_by_symbol = getattr(_auto_bot, '_last_sentiment_result_by_symbol', {})
+        sentiment_result = sentiment_by_symbol.get(symbol, getattr(_auto_bot, '_last_sentiment_result', {}))
         sentiment_status = {
             "level": sentiment_result.get("level", "N/A"),
             "retail_sentiment": sentiment_result.get("retail_sentiment", 0),
@@ -2496,7 +2516,7 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         }
     layers["sentiment"] = sentiment_status
     
-    # Current Signal
+    # Current Signal (symbol-specific from last_analysis which is already symbol-filtered)
     current_signal = {
         "signal": last_analysis.get("signal", "WAIT"),
         "symbol": last_analysis.get("symbol", symbol),
@@ -2507,7 +2527,7 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         "take_profit": last_analysis.get("take_profit", 0)
     }
     
-    # Final Decision
+    # Final Decision (using symbol-specific titan_data)
     final_decision = {
         "action": titan_data.get("should_trade", False) and last_analysis.get("signal", "WAIT") != "WAIT",
         "signal": last_analysis.get("signal", "WAIT") if titan_data.get("should_trade", False) else "BLOCKED",
