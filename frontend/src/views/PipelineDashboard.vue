@@ -1689,35 +1689,42 @@ const setQuality = async (quality) => {
 const checkSystemHealth = async () => {
   isLoading.value = true;
   try {
-    // Fetch health data
-    const [healthRes, botStatusRes] = await Promise.all([
-      api.getSystemHealth().catch(() => ({})),
-      api.getBotStatus(),
-    ]);
+    // Fetch bot status first (this always works if API is connected)
+    const botStatusRes = await api.getBotStatus().catch(() => ({ running: false, _isMock: true }));
+    
+    // Try to get system health (optional - may not exist)
+    let healthRes = {};
+    try {
+      healthRes = await api.getSystemHealth();
+    } catch (e) {
+      console.log("System health endpoint not available, using fallback");
+    }
+    
+    // API is online if we got botStatus without _isMock
+    const apiOnline = !botStatusRes._isMock;
+    
+    // MT5 is connected if bot is running (bot requires MT5)
+    const mt5Connected = healthRes.mt5_connected ?? (botStatusRes.running && apiOnline);
 
     // Update system health
     systemHealth.value = {
-      mt5_connected: healthRes.mt5_connected ?? botStatusRes.running,
-      api_status:
-        healthRes.api_status ?? (botStatusRes._isMock ? "offline" : "online"),
+      mt5_connected: mt5Connected,
+      api_status: apiOnline ? "online" : "offline",
       bot_running: botStatusRes.running || false,
-      data_lake_ready:
-        healthRes.data_lake_ready ?? layers.value.data_lake?.status === "READY",
-      faiss_loaded:
-        healthRes.faiss_loaded ??
-        layers.value.pattern_matcher?.status === "ACTIVE",
-      intelligence_modules:
-        healthRes.intelligence_modules ??
-        intelligenceModules.value.filter((m) => m.active).length,
+      data_lake_ready: healthRes.data_lake_ready ?? (layers.value.data_lake?.status === "READY"),
+      faiss_loaded: healthRes.faiss_loaded ?? (layers.value.pattern_matcher?.status === "ACTIVE"),
+      intelligence_modules: healthRes.intelligence_modules ?? intelligenceModules.value.filter((m) => m.active).length,
       total_modules: 16,
       last_analysis_time: healthRes.last_analysis_time ?? lastUpdateTime.value,
       memory_usage: healthRes.memory_usage ?? 0,
       uptime: healthRes.uptime ?? 0,
     };
 
-    isConnected.value = systemHealth.value.api_status === "online";
+    isConnected.value = apiOnline;
   } catch (error) {
     console.error("Health check failed:", error);
+    isConnected.value = false;
+    systemHealth.value.api_status = "offline";
   } finally {
     isLoading.value = false;
   }
