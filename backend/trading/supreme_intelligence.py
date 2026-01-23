@@ -506,10 +506,15 @@ class SupremeIntelligence:
         bullish = prices > opens
         bearish = prices < opens
         
-        # Volume-weighted
-        if volumes is not None and len(volumes) == len(prices):
-            buy_vol = np.sum(volumes[bullish[-20:]])
-            sell_vol = np.sum(volumes[bearish[-20:]])
+        # Volume-weighted - use consistent slicing for boolean indexing
+        if volumes is not None and len(volumes) == len(prices) and len(prices) >= 20:
+            # Use same slice for volumes and boolean arrays
+            vol_slice = volumes[-20:]
+            bull_slice = bullish[-20:]
+            bear_slice = bearish[-20:]
+            
+            buy_vol = np.sum(vol_slice[bull_slice])
+            sell_vol = np.sum(vol_slice[bear_slice])
             total_vol = buy_vol + sell_vol
             
             if total_vol > 0:
@@ -519,8 +524,8 @@ class SupremeIntelligence:
                 buy_pressure = 50
                 sell_pressure = 50
         else:
-            buy_pressure = np.sum(bullish[-20:]) / 20 * 100
-            sell_pressure = np.sum(bearish[-20:]) / 20 * 100
+            buy_pressure = np.sum(bullish[-20:]) / 20 * 100 if len(bullish) >= 20 else 50
+            sell_pressure = np.sum(bearish[-20:]) / 20 * 100 if len(bearish) >= 20 else 50
         
         net_flow = buy_pressure - sell_pressure
         
