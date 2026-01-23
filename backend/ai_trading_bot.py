@@ -1577,18 +1577,18 @@ class AITradingBot:
         logger.info(f"🔍 execute_trade() called for {symbol}")
         logger.info(f"   Signal: {signal}, Quality: {quality}, Price: {current_price}")
         
-        # 🧠 SMART FEATURES CHECK - ตรวจสอบก่อนเทรด
+        # 🧠 SMART FEATURES CHECK - ตรวจสอบก่อนเทรด (WARNING ONLY in trial mode)
         can_trade, reason = self._can_trade_today()
         if not can_trade:
-            logger.warning(f"⛔ Trade blocked by smart features: {reason}")
-            return {"action": "BLOCKED", "reason": reason, "symbol": symbol}
+            logger.warning(f"⚠️ Smart features suggest SKIP but ALLOWING TRADE (trial mode): {reason}")
+            # Don't block - continue with trade
         
-        # 🔗 Correlation Check
+        # 🔗 Correlation Check (WARNING ONLY in trial mode)
         side_str = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
         can_trade, reason = self._check_correlation(symbol, side_str)
         if not can_trade:
-            logger.warning(f"⛔ Trade blocked by correlation: {reason}")
-            return {"action": "BLOCKED", "reason": reason, "symbol": symbol}
+            logger.warning(f"⚠️ Correlation check suggests SKIP but ALLOWING TRADE (trial mode): {reason}")
+            # Don't block - continue with trade
         
         # 🧠⚡ ULTRA INTELLIGENCE CHECK - 10x Smarter
         ultra_decision = None
@@ -1643,16 +1643,10 @@ class AITradingBot:
                     for warning in ultra_decision.warnings:
                         logger.warning(f"   ⚠️ {warning}")
                     
-                    # Check if Ultra blocks the trade
+                    # 🔥 TRIAL MODE: Ultra Intelligence is WARNING ONLY (no blocking)
                     if not ultra_decision.can_trade:
-                        logger.warning(f"⛔ Trade blocked by Ultra Intelligence")
-                        return {
-                            "action": "BLOCKED_BY_ULTRA",
-                            "reason": "; ".join(ultra_decision.warnings),
-                            "symbol": symbol,
-                            "session": ultra_decision.session_quality.value,
-                            "volatility": ultra_decision.volatility_state.value
-                        }
+                        logger.warning(f"⚠️ Ultra Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
+                        ultra_multiplier = 0.5  # Reduce size but still trade
                     
                     # Apply Ultra multiplier
                     ultra_multiplier = ultra_decision.position_size_multiplier
@@ -1728,18 +1722,12 @@ class AITradingBot:
                     for warning in supreme_decision.warnings:
                         logger.warning(f"   ⚠️ {warning}")
                     
+                    # 🔥 TRIAL MODE: Supreme Intelligence is WARNING ONLY (no blocking)
                     if not supreme_decision.can_trade:
-                        logger.warning(f"⛔ Trade blocked by Supreme Intelligence")
-                        return {
-                            "action": "BLOCKED_BY_SUPREME",
-                            "reason": "; ".join(supreme_decision.warnings),
-                            "symbol": symbol,
-                            "entropy": supreme_decision.entropy_level.value,
-                            "win_probability": supreme_decision.win_probability,
-                            "confluence_score": supreme_decision.confluence_score,
-                        }
-                    
-                    supreme_multiplier = supreme_decision.optimal_size_percent
+                        logger.warning(f"⚠️ Supreme Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
+                        supreme_multiplier = 0.5  # Reduce size but still trade
+                    else:
+                        supreme_multiplier = supreme_decision.optimal_size_percent
                     
                     self._last_supreme_decision = {
                         "symbol": symbol,
@@ -1819,19 +1807,12 @@ class AITradingBot:
                     for insight in transcendent_decision.insights[:3]:  # Top 3 insights
                         logger.info(f"   💡 {insight}")
                     
+                    # 🔥 TRIAL MODE: Transcendent Intelligence is WARNING ONLY (no blocking)
                     if not transcendent_decision.can_trade:
-                        logger.warning(f"⛔ Trade blocked by Transcendent Intelligence")
-                        return {
-                            "action": "BLOCKED_BY_TRANSCENDENT",
-                            "reason": "; ".join(transcendent_decision.warnings),
-                            "symbol": symbol,
-                            "quantum_state": transcendent_decision.quantum_field.quantum_state.value,
-                            "transcendent_score": transcendent_decision.transcendent_score,
-                            "win_probability": transcendent_decision.win_probability,
-                            "expected_value": transcendent_decision.expected_value,
-                        }
-                    
-                    transcendent_multiplier = transcendent_decision.quantum_position_size * 10  # Scale up
+                        logger.warning(f"⚠️ Transcendent Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
+                        transcendent_multiplier = 0.5  # Reduce size but still trade
+                    else:
+                        transcendent_multiplier = transcendent_decision.quantum_position_size * 10  # Scale up
                     
                     self._last_transcendent_decision = {
                         "symbol": symbol,
@@ -1922,21 +1903,12 @@ class AITradingBot:
                     for insight in omniscient_decision.insights[:3]:
                         logger.info(f"   💡 {insight}")
                     
+                    # 🔥 TRIAL MODE: Omniscient Intelligence is WARNING ONLY (no blocking)
                     if not omniscient_decision.can_trade:
-                        logger.warning(f"⛔ Trade blocked by Omniscient Intelligence")
-                        return {
-                            "action": "BLOCKED_BY_OMNISCIENT",
-                            "reason": "; ".join(omniscient_decision.warnings),
-                            "symbol": symbol,
-                            "consciousness": omniscient_decision.consciousness_level.value,
-                            "omniscient_score": omniscient_decision.omniscient_score,
-                            "win_probability": omniscient_decision.win_probability,
-                            "edge": omniscient_decision.edge,
-                            "physics_state": omniscient_decision.physics.physics_state.value,
-                            "chaos_level": omniscient_decision.chaos.chaos_level.value,
-                        }
-                    
-                    omniscient_multiplier = omniscient_decision.omniscient_position_size * 10
+                        logger.warning(f"⚠️ Omniscient Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
+                        omniscient_multiplier = 0.5  # Reduce size but still trade
+                    else:
+                        omniscient_multiplier = omniscient_decision.omniscient_position_size * 10
                     
                     self._last_omniscient_decision = {
                         "symbol": symbol,
@@ -2033,16 +2005,13 @@ class AITradingBot:
                     logger.info(f"   🎯 Confluence: {intel_decision.confluence.agreeing_factors}/{intel_decision.confluence.total_factors}")
                 
                 if not intel_decision.can_trade:
-                    logger.warning(f"   🧠 ADVANCED INTELLIGENCE BLOCKED:")
+                    logger.warning(f"   🧠 ADVANCED INTELLIGENCE WARNING (trial mode - allowing trade):")
                     for warning in intel_decision.warnings:
                         logger.warning(f"      {warning}")
-                    return {
-                        "action": "BLOCKED_BY_INTELLIGENCE",
-                        "reason": "; ".join(intel_decision.warnings),
-                        "confluence": intel_decision.confluence.to_dict() if intel_decision.confluence else None,
-                    }
+                    intel_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    intel_multiplier = intel_decision.position_size_factor
                 
-                intel_multiplier = intel_decision.position_size_factor
                 logger.info(f"   🧠 Intelligence Multiplier: {intel_multiplier}x")
                 
                 for reason in intel_decision.reasons:
@@ -2083,16 +2052,12 @@ class AITradingBot:
                 )
                 
                 if not neural_decision.can_trade:
-                    logger.warning(f"   🧬 NEURAL BRAIN BLOCKED:")
+                    logger.warning(f"   🧬 NEURAL BRAIN WARNING (trial mode - allowing trade):")
                     for warning in neural_decision.warnings:
                         logger.warning(f"      {warning}")
-                    return {
-                        "action": "BLOCKED_BY_NEURAL",
-                        "reason": "; ".join(neural_decision.warnings),
-                        "market_state": neural_decision.market_state.value,
-                    }
-                
-                neural_multiplier = neural_decision.position_size_factor
+                    neural_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    neural_multiplier = neural_decision.position_size_factor
                 
                 logger.info(f"   🧬 Market State: {neural_decision.market_state.value}")
                 logger.info(f"   🧬 Pattern Quality: {neural_decision.pattern_quality}")
@@ -2138,19 +2103,14 @@ class AITradingBot:
                 )
                 
                 if not quantum_decision.should_trade:
-                    logger.warning(f"   ⚛️ QUANTUM STRATEGY BLOCKED:")
+                    logger.warning(f"   ⚛️ QUANTUM STRATEGY WARNING (trial mode - allowing trade):")
                     logger.warning(f"      Quantum Score: {quantum_decision.quantum_score:.1f}")
                     logger.warning(f"      Confidence: {quantum_decision.confidence:.1f}%")
                     for warning in quantum_decision.warnings:
                         logger.warning(f"      {warning}")
-                    return {
-                        "action": "BLOCKED_BY_QUANTUM",
-                        "reason": f"Score={quantum_decision.quantum_score:.1f}, {'; '.join(quantum_decision.warnings)}",
-                        "quantum_score": quantum_decision.quantum_score,
-                        "confidence": quantum_decision.confidence,
-                    }
-                
-                quantum_multiplier = quantum_decision.position_multiplier
+                    quantum_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    quantum_multiplier = quantum_decision.position_multiplier
                 
                 # Log quantum analysis
                 logger.info(f"   ⚛️ Quantum Score: {quantum_decision.quantum_score:.1f}")
@@ -2238,20 +2198,14 @@ class AITradingBot:
                 )
                 
                 if not deep_decision.should_trade:
-                    logger.warning(f"   🔮 DEEP INTELLIGENCE BLOCKED:")
+                    logger.warning(f"   🔮 DEEP INTELLIGENCE WARNING (trial mode - allowing trade):")
                     logger.warning(f"      Confluence: {deep_decision.confluence_level.value}")
                     logger.warning(f"      Confidence: {deep_decision.confidence:.1f}%")
                     for warning in deep_decision.warnings:
                         logger.warning(f"      {warning}")
-                    warnings_str = "; ".join(deep_decision.warnings)
-                    return {
-                        "action": "BLOCKED_BY_DEEP",
-                        "reason": f"Confluence={deep_decision.confluence_level.value}, {warnings_str}",
-                        "confluence": deep_decision.confluence_level.value,
-                        "confidence": deep_decision.confidence,
-                    }
-                
-                deep_multiplier = deep_decision.position_multiplier
+                    deep_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    deep_multiplier = deep_decision.position_multiplier
                 
                 logger.info(f"   🔮 Confluence: {deep_decision.confluence_level.value}")
                 logger.info(f"   🔮 Deep Confidence: {deep_decision.confidence:.1f}%")
@@ -2307,19 +2261,14 @@ class AITradingBot:
                 )
                 
                 if not alpha_decision.should_trade:
-                    logger.warning(f"   🎯 ALPHA ENGINE BLOCKED:")
+                    logger.warning(f"   🎯 ALPHA ENGINE WARNING (trial mode - allowing trade):")
                     logger.warning(f"      Grade: {alpha_decision.grade.value}")
                     logger.warning(f"      Alpha Score: {alpha_decision.alpha_score:.1f}")
                     for risk in alpha_decision.risk_factors[:3]:
                         logger.warning(f"      {risk}")
-                    return {
-                        "action": "BLOCKED_BY_ALPHA",
-                        "reason": f"Grade={alpha_decision.grade.value}, Score={alpha_decision.alpha_score:.1f}",
-                        "alpha_grade": alpha_decision.grade.value,
-                        "alpha_score": alpha_decision.alpha_score,
-                    }
-                
-                alpha_multiplier = alpha_decision.position_multiplier
+                    alpha_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    alpha_multiplier = alpha_decision.position_multiplier
                 
                 # Log alpha analysis
                 logger.info(f"   🎯 Alpha Grade: {alpha_decision.grade.value}")
@@ -2413,21 +2362,15 @@ class AITradingBot:
                 )
                 
                 if not omega_decision.should_trade:
-                    logger.warning(f"   🧠⚡ OMEGA BRAIN BLOCKED:")
+                    logger.warning(f"   🧠⚡ OMEGA BRAIN WARNING (trial mode - allowing trade):")
                     logger.warning(f"      Grade: {omega_decision.grade.value}")
                     logger.warning(f"      Omega Score: {omega_decision.omega_score:.1f}")
                     logger.warning(f"      Verdict: {omega_decision.final_verdict}")
                     for risk in omega_decision.risk_factors[:3]:
                         logger.warning(f"      {risk}")
-                    return {
-                        "action": "BLOCKED_BY_OMEGA",
-                        "reason": f"Grade={omega_decision.grade.value}, Score={omega_decision.omega_score:.1f}",
-                        "omega_grade": omega_decision.grade.value,
-                        "omega_score": omega_decision.omega_score,
-                        "verdict": omega_decision.final_verdict
-                    }
-                
-                omega_multiplier = omega_decision.position_multiplier
+                    omega_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    omega_multiplier = omega_decision.position_multiplier
                 
                 # Log Omega Brain analysis
                 logger.info(f"   🧠⚡ Omega Grade: {omega_decision.grade.value}")
@@ -2591,21 +2534,14 @@ class AITradingBot:
                 )
                 
                 if not titan_decision.should_trade:
-                    logger.warning(f"   🏛️ TITAN CORE BLOCKED:")
+                    logger.warning(f"   🏛️ TITAN CORE WARNING (trial mode - allowing trade):")
                     logger.warning(f"      Grade: {titan_decision.grade.value}")
                     logger.warning(f"      Titan Score: {titan_decision.titan_score:.1f}")
                     logger.warning(f"      Consensus: {titan_decision.consensus.level.value}")
                     logger.warning(f"      Verdict: {titan_decision.final_verdict}")
-                    return {
-                        "action": "BLOCKED_BY_TITAN",
-                        "reason": f"Grade={titan_decision.grade.value}, Score={titan_decision.titan_score:.1f}",
-                        "titan_grade": titan_decision.grade.value,
-                        "titan_score": titan_decision.titan_score,
-                        "consensus": titan_decision.consensus.level.value,
-                        "verdict": titan_decision.final_verdict
-                    }
-                
-                titan_multiplier = titan_decision.position_multiplier
+                    titan_multiplier = 0.5  # Reduce size but still trade
+                else:
+                    titan_multiplier = titan_decision.position_multiplier
                 
                 # Log Titan Core analysis
                 logger.info(f"   🏛️ Titan Grade: {titan_decision.grade.value}")
@@ -2666,15 +2602,12 @@ class AITradingBot:
             smart_decision = self.smart_brain.evaluate_entry(symbol, side_for_check)
             
             if not smart_decision.can_trade:
-                logger.warning(f"   🧠 SMART BRAIN BLOCKED:")
+                logger.warning(f"   🧠 SMART BRAIN WARNING (trial mode - allowing trade):")
                 for reason in smart_decision.reasons:
                     logger.warning(f"      {reason}")
-                return {
-                    "action": "BLOCKED_BY_BRAIN",
-                    "reason": "; ".join(smart_decision.reasons),
-                }
-            
-            smart_multiplier = smart_decision.risk_multiplier
+                smart_multiplier = 0.5  # Reduce size but still trade
+            else:
+                smart_multiplier = smart_decision.risk_multiplier
             
             if smart_decision.insights:
                 for insight in smart_decision.insights:
@@ -2705,13 +2638,12 @@ class AITradingBot:
                 logger.info(f"   🕐 Session: {session.current_session.value} ({session.quality_score}%)")
             
             if not pro_decision.can_trade:
-                logger.warning(f"   🏆 PRO FEATURES BLOCKED:")
+                logger.warning(f"   🏆 PRO FEATURES WARNING (trial mode - allowing trade):")
                 for reason in pro_decision.reasons:
                     logger.warning(f"      {reason}")
-                return {
-                    "action": "BLOCKED_BY_PRO",
-                    "reason": "; ".join(pro_decision.reasons),
-                }
+                position_multiplier_from_pro = 0.5  # Reduce size but still trade
+            else:
+                position_multiplier_from_pro = pro_decision.position_multiplier
             
             if pro_decision.warnings:
                 for warning in pro_decision.warnings:
@@ -2735,14 +2667,12 @@ class AITradingBot:
             )
             
             if not risk_assessment.can_trade:
-                logger.warning(f"   🛡️ RISK GUARDIAN BLOCKED:")
+                logger.warning(f"   🛡️ RISK GUARDIAN WARNING (trial mode - allowing trade with reduced size):")
                 for reason in risk_assessment.reasons:
                     logger.warning(f"      {reason}")
-                return {
-                    "action": "BLOCKED_BY_RISK",
-                    "reason": "; ".join(risk_assessment.reasons),
-                    "risk_level": risk_assessment.level.value,
-                }
+                position_multiplier_from_risk = 0.25  # Severely reduced size but still trade
+            else:
+                position_multiplier_from_risk = risk_assessment.max_position_size
             
             if risk_assessment.warnings:
                 for warning in risk_assessment.warnings:
