@@ -19,29 +19,34 @@
 import axios from "axios";
 
 // ===========================================
-// CONFIGURATION
+// CONFIGURATION - Smart Auto-Detection
 // ===========================================
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true" || false;
 
 const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_URL) {
+  // 1. ถ้ามี VITE_API_URL กำหนดไว้ ใช้ค่านั้น
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim()) {
     const base = import.meta.env.VITE_API_URL.replace(/\/api\/v1\/?$/, "");
     return `${base}/api/v1`;
   }
 
-  if (
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1"
-  ) {
+  // 2. Auto-detect จาก browser location
+  const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  
+  // ถ้าเป็น localhost หรือ 127.0.0.1 ใช้ localhost
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
     return "http://localhost:8000/api/v1";
   }
-
-  return `http://${window.location.hostname}:8000/api/v1`;
+  
+  // 3. ถ้าเป็น IP อื่น (VPS) ใช้ IP นั้นเลย
+  return `${protocol}//${hostname}:8000/api/v1`;
 };
 
 const API_BASE_URL = getApiBaseUrl();
 console.log("[API] Base URL:", API_BASE_URL);
+console.log("[API] Detected hostname:", window.location.hostname);
 
 // ===========================================
 // AXIOS CLIENT
