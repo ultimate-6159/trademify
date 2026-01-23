@@ -8,7 +8,7 @@ echo      MT5 CONNECTION DIAGNOSTIC
 echo ============================================
 echo.
 
-cd /d D:\projectx\trademify\backend
+cd /d C:\trademify\backend
 
 python -c "
 import MetaTrader5 as mt5
@@ -28,8 +28,8 @@ if not mt5.initialize():
     print()
     print('TO FIX THIS:')
     print('1. Open MetaTrader 5 application')
-    print('2. Login to account: 267643655')
-    print('3. Server: Exness-MT5Real39')
+    print('2. Login to account: 415146568')
+    print('3. Server: Exness-MT5Trial14')
     print('4. Enable AutoTrading (Ctrl+E)')
     print()
     sys.exit(1)
