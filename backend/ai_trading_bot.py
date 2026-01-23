@@ -2481,6 +2481,31 @@ class AITradingBot:
         
         while self._running:
             try:
+                # 🔄 SYNC POSITIONS WITH MT5 (Auto-detect SL/TP closed positions)
+                if self.trading_engine:
+                    sync_result = await self.trading_engine.sync_with_broker()
+                    
+                    # Update daily stats if positions were closed externally
+                    for removed_pos in sync_result.get("removed", []):
+                        pnl = removed_pos.get("pnl", 0)
+                        self._daily_stats["trades"] += 1
+                        self._daily_stats["pnl"] += pnl
+                        if pnl > 0:
+                            self._daily_stats["wins"] += 1
+                        else:
+                            self._daily_stats["losses"] += 1
+                        
+                        # Broadcast position closed event
+                        await self._broadcast_update("position_closed", {
+                            "id": removed_pos.get("id"),
+                            "symbol": removed_pos.get("symbol"),
+                            "side": removed_pos.get("side"),
+                            "pnl": pnl,
+                            "reason": removed_pos.get("reason"),
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        logger.info(f"📊 Position closed externally: {removed_pos.get('symbol')} PnL: ${pnl:.2f}")
+                
                 # Reset daily stats at midnight
                 today = datetime.now().date().isoformat()
                 if self._daily_stats["date"] != today:

@@ -459,6 +459,83 @@ class TradingEngine:
             "total_pnl": round(total_pnl, 2),
             "positions": [p.to_dict() for p in self.positions.values()],
         }
+    
+    async def sync_with_broker(self) -> Dict[str, Any]:
+        """
+        🔄 Sync internal positions with actual broker positions
+        This ensures bot state matches MT5 when positions are closed externally (SL/TP hit)
+        
+        Returns:
+            Dict with sync results: added, removed, unchanged positions
+        """
+        sync_result = {
+            "added": [],
+            "removed": [],
+            "unchanged": [],
+            "synced_at": datetime.now().isoformat()
+        }
+        
+        try:
+            # Get actual positions from broker (MT5)
+            broker_positions = await self.broker.get_positions()
+            broker_position_ids = {p.id for p in broker_positions}
+            internal_position_ids = set(self.positions.keys())
+            
+            # 1. Find positions closed by broker (SL/TP hit) - remove from internal
+            removed_ids = internal_position_ids - broker_position_ids
+            for pos_id in removed_ids:
+                closed_pos = self.positions.pop(pos_id, None)
+                if closed_pos:
+                    sync_result["removed"].append({
+                        "id": pos_id,
+                        "symbol": closed_pos.symbol,
+                        "side": closed_pos.side.value,
+                        "pnl": closed_pos.pnl,
+                        "reason": "Closed by MT5 (SL/TP hit or manual)"
+                    })
+                    logger.info(f"🔄 SYNC: Removed position {pos_id} ({closed_pos.symbol}) - closed externally")
+                    
+                    # Trigger callback if exists
+                    if self.on_position_closed:
+                        result = TradeResult(
+                            success=True,
+                            position=closed_pos,
+                            message="Position closed by MT5 (SL/TP hit)"
+                        )
+                        self.on_position_closed(result)
+            
+            # 2. Find new positions opened externally - add to internal
+            for broker_pos in broker_positions:
+                if broker_pos.id not in internal_position_ids:
+                    self.positions[broker_pos.id] = broker_pos
+                    sync_result["added"].append({
+                        "id": broker_pos.id,
+                        "symbol": broker_pos.symbol,
+                        "side": broker_pos.side.value,
+                        "reason": "Opened externally (manual or other)"
+                    })
+                    logger.info(f"🔄 SYNC: Added position {broker_pos.id} ({broker_pos.symbol}) - opened externally")
+            
+            # 3. Update existing positions with current prices
+            for broker_pos in broker_positions:
+                if broker_pos.id in self.positions:
+                    self.positions[broker_pos.id].current_price = broker_pos.current_price
+                    self.positions[broker_pos.id].pnl = broker_pos.pnl
+                    sync_result["unchanged"].append({
+                        "id": broker_pos.id,
+                        "symbol": broker_pos.symbol,
+                        "pnl": broker_pos.pnl
+                    })
+            
+            # Log summary
+            if sync_result["removed"] or sync_result["added"]:
+                logger.info(f"🔄 SYNC Complete: +{len(sync_result['added'])} -{len(sync_result['removed'])} ={len(sync_result['unchanged'])}")
+            
+        except Exception as e:
+            logger.error(f"❌ Sync failed: {e}")
+            sync_result["error"] = str(e)
+        
+        return sync_result
 
 
 class RiskManager:
