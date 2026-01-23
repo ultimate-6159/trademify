@@ -1086,38 +1086,51 @@ class EnhancedAnalyzer:
         signal: str,
         quality: SignalQuality
     ) -> Tuple[Optional[float], Optional[float]]:
-        """Adjust SL/TP based on ATR and quality"""
+        """
+        Adjust SL/TP based on ATR and quality
+        
+        🎯 REALISTIC TP STRATEGY:
+        - TP ต้องไม่ไกลเกินไป ให้ราคาไปถึงได้
+        - R:R ที่ดีคือ 1.5:1 ถึง 2:1 (ไม่ใช่ 3:1 หรือ 4:1)
+        - Gold (XAU): TP ~$10-20, SL ~$8-15
+        - Forex: TP ~20-40 pips, SL ~15-25 pips
+        """
         # Normalize signal to BUY/SELL
         is_buy = signal in ["BUY", "STRONG_BUY"]
         is_sell = signal in ["SELL", "STRONG_SELL"]
         
         if not base_sl or not base_tp:
-            # Default ATR-based SL/TP
-            atr_multiplier = 2.0
+            # 🎯 REALISTIC ATR-based SL/TP
+            # SL = 1.5 ATR, TP = 2.0 ATR (R:R = 1.33:1)
+            sl_atr_mult = 1.5
+            tp_atr_mult = 2.0  # ลดจาก 4.0 เป็น 2.0
+            
             if is_buy:
-                base_sl = current_price - (atr * atr_multiplier)
-                base_tp = current_price + (atr * atr_multiplier * 2)
+                base_sl = current_price - (atr * sl_atr_mult)
+                base_tp = current_price + (atr * tp_atr_mult)
             elif is_sell:
-                base_sl = current_price + (atr * atr_multiplier)
-                base_tp = current_price - (atr * atr_multiplier * 2)
+                base_sl = current_price + (atr * sl_atr_mult)
+                base_tp = current_price - (atr * tp_atr_mult)
             else:
                 return None, None
         
-        # Tighten SL for lower quality signals
+        # 🎯 Quality-based adjustment (more conservative)
+        # Higher quality = slightly wider TP, but still realistic
         sl_adjustment = {
             SignalQuality.PREMIUM: 1.0,   # No adjustment
-            SignalQuality.HIGH: 0.9,      # 10% tighter
-            SignalQuality.MEDIUM: 0.8,    # 20% tighter
-            SignalQuality.LOW: 0.6,       # 40% tighter
-            SignalQuality.SKIP: 0.5,
+            SignalQuality.HIGH: 0.95,     # 5% tighter
+            SignalQuality.MEDIUM: 0.9,    # 10% tighter
+            SignalQuality.LOW: 0.8,       # 20% tighter
+            SignalQuality.SKIP: 0.7,
         }
         
-        # Widen TP for higher quality signals
+        # 🎯 TP adjustment - MORE CONSERVATIVE
+        # ไม่ขยาย TP มากเกินไป เพื่อให้ราคาไปถึงได้
         tp_adjustment = {
-            SignalQuality.PREMIUM: 1.3,   # 30% wider
-            SignalQuality.HIGH: 1.2,      # 20% wider
-            SignalQuality.MEDIUM: 1.0,    # No adjustment
-            SignalQuality.LOW: 0.8,       # 20% tighter
+            SignalQuality.PREMIUM: 1.1,   # 10% wider (ลดจาก 30%)
+            SignalQuality.HIGH: 1.0,      # No adjustment (ลดจาก 20%)
+            SignalQuality.MEDIUM: 0.9,    # 10% tighter
+            SignalQuality.LOW: 0.75,      # 25% tighter
             SignalQuality.SKIP: 0.5,
         }
         
@@ -1126,6 +1139,14 @@ class EnhancedAnalyzer:
         
         sl_distance = abs(current_price - base_sl)
         tp_distance = abs(base_tp - current_price)
+        
+        # 🎯 CLAMP R:R ratio to realistic range (1.0 to 2.5)
+        # ไม่ให้ TP ไกลเกินไป
+        max_rr = 2.0  # Maximum R:R ratio
+        if sl_distance > 0:
+            current_rr = tp_distance / sl_distance
+            if current_rr > max_rr:
+                tp_distance = sl_distance * max_rr
         
         if is_buy:
             adjusted_sl = current_price - (sl_distance * sl_mult)

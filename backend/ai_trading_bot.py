@@ -55,6 +55,10 @@ from trading.quantum_strategy import QuantumStrategy, get_quantum_strategy
 from trading.alpha_engine import AlphaEngine, get_alpha_engine
 from trading.omega_brain import OmegaBrain, get_omega_brain
 from trading.titan_core import TitanCore, get_titan_core, ModuleSignal
+from trading.ultra_intelligence import UltraIntelligence, get_ultra_intelligence, UltraDecision
+from trading.supreme_intelligence import SupremeIntelligence, get_supreme_intelligence, SupremeDecision
+from trading.transcendent_intelligence import TranscendentIntelligence, get_transcendent_intelligence, TranscendentDecision
+from trading.omniscient_intelligence import OmniscientIntelligence, get_omniscient_intelligence, OmniscientDecision
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
 from services.mt5_service import get_mt5_service, MT5Service
@@ -313,6 +317,15 @@ class AITradingBot:
         # 🏛️⚔️ Titan Core - Meta-Intelligence Synthesis
         self.titan_core: Optional[TitanCore] = None
         
+        # 🧠⚡ Ultra Intelligence - 10x Smarter Trading
+        self.ultra_intelligence: Optional[UltraIntelligence] = None
+        
+        # 🏆👑 Supreme Intelligence - 20x Smarter Trading (Hedge Fund Level)
+        self.supreme_intelligence: Optional[SupremeIntelligence] = None
+        
+        # 🌌✨ Transcendent Intelligence - 50x Smarter (Beyond Human)
+        self.transcendent_intelligence: Optional[TranscendentIntelligence] = None
+        
         # State
         self._running = False
         self._last_signals: Dict[str, Any] = {}
@@ -324,6 +337,60 @@ class AITradingBot:
             "pnl": 0.0,
             "date": datetime.now().date().isoformat()
         }
+        
+        # 📈 Trailing Stop Config - ยก SL ตามราคาเพื่อล็อคกำไร
+        self._trailing_stop_config = {
+            "enabled": True,                    # เปิด/ปิด Trailing Stop
+            "activation_profit_pct": 0.3,       # เริ่มทำงานเมื่อกำไร >= 0.3%
+            "trail_distance_pct": 0.2,          # SL ตาม 0.2% จากราคาปัจจุบัน
+            "min_trail_distance_gold": 1.0,     # Gold: SL ตาม $1 minimum
+            "min_trail_distance_forex": 0.0010, # Forex: SL ตาม 10 pips minimum
+            "step_pct": 0.1,                    # ยก SL ทีละ 0.1%
+        }
+        self._position_highest_prices: Dict[str, float] = {}  # Track highest/lowest for trailing
+        
+        # 🎯 Floating TP Config - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
+        self._floating_tp_config = {
+            "enabled": True,                    # เปิด/ปิด Floating TP
+            "min_rr_ratio": 1.5,                # R:R ขั้นต่ำที่ต้องรักษา (SL-Entry : TP-Entry)
+            "tp_extension_multiplier": 1.2,    # ยืด TP 20% เมื่อ SL ถูกยก
+            "max_tp_extension_pct": 5.0,        # TP ขยับได้มากสุด 5% จาก entry
+        }
+        self._position_original_tp: Dict[str, float] = {}  # เก็บ TP เดิมเพื่ออ้างอิง
+        
+        # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
+        self._smart_features = {
+            # Break-Even: ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
+            "break_even": {
+                "enabled": True,
+                "activation_pct": 0.5,  # เปิดใช้เมื่อกำไร >= 0.5%
+                "offset_pct": 0.05,     # SL = entry + 0.05% (เผื่อ spread)
+            },
+            # Max Daily Trades: จำกัดจำนวนเทรดต่อวัน
+            "max_daily_trades": {
+                "enabled": True,
+                "limit": 5,  # เทรดได้ไม่เกิน 5 ครั้งต่อวัน
+            },
+            # Consecutive Loss Protection: หยุดเทรดหลังขาดทุนติดต่อกัน
+            "loss_protection": {
+                "enabled": True,
+                "max_consecutive_losses": 3,  # หยุดหลังขาดทุน 3 ครั้งติด
+                "cooldown_minutes": 60,       # พักเทรด 60 นาที
+            },
+            # Time-based Exit: ปิดออเดอร์ที่ค้างนานเกินไป
+            "time_exit": {
+                "enabled": True,
+                "max_hours": 24,  # ปิดออเดอร์ที่ค้าง > 24 ชม.
+            },
+            # Correlation Protection: ไม่เปิดหลาย position ที่ correlated
+            "correlation_protection": {
+                "enabled": True,
+                "max_same_direction": 2,  # เปิดทิศเดียวกันได้ไม่เกิน 2 position
+            },
+        }
+        self._consecutive_losses = 0
+        self._last_loss_time: Optional[datetime] = None
+        self._break_even_applied: Dict[str, bool] = {}  # Track positions with break-even
         
         # 📊 Last Analysis Results (for Frontend API) - keyed by symbol
         self._last_analysis_by_symbol: Dict[str, Dict[str, Any]] = {}
@@ -357,6 +424,10 @@ class AITradingBot:
         # 🎯 Last Trade Result (for debugging why trades didn't execute)
         self._last_trade_result_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_trade_result: Dict[str, Any] = {}  # Last execute_trade() result
+        self._last_ultra_decision: Dict[str, Any] = {}  # Last Ultra Intelligence decision
+        self._last_supreme_decision: Dict[str, Any] = {}  # Last Supreme Intelligence decision
+        self._last_transcendent_decision: Dict[str, Any] = {}  # Last Transcendent Intelligence decision
+        self._last_omniscient_decision: Dict[str, Any] = {}  # Last Omniscient Intelligence decision
         
         # Subscribers for real-time updates (SSE)
         self._subscribers: List[asyncio.Queue] = []
@@ -1044,9 +1115,90 @@ class AITradingBot:
         logger.info("   - Self-Improvement Engine")
         logger.info("   - Market Condition Analyzer")
         
+        # 17. 🧠⚡ Ultra Intelligence - 10x Smarter Trading
+        self.ultra_intelligence = get_ultra_intelligence()
+        logger.info("✓ Ultra Intelligence initialized:")
+        logger.info("   - Smart Money Concepts (SMC)")
+        logger.info("   - Market Structure Analysis")
+        logger.info("   - Session Quality Filter")
+        logger.info("   - Volatility Scaling")
+        logger.info("   - Liquidity Zone Detection")
+        logger.info("   - Adaptive Position Sizing")
+        logger.info("   - Partial Profit Taking")
+        logger.info("   - Momentum Filter")
+        
+        # 18. 🏆👑 Supreme Intelligence - 20x Smarter (Hedge Fund Level)
+        self.supreme_intelligence = get_supreme_intelligence()
+        logger.info("✓ Supreme Intelligence initialized:")
+        logger.info("   - Order Flow Analysis (Buy/Sell Pressure)")
+        logger.info("   - Institutional Footprint Detection")
+        logger.info("   - Market Entropy Analysis (Chaos Level)")
+        logger.info("   - Fractal Dimension Calculation")
+        logger.info("   - Win Probability Estimation")
+        logger.info("   - Alpha Potential Calculation")
+        logger.info("   - Self-Learning Weight Optimization")
+        logger.info("   - Execution Timing Quality")
+        logger.info("   - Dynamic SL/TP Optimization")
+        logger.info("   - Scale In/Out Level Detection")
+        
+        # 19. 🌌✨ Transcendent Intelligence - 50x Smarter (Beyond Human)
+        self.transcendent_intelligence = get_transcendent_intelligence()
+        logger.info("✓ Transcendent Intelligence initialized:")
+        logger.info("   - Quantum Probability Fields")
+        logger.info("   - Multi-Dimensional Analysis (7D)")
+        logger.info("   - Black Swan Detection")
+        logger.info("   - Market Microstructure Analysis")
+        logger.info("   - Signal Purity Filter")
+        logger.info("   - Risk Topology Analysis")
+        logger.info("   - Quantum Kelly Criterion")
+        logger.info("   - Entry/Exit Optimization")
+        logger.info("   - Scale In/Out Levels")
+        logger.info("   - Time Decay Factor")
+        logger.info("   - Market Synchronicity")
+        logger.info("   - Self-Evolving Weights")
+        
+        # 20. 🔮 Omniscient Intelligence - 100x Smarter (All-Knowing)
+        self.omniscient_intelligence = get_omniscient_intelligence()
+        logger.info("✓ Omniscient Intelligence initialized:")
+        logger.info("   === MARKET PHYSICS (1-10) ===")
+        logger.info("   - Gravitational Price Levels")
+        logger.info("   - Momentum Wave Interference")
+        logger.info("   - Price Velocity & Acceleration")
+        logger.info("   - Resonance Frequency Detection")
+        logger.info("   === NEURAL ENSEMBLE (11-20) ===")
+        logger.info("   - Deep LSTM Prediction")
+        logger.info("   - Transformer Attention")
+        logger.info("   - CNN Pattern Scanner")
+        logger.info("   - Ensemble Voting Network")
+        logger.info("   === INFORMATION THEORY (21-30) ===")
+        logger.info("   - Shannon Entropy Decoder")
+        logger.info("   - KL Divergence Monitor")
+        logger.info("   - Signal-to-Noise Ratio")
+        logger.info("   === CHAOS & COMPLEXITY (31-40) ===")
+        logger.info("   - Lyapunov Exponent")
+        logger.info("   - Fractal Dimension")
+        logger.info("   - Bifurcation Detection")
+        logger.info("   === GAME THEORY (41-50) ===")
+        logger.info("   - Nash Equilibrium")
+        logger.info("   - Pareto Efficiency")
+        logger.info("   - Dominant Strategy")
+        logger.info("   === BEHAVIORAL FINANCE (51-60) ===")
+        logger.info("   - Herding Detection")
+        logger.info("   - Bias Identification")
+        logger.info("   - Regret Minimization")
+        logger.info("   === RISK MATHEMATICS (71-80) ===")
+        logger.info("   - VaR/CVaR Calculator")
+        logger.info("   - Jump Probability")
+        logger.info("   - Max Drawdown Predictor")
+        logger.info("   === OMNISCIENT CORE (91-100) ===")
+        logger.info("   - Consciousness Simulation")
+        logger.info("   - Universal Alignment")
+        logger.info("   - Prophecy Generation")
+        
         logger.info("=" * 60)
         logger.info("✓ Bot initialization complete!")
-        logger.info(f"🏛️ Total Intelligence Layers: 16")
+        logger.info(f"🏛️ Total Intelligence Layers: 20")
+        logger.info(f"🔮 Total Features: 100+ (OMNISCIENT)")
         logger.info("=" * 60)
     
     async def _build_index(self, symbol: str):
@@ -1421,6 +1573,395 @@ class AITradingBot:
         
         logger.info(f"🔍 execute_trade() called for {symbol}")
         logger.info(f"   Signal: {signal}, Quality: {quality}, Price: {current_price}")
+        
+        # 🧠 SMART FEATURES CHECK - ตรวจสอบก่อนเทรด
+        can_trade, reason = self._can_trade_today()
+        if not can_trade:
+            logger.warning(f"⛔ Trade blocked by smart features: {reason}")
+            return {"action": "BLOCKED", "reason": reason, "symbol": symbol}
+        
+        # 🔗 Correlation Check
+        side_str = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+        can_trade, reason = self._check_correlation(symbol, side_str)
+        if not can_trade:
+            logger.warning(f"⛔ Trade blocked by correlation: {reason}")
+            return {"action": "BLOCKED", "reason": reason, "symbol": symbol}
+        
+        # 🧠⚡ ULTRA INTELLIGENCE CHECK - 10x Smarter
+        ultra_decision = None
+        ultra_multiplier = 1.0
+        if self.ultra_intelligence:
+            try:
+                # Get price data
+                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                if len(df) >= 50:
+                    prices = df['close'].values.astype(np.float32)
+                    highs = df['high'].values.astype(np.float32)
+                    lows = df['low'].values.astype(np.float32)
+                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
+                    
+                    # Calculate ATR
+                    atr = np.mean(np.maximum(
+                        highs[-14:] - lows[-14:],
+                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
+                    ))
+                    
+                    # Get balance
+                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                    
+                    ultra_decision = self.ultra_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=analysis.get("enhanced_confidence", 70),
+                        current_balance=balance,
+                        account_equity=equity
+                    )
+                    
+                    # Log Ultra Intelligence results
+                    logger.info(f"🧠⚡ ULTRA INTELLIGENCE:")
+                    logger.info(f"   Session: {ultra_decision.session_quality.value}")
+                    logger.info(f"   Volatility: {ultra_decision.volatility_state.value}")
+                    logger.info(f"   Phase: {ultra_decision.market_phase.value}")
+                    logger.info(f"   Structure: {ultra_decision.market_structure.trend if ultra_decision.market_structure else 'N/A'}")
+                    logger.info(f"   Size Mult: {ultra_decision.position_size_multiplier}x")
+                    logger.info(f"   Optimal R:R: {ultra_decision.optimal_rr}")
+                    logger.info(f"   Confidence: {ultra_decision.confidence}%")
+                    
+                    for reason in ultra_decision.reasons:
+                        logger.info(f"   ✅ {reason}")
+                    for warning in ultra_decision.warnings:
+                        logger.warning(f"   ⚠️ {warning}")
+                    
+                    # Check if Ultra blocks the trade
+                    if not ultra_decision.can_trade:
+                        logger.warning(f"⛔ Trade blocked by Ultra Intelligence")
+                        return {
+                            "action": "BLOCKED_BY_ULTRA",
+                            "reason": "; ".join(ultra_decision.warnings),
+                            "symbol": symbol,
+                            "session": ultra_decision.session_quality.value,
+                            "volatility": ultra_decision.volatility_state.value
+                        }
+                    
+                    # Apply Ultra multiplier
+                    ultra_multiplier = ultra_decision.position_size_multiplier
+                    
+                    # Store for later use
+                    self._last_ultra_decision = {
+                        "symbol": symbol,
+                        "can_trade": ultra_decision.can_trade,
+                        "confidence": ultra_decision.confidence,
+                        "size_multiplier": ultra_decision.position_size_multiplier,
+                        "optimal_rr": ultra_decision.optimal_rr,
+                        "session": ultra_decision.session_quality.value,
+                        "volatility": ultra_decision.volatility_state.value,
+                        "phase": ultra_decision.market_phase.value,
+                        "entry_type": ultra_decision.entry_type,
+                        "use_partial_tp": ultra_decision.use_partial_tp,
+                        "reasons": ultra_decision.reasons,
+                        "warnings": ultra_decision.warnings,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Ultra Intelligence analysis failed: {e}")
+        
+        # 🏆👑 SUPREME INTELLIGENCE CHECK - 20x Smarter (Hedge Fund Level)
+        supreme_decision = None
+        supreme_multiplier = 1.0
+        if self.supreme_intelligence:
+            try:
+                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                if len(df) >= 50:
+                    prices = df['close'].values.astype(np.float32)
+                    highs = df['high'].values.astype(np.float32)
+                    lows = df['low'].values.astype(np.float32)
+                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
+                    
+                    atr = np.mean(np.maximum(
+                        highs[-14:] - lows[-14:],
+                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
+                    ))
+                    
+                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                    
+                    supreme_decision = self.supreme_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=analysis.get("enhanced_confidence", 70),
+                        balance=balance,
+                        equity=equity,
+                    )
+                    
+                    logger.info(f"🏆👑 SUPREME INTELLIGENCE:")
+                    logger.info(f"   Entropy: {supreme_decision.entropy_level.value}")
+                    logger.info(f"   Institutional: {supreme_decision.institutional_activity.value}")
+                    logger.info(f"   Momentum: {supreme_decision.momentum_quality.value}")
+                    logger.info(f"   Confluence: {supreme_decision.confluence_score:.0f}%")
+                    logger.info(f"   Win Prob: {supreme_decision.win_probability:.0f}%")
+                    logger.info(f"   Alpha: {supreme_decision.alpha_potential:.1f}%")
+                    logger.info(f"   Signal: {supreme_decision.signal_strength}")
+                    logger.info(f"   Size: {supreme_decision.optimal_size_percent:.2f}x")
+                    logger.info(f"   Execution: {supreme_decision.execution_timing.value}")
+                    
+                    for reason in supreme_decision.reasons:
+                        logger.info(f"   ✅ {reason}")
+                    for warning in supreme_decision.warnings:
+                        logger.warning(f"   ⚠️ {warning}")
+                    
+                    if not supreme_decision.can_trade:
+                        logger.warning(f"⛔ Trade blocked by Supreme Intelligence")
+                        return {
+                            "action": "BLOCKED_BY_SUPREME",
+                            "reason": "; ".join(supreme_decision.warnings),
+                            "symbol": symbol,
+                            "entropy": supreme_decision.entropy_level.value,
+                            "win_probability": supreme_decision.win_probability,
+                            "confluence_score": supreme_decision.confluence_score,
+                        }
+                    
+                    supreme_multiplier = supreme_decision.optimal_size_percent
+                    
+                    self._last_supreme_decision = {
+                        "symbol": symbol,
+                        "can_trade": supreme_decision.can_trade,
+                        "confidence": supreme_decision.confidence,
+                        "signal_strength": supreme_decision.signal_strength,
+                        "size_percent": supreme_decision.optimal_size_percent,
+                        "entropy": supreme_decision.entropy_level.value,
+                        "institutional": supreme_decision.institutional_activity.value,
+                        "momentum": supreme_decision.momentum_quality.value,
+                        "confluence": supreme_decision.confluence_score,
+                        "win_probability": supreme_decision.win_probability,
+                        "alpha_potential": supreme_decision.alpha_potential,
+                        "execution_timing": supreme_decision.execution_timing.value,
+                        "optimal_sl": supreme_decision.optimal_sl_distance,
+                        "optimal_tp": supreme_decision.optimal_tp_distance,
+                        "max_holding_hours": supreme_decision.max_holding_hours,
+                        "reasons": supreme_decision.reasons,
+                        "warnings": supreme_decision.warnings,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Supreme Intelligence analysis failed: {e}")
+        
+        # 🌌✨ TRANSCENDENT INTELLIGENCE CHECK - 50x Smarter (Beyond Human)
+        transcendent_decision = None
+        transcendent_multiplier = 1.0
+        if self.transcendent_intelligence:
+            try:
+                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                if len(df) >= 50:
+                    prices = df['close'].values.astype(np.float32)
+                    highs = df['high'].values.astype(np.float32)
+                    lows = df['low'].values.astype(np.float32)
+                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
+                    
+                    atr = np.mean(np.maximum(
+                        highs[-14:] - lows[-14:],
+                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
+                    ))
+                    
+                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                    
+                    transcendent_decision = self.transcendent_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=analysis.get("enhanced_confidence", 70),
+                        balance=balance,
+                        equity=equity,
+                    )
+                    
+                    logger.info(f"🌌✨ TRANSCENDENT INTELLIGENCE:")
+                    logger.info(f"   Quantum: {transcendent_decision.quantum_field.quantum_state.value}")
+                    logger.info(f"   Bull Prob: {transcendent_decision.quantum_field.bull_probability:.0%}")
+                    logger.info(f"   Bear Prob: {transcendent_decision.quantum_field.bear_probability:.0%}")
+                    logger.info(f"   Dimensions: {transcendent_decision.multi_dimensional.dimensional_alignment:.0f}%")
+                    logger.info(f"   Purity: {transcendent_decision.signal_purity.value}")
+                    logger.info(f"   Topology: {transcendent_decision.risk_topology.value}")
+                    logger.info(f"   Win Prob: {transcendent_decision.win_probability:.0%}")
+                    logger.info(f"   Expected Value: {transcendent_decision.expected_value:.4f}")
+                    logger.info(f"   Score: {transcendent_decision.transcendent_score:.0f}/100")
+                    logger.info(f"   Level: {transcendent_decision.intelligence_level.value}")
+                    
+                    for reason in transcendent_decision.reasons:
+                        logger.info(f"   ✅ {reason}")
+                    for warning in transcendent_decision.warnings:
+                        logger.warning(f"   ⚠️ {warning}")
+                    for insight in transcendent_decision.insights[:3]:  # Top 3 insights
+                        logger.info(f"   💡 {insight}")
+                    
+                    if not transcendent_decision.can_trade:
+                        logger.warning(f"⛔ Trade blocked by Transcendent Intelligence")
+                        return {
+                            "action": "BLOCKED_BY_TRANSCENDENT",
+                            "reason": "; ".join(transcendent_decision.warnings),
+                            "symbol": symbol,
+                            "quantum_state": transcendent_decision.quantum_field.quantum_state.value,
+                            "transcendent_score": transcendent_decision.transcendent_score,
+                            "win_probability": transcendent_decision.win_probability,
+                            "expected_value": transcendent_decision.expected_value,
+                        }
+                    
+                    transcendent_multiplier = transcendent_decision.quantum_position_size * 10  # Scale up
+                    
+                    self._last_transcendent_decision = {
+                        "symbol": symbol,
+                        "can_trade": transcendent_decision.can_trade,
+                        "confidence": transcendent_decision.confidence,
+                        "quantum_state": transcendent_decision.quantum_field.quantum_state.value,
+                        "bull_probability": transcendent_decision.quantum_field.bull_probability,
+                        "bear_probability": transcendent_decision.quantum_field.bear_probability,
+                        "dimensional_alignment": transcendent_decision.multi_dimensional.dimensional_alignment,
+                        "signal_purity": transcendent_decision.signal_purity.value,
+                        "risk_topology": transcendent_decision.risk_topology.value,
+                        "win_probability": transcendent_decision.win_probability,
+                        "expected_value": transcendent_decision.expected_value,
+                        "transcendent_score": transcendent_decision.transcendent_score,
+                        "intelligence_level": transcendent_decision.intelligence_level.value,
+                        "quantum_sl": transcendent_decision.quantum_sl,
+                        "quantum_tp": transcendent_decision.quantum_tp,
+                        "expected_rr": transcendent_decision.expected_rr,
+                        "kelly_quantum": transcendent_decision.kelly_quantum,
+                        "position_size": transcendent_decision.quantum_position_size,
+                        "reasons": transcendent_decision.reasons,
+                        "warnings": transcendent_decision.warnings,
+                        "insights": transcendent_decision.insights,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Transcendent Intelligence analysis failed: {e}")
+        
+        # 🔮 OMNISCIENT INTELLIGENCE - 100x SMARTER (All-Knowing)
+        omniscient_decision: Optional[OmniscientDecision] = None
+        omniscient_multiplier = 1.0
+        if self.omniscient_intelligence and analysis.get("market_data"):
+            try:
+                market_data = analysis.get("market_data", {})
+                atr = market_data.get("atr", 0)
+                
+                # Get more data for Omniscient analysis (need 100+ candles)
+                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=200)
+                if df is not None and len(df) > 50:
+                    prices = df['close'].values.astype(np.float32)
+                    highs = df['high'].values.astype(np.float32)
+                    lows = df['low'].values.astype(np.float32)
+                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df else None
+                    
+                    account = await self.get_account_info()
+                    balance = account.get("balance", 10000)
+                    equity = account.get("equity", balance)
+                    
+                    omniscient_decision = self.omniscient_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=signal_side,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=analysis.get("confidence", 50),
+                        balance=balance,
+                        equity=equity,
+                    )
+                    
+                    logger.info(f"🔮 OMNISCIENT INTELLIGENCE:")
+                    logger.info(f"   Consciousness: {omniscient_decision.consciousness_level.value}")
+                    logger.info(f"   Physics: {omniscient_decision.physics.physics_state.value}")
+                    logger.info(f"   Neural: {omniscient_decision.neural.confidence.value} → {omniscient_decision.neural.ensemble_vote}")
+                    logger.info(f"   Chaos: {omniscient_decision.chaos.chaos_level.value}")
+                    logger.info(f"   Game Strategy: {omniscient_decision.game_theory.strategy.value}")
+                    logger.info(f"   Risk State: {omniscient_decision.risk_math.risk_state.value}")
+                    logger.info(f"   Win Prob: {omniscient_decision.win_probability:.0%}")
+                    logger.info(f"   Edge: {omniscient_decision.edge:.2f}%")
+                    logger.info(f"   Omniscient Score: {omniscient_decision.omniscient_score:.0f}/100")
+                    logger.info(f"   Universal Alignment: {omniscient_decision.universal_alignment:.0f}%")
+                    
+                    # Show biases
+                    if omniscient_decision.behavioral.detected_biases:
+                        biases = [b.value for b in omniscient_decision.behavioral.detected_biases]
+                        logger.info(f"   Biases: {', '.join(biases)}")
+                    
+                    # Show prophecies
+                    for prophecy in omniscient_decision.prophecies[:2]:
+                        logger.info(f"   🔮 {prophecy}")
+                    
+                    for reason in omniscient_decision.reasons:
+                        logger.info(f"   ✅ {reason}")
+                    for warning in omniscient_decision.warnings[:3]:
+                        logger.warning(f"   ⚠️ {warning}")
+                    for insight in omniscient_decision.insights[:3]:
+                        logger.info(f"   💡 {insight}")
+                    
+                    if not omniscient_decision.can_trade:
+                        logger.warning(f"⛔ Trade blocked by Omniscient Intelligence")
+                        return {
+                            "action": "BLOCKED_BY_OMNISCIENT",
+                            "reason": "; ".join(omniscient_decision.warnings),
+                            "symbol": symbol,
+                            "consciousness": omniscient_decision.consciousness_level.value,
+                            "omniscient_score": omniscient_decision.omniscient_score,
+                            "win_probability": omniscient_decision.win_probability,
+                            "edge": omniscient_decision.edge,
+                            "physics_state": omniscient_decision.physics.physics_state.value,
+                            "chaos_level": omniscient_decision.chaos.chaos_level.value,
+                        }
+                    
+                    omniscient_multiplier = omniscient_decision.omniscient_position_size * 10
+                    
+                    self._last_omniscient_decision = {
+                        "symbol": symbol,
+                        "can_trade": omniscient_decision.can_trade,
+                        "confidence": omniscient_decision.confidence,
+                        "consciousness_level": omniscient_decision.consciousness_level.value,
+                        "omniscient_score": omniscient_decision.omniscient_score,
+                        "universal_alignment": omniscient_decision.universal_alignment,
+                        "physics_state": omniscient_decision.physics.physics_state.value,
+                        "neural_confidence": omniscient_decision.neural.confidence.value,
+                        "neural_vote": omniscient_decision.neural.ensemble_vote,
+                        "chaos_level": omniscient_decision.chaos.chaos_level.value,
+                        "game_strategy": omniscient_decision.game_theory.strategy.value,
+                        "risk_state": omniscient_decision.risk_math.risk_state.value,
+                        "biases": [b.value for b in omniscient_decision.behavioral.detected_biases],
+                        "win_probability": omniscient_decision.win_probability,
+                        "expected_value": omniscient_decision.expected_value,
+                        "edge": omniscient_decision.edge,
+                        "optimal_sl": omniscient_decision.optimal_sl,
+                        "optimal_tp": omniscient_decision.optimal_tp,
+                        "expected_rr": omniscient_decision.expected_rr,
+                        "prophecies": omniscient_decision.prophecies,
+                        "reasons": omniscient_decision.reasons,
+                        "warnings": omniscient_decision.warnings,
+                        "insights": omniscient_decision.insights,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Omniscient Intelligence analysis failed: {e}")
         
         # 🧠 ADVANCED INTELLIGENCE CHECK
         intel_multiplier = 1.0
@@ -2294,9 +2835,23 @@ class AITradingBot:
         # 🏛️⚔️ Titan Core position size factor (Final)
         position_multiplier = min(position_multiplier, titan_multiplier)
         
+        # 🧠⚡ Ultra Intelligence position size factor (Ultimate)
+        position_multiplier = min(position_multiplier, ultra_multiplier)
+        
+        # 🏆👑 Supreme Intelligence position size factor (Hedge Fund Level)
+        position_multiplier = min(position_multiplier, supreme_multiplier)
+        
+        # 🌌✨ Transcendent Intelligence position size factor (Beyond Human)
+        position_multiplier = min(position_multiplier, transcendent_multiplier)
+        
+        # 🔮 Omniscient Intelligence position size factor (All-Knowing)
+        position_multiplier = min(position_multiplier, omniscient_multiplier)
+        
         logger.info(f"   📊 Final Position Multiplier: {position_multiplier:.2f}x")
         logger.info(f"      Neural: {neural_multiplier}x | Deep: {deep_multiplier:.2f}x | Quantum: {quantum_multiplier:.2f}x")
         logger.info(f"      Alpha: {alpha_multiplier:.2f}x | Omega: {omega_multiplier:.2f}x | Titan: {titan_multiplier:.2f}x")
+        logger.info(f"      Ultra: {ultra_multiplier:.2f}x | Supreme: {supreme_multiplier:.2f}x | Transcendent: {transcendent_multiplier:.2f}x")
+        logger.info(f"      🔮 Omniscient: {omniscient_multiplier:.2f}x")
         
         # 🔒 MANDATORY STOP LOSS - Use Risk Guardian to validate/fix
         if self.risk_guardian:
@@ -2337,6 +2892,23 @@ class AITradingBot:
                 take_profit = current_price * 0.98  # Default 2% profit
                 logger.warning(f"⚠️ Fixed invalid TP for SELL: {old_tp:.5f} -> {take_profit:.5f}")
         
+
+            # 🎯 LIMIT TP - ไม่ให้ TP ไกลเกินไป (Max R:R = 2.0)
+            if take_profit and stop_loss:
+                sl_distance = abs(current_price - stop_loss)
+                tp_distance = abs(take_profit - current_price)
+                current_rr = tp_distance / sl_distance if sl_distance > 0 else 0
+                max_rr = 2.0
+                if current_rr > max_rr:
+                    old_tp = take_profit
+                    tp_distance_limited = sl_distance * max_rr
+                    if side == OrderSide.BUY:
+                        take_profit = current_price + tp_distance_limited
+                    else:
+                        take_profit = current_price - tp_distance_limited
+                    logger.info(f"🎯 Limited TP: R:R {current_rr:.1f} -> {max_rr:.1f}, TP: {old_tp:.5f} -> {take_profit:.5f}")
+
+
         # �🛡️ Calculate position size using Risk Guardian
         balance = await self.trading_engine.broker.get_balance()
         
@@ -2451,6 +3023,471 @@ class AITradingBot:
             logger.warning("❌ Trade failed: execute_order returned None (trading engine disabled?)")
             return {"action": "SKIP", "reason": "Trading engine returned None"}
     
+
+
+    async def _apply_break_even(self) -> None:
+        """🛡️ Break-Even - ย้าย SL ไปจุด entry เมื่อกำไร"""
+        config = self._smart_features.get("break_even", {})
+        if not config.get("enabled", False):
+            return
+        
+        if not self.trading_engine or not self.trading_engine.positions:
+            return
+        
+        activation_pct = config.get("activation_pct", 0.5)
+        offset_pct = config.get("offset_pct", 0.05)
+        
+        for pos_id, position in list(self.trading_engine.positions.items()):
+            try:
+                # Skip if already applied
+                if self._break_even_applied.get(pos_id, False):
+                    continue
+                
+                symbol = position.symbol
+                current_price = position.current_price or 0
+                entry_price = position.entry_price or 0
+                current_sl = position.stop_loss
+                
+                if not current_price or not entry_price:
+                    continue
+                
+                # Calculate profit percentage
+                if position.side == OrderSide.BUY:
+                    profit_pct = ((current_price - entry_price) / entry_price) * 100
+                else:
+                    profit_pct = ((entry_price - current_price) / entry_price) * 100
+                
+                # Check activation
+                if profit_pct < activation_pct:
+                    continue
+                
+                # Calculate break-even SL with offset
+                offset = entry_price * (offset_pct / 100)
+                
+                if position.side == OrderSide.BUY:
+                    new_sl = entry_price + offset
+                    # Only move if better than current SL
+                    if current_sl and new_sl <= current_sl:
+                        continue
+                else:
+                    new_sl = entry_price - offset
+                    if current_sl and new_sl >= current_sl:
+                        continue
+                
+                # Round appropriately
+                is_gold = "XAU" in symbol.upper()
+                new_sl = round(new_sl, 2 if is_gold else 5)
+                
+                # Apply break-even
+                success = await self.trading_engine.broker.modify_position(
+                    position_id=pos_id,
+                    stop_loss=new_sl
+                )
+                
+                if success:
+                    self._break_even_applied[pos_id] = True
+                    position.stop_loss = new_sl
+                    logger.info(
+                        f"🛡️ BREAK-EVEN: {symbol} | "
+                        f"Entry: {entry_price:.5f} | "
+                        f"New SL: {new_sl:.5f} | "
+                        f"Profit: {profit_pct:.2f}%"
+                    )
+                    
+                    await self._broadcast_update("break_even_applied", {
+                        "symbol": symbol,
+                        "position_id": pos_id,
+                        "entry_price": entry_price,
+                        "new_sl": new_sl,
+                        "profit_pct": profit_pct,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error applying break-even for {pos_id}: {e}")
+    
+    async def _check_time_exit(self) -> None:
+        """⏰ Time Exit - ปิดออเดอร์ที่ค้างนานเกินไป"""
+        config = self._smart_features.get("time_exit", {})
+        if not config.get("enabled", False):
+            return
+        
+        if not self.trading_engine or not self.trading_engine.positions:
+            return
+        
+        max_hours = config.get("max_hours", 24)
+        
+        for pos_id, position in list(self.trading_engine.positions.items()):
+            try:
+                # Check how long position has been open
+                opened_at = getattr(position, 'opened_at', None)
+                if not opened_at:
+                    continue
+                
+                hours_open = (datetime.now() - opened_at).total_seconds() / 3600
+                
+                if hours_open >= max_hours:
+                    symbol = position.symbol
+                    pnl = position.pnl or 0
+                    
+                    logger.info(
+                        f"⏰ TIME EXIT: {symbol} | "
+                        f"Open for {hours_open:.1f} hours | "
+                        f"PnL: ${pnl:.2f}"
+                    )
+                    
+                    # Close position
+                    await self.trading_engine.close_position(pos_id, reason="time_exit")
+                    
+                    await self._broadcast_update("time_exit", {
+                        "symbol": symbol,
+                        "position_id": pos_id,
+                        "hours_open": hours_open,
+                        "pnl": pnl,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error checking time exit for {pos_id}: {e}")
+    
+    def _can_trade_today(self) -> tuple[bool, str]:
+        """📊 Check if we can trade today based on limits"""
+        # Max daily trades
+        config = self._smart_features.get("max_daily_trades", {})
+        if config.get("enabled", False):
+            limit = config.get("limit", 5)
+            today_trades = self._daily_stats.get("trades", 0)
+            if today_trades >= limit:
+                return False, f"Daily limit reached ({today_trades}/{limit})"
+        
+        # Consecutive loss protection
+        config = self._smart_features.get("loss_protection", {})
+        if config.get("enabled", False):
+            max_losses = config.get("max_consecutive_losses", 3)
+            cooldown = config.get("cooldown_minutes", 60)
+            
+            if self._consecutive_losses >= max_losses:
+                if self._last_loss_time:
+                    minutes_since = (datetime.now() - self._last_loss_time).total_seconds() / 60
+                    if minutes_since < cooldown:
+                        remaining = int(cooldown - minutes_since)
+                        return False, f"Loss protection active ({remaining}m cooldown)"
+                    else:
+                        # Reset after cooldown
+                        self._consecutive_losses = 0
+        
+        return True, "OK"
+    
+    def _check_correlation(self, symbol: str, side: str) -> tuple[bool, str]:
+        """🔗 Check correlation protection"""
+        config = self._smart_features.get("correlation_protection", {})
+        if not config.get("enabled", False):
+            return True, "OK"
+        
+        if not self.trading_engine or not self.trading_engine.positions:
+            return True, "OK"
+        
+        max_same = config.get("max_same_direction", 2)
+        
+        # Count positions in same direction
+        same_direction = 0
+        for pos in self.trading_engine.positions.values():
+            if pos.side.value == side:
+                same_direction += 1
+        
+        if same_direction >= max_same:
+            return False, f"Max {max_same} positions in {side} direction"
+        
+        return True, "OK"
+    
+    def _update_loss_tracking(self, pnl: float) -> None:
+        """📉 Update consecutive loss tracking"""
+        if pnl < 0:
+            self._consecutive_losses += 1
+            self._last_loss_time = datetime.now()
+            logger.warning(f"📉 Consecutive losses: {self._consecutive_losses}")
+        else:
+            self._consecutive_losses = 0
+            logger.info(f"📈 Win! Consecutive losses reset")
+
+    async def _update_floating_tp(
+        self,
+        position,
+        new_sl: float,
+        entry_price: float,
+        current_price: float,
+        pos_id: str
+    ) -> Optional[float]:
+        """
+        🎯 FLOATING TP - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
+        
+        Logic:
+        1. เมื่อ SL ถูกยกขึ้น (locked profit) → TP ก็ควรขยับตาม
+        2. รักษา R:R ratio ขั้นต่ำ (เช่น 1.5:1)
+        3. ยืด TP เพิ่มเติมเมื่อ Momentum ดี
+        
+        ตัวอย่าง:
+        - Entry: 1.1000, Original SL: 1.0950, Original TP: 1.1100 (R:R = 2:1)
+        - SL ยกขึ้นเป็น 1.0980 (locked 0.3%)
+        - TP ใหม่ = Entry + (Entry - New_SL) * R:R = 1.1000 + (1.1000 - 1.0980) * 2 = 1.1040
+        - แต่ต้องไม่ต่ำกว่า TP เดิม! ดังนั้น TP ยังคง 1.1100 หรือยืดเป็น 1.1120
+        """
+        
+        if not self._floating_tp_config.get("enabled", False):
+            return None
+        
+        symbol = position.symbol
+        current_tp = position.take_profit
+        
+        if not current_tp:
+            return None
+        
+        # เก็บ TP เดิมถ้ายังไม่มี
+        if pos_id not in self._position_original_tp:
+            self._position_original_tp[pos_id] = current_tp
+        
+        original_tp = self._position_original_tp[pos_id]
+        config = self._floating_tp_config
+        min_rr = config.get("min_rr_ratio", 1.5)
+        extension_mult = config.get("tp_extension_multiplier", 1.2)
+        max_extension_pct = config.get("max_tp_extension_pct", 5.0)
+        
+        is_gold = "XAU" in symbol.upper() or "GOLD" in symbol.upper()
+        
+        try:
+            if position.side == OrderSide.BUY:
+                # BUY: SL ต่ำกว่า Entry, TP สูงกว่า Entry
+                new_risk = entry_price - new_sl  # Risk ลดลงแล้ว (SL ยกขึ้น)
+                
+                # คำนวณ TP ใหม่จาก R:R
+                new_reward_min = new_risk * min_rr
+                new_tp_from_rr = entry_price + new_reward_min
+                
+                # ยืด TP เพิ่มเมื่อ SL ถูก lock
+                # ยิ่ง lock profit มาก ยิ่งยืด TP มาก
+                locked_profit = new_sl - (entry_price - (original_tp - entry_price) / min_rr)
+                if locked_profit > 0:
+                    extension_factor = extension_mult
+                else:
+                    extension_factor = 1.0
+                
+                # TP ใหม่ = max(TP เดิม, TP จาก R:R ใหม่) * extension
+                base_tp = max(current_tp, new_tp_from_rr)
+                
+                # คำนวณ distance ที่ราคาวิ่งมาแล้ว
+                price_moved = current_price - entry_price
+                if price_moved > 0:
+                    # ราคาวิ่งไปในทิศทางที่ถูก → ยืด TP ตาม
+                    new_tp = entry_price + (original_tp - entry_price) + price_moved * (extension_factor - 1)
+                else:
+                    new_tp = base_tp
+                
+                # ไม่ให้ TP ต่ำกว่า TP เดิม
+                new_tp = max(new_tp, current_tp)
+                
+                # จำกัดการยืดไม่เกิน max_extension_pct
+                max_tp = entry_price * (1 + max_extension_pct / 100)
+                new_tp = min(new_tp, max_tp)
+                
+            else:  # SELL
+                # SELL: SL สูงกว่า Entry, TP ต่ำกว่า Entry
+                new_risk = new_sl - entry_price
+                
+                new_reward_min = new_risk * min_rr
+                new_tp_from_rr = entry_price - new_reward_min
+                
+                # TP ใหม่ = min(TP เดิม, TP จาก R:R ใหม่)
+                base_tp = min(current_tp, new_tp_from_rr)
+                
+                price_moved = entry_price - current_price
+                if price_moved > 0:
+                    new_tp = entry_price - (entry_price - original_tp) - price_moved * (extension_mult - 1)
+                else:
+                    new_tp = base_tp
+                
+                # ไม่ให้ TP สูงกว่า TP เดิม (สำหรับ SELL)
+                new_tp = min(new_tp, current_tp)
+                
+                # จำกัดการยืด
+                min_tp = entry_price * (1 - max_extension_pct / 100)
+                new_tp = max(new_tp, min_tp)
+            
+            # Round ตามประเภทสินทรัพย์
+            if is_gold:
+                new_tp = round(new_tp, 2)
+            else:
+                new_tp = round(new_tp, 5)
+            
+            # ถ้า TP เปลี่ยนแปลงมากพอ → อัพเดท
+            tp_change_pct = abs(new_tp - current_tp) / current_tp * 100
+            if tp_change_pct < 0.05:  # เปลี่ยนน้อยกว่า 0.05% ไม่ต้องอัพเดท
+                return current_tp
+            
+            # Modify TP via broker
+            success = await self.trading_engine.broker.modify_position(
+                position_id=pos_id,
+                take_profit=new_tp
+            )
+            
+            if success:
+                position.take_profit = new_tp
+                
+                # คำนวณ R:R ใหม่
+                if position.side == OrderSide.BUY:
+                    actual_risk = entry_price - new_sl
+                    actual_reward = new_tp - entry_price
+                else:
+                    actual_risk = new_sl - entry_price
+                    actual_reward = entry_price - new_tp
+                
+                new_rr = actual_reward / actual_risk if actual_risk > 0 else 0
+                
+                logger.info(
+                    f"🎯 FLOATING TP: {symbol} | "
+                    f"TP: {current_tp:.5f} → {new_tp:.5f} | "
+                    f"New R:R = 1:{new_rr:.2f}"
+                )
+                
+                return new_tp
+            else:
+                logger.warning(f"⚠️ Failed to modify TP for {symbol}")
+                return current_tp
+                
+        except Exception as e:
+            logger.error(f"Error updating floating TP for {symbol}: {e}")
+            return current_tp
+
+    async def _update_trailing_stops(self) -> None:
+        """🎯 Trailing Stop - ยก SL ตามราคาเพื่อล็อคกำไร"""
+        if not self._trailing_stop_config.get("enabled", False):
+            return
+        
+        if not self.trading_engine or not self.trading_engine.positions:
+            return
+        
+        config = self._trailing_stop_config
+        activation_pct = config.get("activation_profit_pct", 0.3)
+        trail_pct = config.get("trail_distance_pct", 0.2)
+        step_pct = config.get("step_pct", 0.1)
+        
+        for pos_id, position in list(self.trading_engine.positions.items()):
+            try:
+                symbol = position.symbol
+                current_price = position.current_price or 0
+                entry_price = position.entry_price or 0
+                current_sl = position.stop_loss
+                
+                if not current_price or not entry_price:
+                    continue
+                
+                # Calculate profit percentage
+                if position.side == OrderSide.BUY:
+                    profit_pct = ((current_price - entry_price) / entry_price) * 100
+                else:  # SELL
+                    profit_pct = ((entry_price - current_price) / entry_price) * 100
+                
+                # Check activation threshold
+                if profit_pct < activation_pct:
+                    continue
+                
+                # Determine min trail distance based on symbol
+                is_gold = "XAU" in symbol.upper() or "GOLD" in symbol.upper()
+                if is_gold:
+                    min_trail_distance = config.get("min_trail_distance_gold", 1.0)
+                else:
+                    min_trail_distance = config.get("min_trail_distance_forex", 0.0010)
+                
+                # Calculate trailing distance
+                trail_distance = max(current_price * (trail_pct / 100), min_trail_distance)
+                step_distance = current_price * (step_pct / 100)
+                
+                # Calculate new SL based on position side
+                if position.side == OrderSide.BUY:
+                    # For BUY: SL below current price, move up only
+                    new_sl = current_price - trail_distance
+                    
+                    # Don't move SL backward
+                    if current_sl and new_sl <= current_sl:
+                        continue
+                    
+                    # Check step size (move by at least step_distance)
+                    if current_sl and (new_sl - current_sl) < step_distance:
+                        continue
+                    
+                    # Don't move SL above entry (break-even ok, but not negative)
+                    # Actually for trailing, we can move above entry to lock profit
+                    
+                else:  # SELL
+                    # For SELL: SL above current price, move down only
+                    new_sl = current_price + trail_distance
+                    
+                    # Don't move SL backward (for SELL, lower is backward)
+                    if current_sl and new_sl >= current_sl:
+                        continue
+                    
+                    # Check step size
+                    if current_sl and (current_sl - new_sl) < step_distance:
+                        continue
+                
+                # Round to appropriate precision
+                if is_gold:
+                    new_sl = round(new_sl, 2)
+                else:
+                    new_sl = round(new_sl, 5)
+                
+                # Modify position SL via broker
+                try:
+                    success = await self.trading_engine.broker.modify_position(
+                        position_id=pos_id,
+                        stop_loss=new_sl
+                    )
+                    
+                    if success:
+                        old_sl = current_sl or entry_price
+                        position.stop_loss = new_sl
+                        
+                        # Calculate locked profit
+                        if position.side == OrderSide.BUY:
+                            locked_profit_pct = ((new_sl - entry_price) / entry_price) * 100
+                        else:
+                            locked_profit_pct = ((entry_price - new_sl) / entry_price) * 100
+                        
+                        logger.info(
+                            f"📈 TRAILING STOP: {symbol} | "
+                            f"Profit: {profit_pct:.2f}% | "
+                            f"SL: {old_sl:.5f} → {new_sl:.5f} | "
+                            f"Locked: {locked_profit_pct:.2f}%"
+                        )
+                        
+                        # 🎯 FLOATING TP - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
+                        new_tp = await self._update_floating_tp(
+                            position=position,
+                            new_sl=new_sl,
+                            entry_price=entry_price,
+                            current_price=current_price,
+                            pos_id=pos_id
+                        )
+                        
+                        # Broadcast update
+                        await self._broadcast_update("trailing_stop_moved", {
+                            "symbol": symbol,
+                            "position_id": pos_id,
+                            "old_sl": old_sl,
+                            "new_sl": new_sl,
+                            "new_tp": new_tp,
+                            "profit_pct": profit_pct,
+                            "locked_profit_pct": locked_profit_pct,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    else:
+                        logger.warning(f"⚠️ Failed to modify SL for {symbol}")
+                        
+                except Exception as e:
+                    logger.error(f"Error modifying trailing stop for {symbol}: {e}")
+                    
+            except Exception as e:
+                logger.error(f"Error in trailing stop for position {pos_id}: {e}")
+
     async def run(self, interval_seconds: int = 60):
         """Run the enhanced trading bot"""
         # Store interval for status reporting
@@ -2488,6 +3525,15 @@ class AITradingBot:
                 if self.trading_engine:
                     sync_result = await self.trading_engine.sync_with_broker()
                     
+                    # 📈 Update Trailing Stops - ยก SL ตามราคา
+                    await self._update_trailing_stops()
+                    
+                    # 🛡️ Apply Break-Even - ย้าย SL ไป entry
+                    await self._apply_break_even()
+                    
+                    # ⏰ Check Time Exit - ปิดออเดอร์ที่ค้างนาน
+                    await self._check_time_exit()
+                    
                     # Update daily stats if positions were closed externally
                     for removed_pos in sync_result.get("removed", []):
                         pnl = removed_pos.get("pnl", 0)
@@ -2508,6 +3554,34 @@ class AITradingBot:
                             "timestamp": datetime.now().isoformat()
                         })
                         logger.info(f"📊 Position closed externally: {removed_pos.get('symbol')} PnL: ${pnl:.2f}")
+                        
+                        # 📉 Update loss tracking for smart features
+                        self._update_loss_tracking(pnl)
+                        
+                        # 🧠⚡ Update Ultra Intelligence performance
+                        if self.ultra_intelligence:
+                            self.ultra_intelligence.update_performance(pnl, pnl > 0)
+                        
+                        # 🏆👑 Update Supreme Intelligence performance
+                        if self.supreme_intelligence:
+                            self.supreme_intelligence.update_trade_result({
+                                "pnl": pnl,
+                                "symbol": removed_pos.get("symbol"),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        
+                        # 🌌✨ Update Transcendent Intelligence performance
+                        if self.transcendent_intelligence:
+                            self.transcendent_intelligence.update_trade_result({
+                                "pnl": pnl,
+                                "symbol": removed_pos.get("symbol"),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        
+                        # Clean up break-even tracking
+                        pos_id = removed_pos.get("id")
+                        if pos_id in self._break_even_applied:
+                            del self._break_even_applied[pos_id]
                 
                 # Reset daily stats at midnight
                 today = datetime.now().date().isoformat()

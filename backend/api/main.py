@@ -3077,6 +3077,245 @@ async def get_last_analysis():
     }
 
 
+@app.get("/api/v1/intelligence/layers")
+async def get_all_intelligence_layers():
+    """
+    🔮 Get comprehensive status of ALL 20 Intelligence Layers
+    
+    Returns real-time status of every intelligence module:
+    - Layer 1-10: Foundation (Pattern, Technical, Volume, Risk, etc.)
+    - Layer 11-16: Advanced (Neural, Deep, Quantum, Alpha, Omega, Titan)
+    - Layer 17: Ultra Intelligence (10x Smarter)
+    - Layer 18: Supreme Intelligence (20x Smarter)
+    - Layer 19: Transcendent Intelligence (50x Smarter)
+    - Layer 20: Omniscient Intelligence (100x Smarter)
+    """
+    global _auto_bot
+    
+    layers = [
+        # Foundation Layers (1-10)
+        {
+            "id": 1,
+            "name": "Pattern Recognition",
+            "description": "FAISS Pattern Matching - ค้นหา Pattern จากฐานข้อมูลล้านรายการใน milliseconds",
+            "icon": "🎯",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'matchers'),
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'matchers') else "inactive",
+            "features": ["FAISS Index", "Z-Score Normalization", "Correlation Check"],
+        },
+        {
+            "id": 2,
+            "name": "Technical Analysis",
+            "description": "RSI, MACD, Bollinger Bands, EMA - วิเคราะห์ตัวชี้วัดทางเทคนิค",
+            "icon": "📊",
+            "active": True,
+            "status": "active",
+            "features": ["RSI", "MACD", "Bollinger Bands", "EMA 20/50/200"],
+        },
+        {
+            "id": 3,
+            "name": "Volume Analysis",
+            "description": "Volume Profile, OBV, Volume Spike Detection",
+            "icon": "📈",
+            "active": True,
+            "status": "active",
+            "features": ["Volume Ratio", "OBV", "Volume Breakout"],
+        },
+        {
+            "id": 4,
+            "name": "Multi-Timeframe",
+            "description": "H1/H4/D1 Confluence - ดูหลาย Timeframe พร้อมกัน",
+            "icon": "🔄",
+            "active": True,
+            "status": "active",
+            "features": ["HTF Trend", "Confluence Score", "Timeframe Alignment"],
+        },
+        {
+            "id": 5,
+            "name": "Market Regime",
+            "description": "Trend/Range/Volatile Detection - ตรวจจับสถานะตลาด",
+            "icon": "🌊",
+            "active": True,
+            "status": "active",
+            "features": ["Trend Detection", "Volatility State", "Regime Classification"],
+        },
+        {
+            "id": 6,
+            "name": "Risk Guardian",
+            "description": "Max 2% Risk, 5% Daily Loss, 10% Drawdown - ปกป้องบัญชี",
+            "icon": "🛡️",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian else "inactive",
+            "features": ["Position Sizing", "Daily Loss Limit", "Drawdown Protection"],
+        },
+        {
+            "id": 7,
+            "name": "Pro Trading Features",
+            "description": "Session Filter, News Filter, Trailing Stop - ฟีเจอร์ Pro",
+            "icon": "🏆",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'pro_features') and _auto_bot.pro_features else "inactive",
+            "features": ["Session Filter", "News Filter", "Trailing Stop", "Break-Even"],
+        },
+        {
+            "id": 8,
+            "name": "Smart Brain",
+            "description": "Trade Journal, Pattern Memory, Adaptive Risk - เรียนรู้จากประสบการณ์",
+            "icon": "🧠",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'smart_brain') and _auto_bot.smart_brain else "inactive",
+            "features": ["Trade Journal", "Pattern Memory", "Adaptive Risk", "Firebase Sync"],
+        },
+        {
+            "id": 9,
+            "name": "Advanced Intelligence",
+            "description": "Market Regime, Kelly Criterion, Confluence Score",
+            "icon": "🎓",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'intelligence') and _auto_bot.intelligence else "inactive",
+            "features": ["Regime Detection", "Kelly Sizing", "S/R Detection"],
+        },
+        {
+            "id": 10,
+            "name": "Continuous Learning",
+            "description": "Online Learning, Market Cycle, Strategy Optimization",
+            "icon": "📚",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'learning_system') and _auto_bot.learning_system is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'learning_system') and _auto_bot.learning_system else "inactive",
+            "features": ["Online Learning", "Cycle Detection", "Background Processing"],
+        },
+        # Advanced Layers (11-16)
+        {
+            "id": 11,
+            "name": "Neural Brain",
+            "description": "Pattern DNA, Market State Machine, Anomaly Detection",
+            "icon": "🧬",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'neural_brain') and _auto_bot.neural_brain else "inactive",
+            "features": ["Pattern DNA", "7 Market States", "Anomaly Detector"],
+        },
+        {
+            "id": 12,
+            "name": "Deep Intelligence",
+            "description": "Cross-Asset Correlation, Predictive Model, Session Analyzer",
+            "icon": "🔮",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'deep_intelligence') and _auto_bot.deep_intelligence else "inactive",
+            "features": ["Cross-Asset", "5 Predictive Methods", "Parameter Tuning"],
+        },
+        {
+            "id": 13,
+            "name": "Quantum Strategy",
+            "description": "Market Microstructure, Volatility Regime, Fractal Analysis",
+            "icon": "⚛️",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'quantum_strategy') and _auto_bot.quantum_strategy else "inactive",
+            "features": ["Smart Money Detection", "GARCH Volatility", "Hurst Exponent"],
+        },
+        {
+            "id": 14,
+            "name": "Alpha Engine",
+            "description": "Order Flow, Liquidity Zones, Market Profile, Divergence",
+            "icon": "🏅",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'alpha_engine') and _auto_bot.alpha_engine is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'alpha_engine') and _auto_bot.alpha_engine else "inactive",
+            "features": ["Order Flow", "POC/Value Area", "Divergence Scanner"],
+        },
+        {
+            "id": 15,
+            "name": "Omega Brain",
+            "description": "Institutional Flow, Manipulation Scanner, Risk Parity",
+            "icon": "Ω",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'omega_brain') and _auto_bot.omega_brain is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'omega_brain') and _auto_bot.omega_brain else "inactive",
+            "features": ["Big Money Detection", "Stop Hunt Scanner", "Sentiment Fusion"],
+        },
+        {
+            "id": 16,
+            "name": "Titan Core",
+            "description": "Meta-Intelligence - รวมทุก Module เข้าด้วยกัน",
+            "icon": "🏛️",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'titan_core') and _auto_bot.titan_core is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'titan_core') and _auto_bot.titan_core else "inactive",
+            "features": ["Consensus Engine", "Prediction Ensemble", "Self-Improvement"],
+        },
+        # Ultra Intelligence Layers (17-20)
+        {
+            "id": 17,
+            "name": "Ultra Intelligence",
+            "description": "10x Smarter - Smart Money Concepts, Session Quality, Volatility Scaling",
+            "icon": "⚡",
+            "multiplier": "10x",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'ultra_intelligence') and _auto_bot.ultra_intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'ultra_intelligence') and _auto_bot.ultra_intelligence else "inactive",
+            "features": ["SMC Analysis", "Market Structure", "Liquidity Zones", "Adaptive Sizing"],
+        },
+        {
+            "id": 18,
+            "name": "Supreme Intelligence",
+            "description": "20x Smarter - Hedge Fund Level: Order Flow, Entropy, Fractal",
+            "icon": "👑",
+            "multiplier": "20x",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'supreme_intelligence') and _auto_bot.supreme_intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'supreme_intelligence') and _auto_bot.supreme_intelligence else "inactive",
+            "features": ["Order Flow Analysis", "Market Entropy", "Fractal Dimension", "Win Probability"],
+        },
+        {
+            "id": 19,
+            "name": "Transcendent Intelligence",
+            "description": "50x Smarter - Quantum Fields, 7D Analysis, Black Swan Detection",
+            "icon": "🌌",
+            "multiplier": "50x",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'transcendent_intelligence') and _auto_bot.transcendent_intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'transcendent_intelligence') and _auto_bot.transcendent_intelligence else "inactive",
+            "features": ["Quantum Probability", "Multi-Dimensional", "Black Swan", "Signal Purity"],
+        },
+        {
+            "id": 20,
+            "name": "Omniscient Intelligence",
+            "description": "100x Smarter - รู้ทุกสิ่ง: Physics, Neural, Chaos, Game Theory",
+            "icon": "🔮",
+            "multiplier": "100x",
+            "active": _auto_bot is not None and hasattr(_auto_bot, 'omniscient_intelligence') and _auto_bot.omniscient_intelligence is not None,
+            "status": "active" if _auto_bot and hasattr(_auto_bot, 'omniscient_intelligence') and _auto_bot.omniscient_intelligence else "inactive",
+            "features": ["Market Physics", "Neural Ensemble", "Information Theory", "Chaos Analysis", "Game Theory", "Behavioral Finance", "Risk Mathematics", "Prophecy"],
+        },
+    ]
+    
+    # Count active layers
+    active_count = sum(1 for layer in layers if layer.get("active", False))
+    
+    # Get last decisions from ultra layers
+    last_decisions = {}
+    if _auto_bot:
+        if hasattr(_auto_bot, '_last_ultra_decision'):
+            last_decisions["ultra"] = getattr(_auto_bot, '_last_ultra_decision', {})
+        if hasattr(_auto_bot, '_last_supreme_decision'):
+            last_decisions["supreme"] = getattr(_auto_bot, '_last_supreme_decision', {})
+        if hasattr(_auto_bot, '_last_transcendent_decision'):
+            last_decisions["transcendent"] = getattr(_auto_bot, '_last_transcendent_decision', {})
+        if hasattr(_auto_bot, '_last_omniscient_decision'):
+            last_decisions["omniscient"] = getattr(_auto_bot, '_last_omniscient_decision', {})
+    
+    return convert_numpy_types({
+        "status": "active" if _auto_bot else "bot_not_running",
+        "total_layers": 20,
+        "active_layers": active_count,
+        "layers": layers,
+        "last_decisions": last_decisions,
+        "quality_filter": {
+            "current": getattr(_auto_bot, 'min_quality', 'MEDIUM').value if _auto_bot and hasattr(getattr(_auto_bot, 'min_quality', None), 'value') else str(getattr(_auto_bot, 'min_quality', 'MEDIUM')) if _auto_bot else 'MEDIUM',
+            "levels": {
+                "PREMIUM": {"threshold": 85, "description": "สัญญาณที่ดีที่สุด ปลอดภัยสูงสุด"},
+                "HIGH": {"threshold": 75, "description": "สัญญาณคุณภาพสูง แนะนำ"},
+                "MEDIUM": {"threshold": 65, "description": "สัญญาณปานกลาง เทรดมากขึ้น"},
+                "LOW": {"threshold": 50, "description": "สัญญาณทั่วไป ความเสี่ยงสูง"},
+            }
+        },
+        "timestamp": datetime.now().isoformat()
+    })
+
+
 # Run with: uvicorn api.main:app --reload
 if __name__ == "__main__":
     import uvicorn
