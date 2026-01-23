@@ -388,7 +388,7 @@ const refreshAll = async () => {
   isLoading.value = true;
   try {
     // Fetch all layers data from new API endpoint
-    const response = await api.get('/api/v1/intelligence/layers');
+    const response = await api.getIntelligenceLayers();
     
     if (response && response.layers) {
       allLayers.value = response.layers;

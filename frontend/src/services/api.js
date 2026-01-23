@@ -789,14 +789,40 @@ const api = {
     );
   },
 
+  async updateBotSettings(settings = {}) {
+    return tryApiOrMock(
+      () => apiClient.put("/bot/settings", settings),
+      () => ({ status: "updated", message: "Settings updated (mock)", ...settings }),
+    );
+  },
+
+  async restartBot(config = {}) {
+    return tryApiOrMock(
+      () => apiClient.post("/bot/restart", config),
+      () => ({ status: "restarted", message: "Bot restarted (mock)", ...config }),
+    );
+  },
+
   // ===========================================
-  // 13. INTELLIGENCE STATUS (16-Layer AI System)
+  // 13. INTELLIGENCE STATUS (20-Layer AI System)
   // ===========================================
 
   async getIntelligenceStatus() {
     return tryApiOrMock(
       () => apiClient.get("/intelligence/status"),
       () => mockData.intelligenceStatus(),
+    );
+  },
+
+  async getIntelligenceLayers() {
+    return tryApiOrMock(
+      () => apiClient.get("/intelligence/layers"),
+      () => ({
+        layers: [],
+        last_decisions: {},
+        quality_filter: { current: "MEDIUM", levels: {} },
+        total_active: 0
+      }),
     );
   },
 
