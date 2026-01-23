@@ -1,32 +1,32 @@
 /**
  * 🧬 Trademify API Service - GENIUS LEVEL 100x 🧬
  * ระบบ API ระดับ Genius พร้อม:
- * 
+ *
  * 🔮 PREDICTIVE LAYER
  * - Predictive prefetching (โหลดข้อมูลล่วงหน้า)
  * - Usage pattern learning (เรียนรู้พฤติกรรมผู้ใช้)
  * - Smart preloading based on navigation
- * 
- * ⚡ PERFORMANCE LAYER  
+ *
+ * ⚡ PERFORMANCE LAYER
  * - Request batching (รวม requests)
  * - Priority queue (จัดลำดับความสำคัญ)
  * - Adaptive timeout (ปรับ timeout ตามสถานะ)
  * - Connection quality detection
  * - Bandwidth optimization
- * 
+ *
  * 🛡️ RELIABILITY LAYER
  * - Offline queue with auto-sync
  * - Circuit breaker pattern
  * - Intelligent retry with jitter
  * - Request deduplication
  * - Stale-while-revalidate
- * 
+ *
  * 📊 ANALYTICS LAYER
  * - Performance metrics
  * - Error tracking
  * - Latency monitoring
  * - Success rate calculation
- * 
+ *
  * 🔄 REAL-TIME LAYER
  * - WebSocket with HTTP fallback
  * - Server-Sent Events support
@@ -64,15 +64,15 @@ const API_BASE_URL = getApiBaseUrl();
 // 🎨 Beautiful console logging
 const log = {
   info: (emoji, ...args) => console.log(`${emoji}`, ...args),
-  success: (...args) => console.log('✅', ...args),
-  warn: (...args) => console.warn('⚠️', ...args),
-  error: (...args) => console.error('❌', ...args),
-  debug: (...args) => DEBUG_MODE && console.log('🔍', ...args),
-  perf: (...args) => DEBUG_MODE && console.log('⚡', ...args),
+  success: (...args) => console.log("✅", ...args),
+  warn: (...args) => console.warn("⚠️", ...args),
+  error: (...args) => console.error("❌", ...args),
+  debug: (...args) => DEBUG_MODE && console.log("🔍", ...args),
+  perf: (...args) => DEBUG_MODE && console.log("⚡", ...args),
 };
 
-log.info('🌐', '[GENIUS] Base URL:', API_BASE_URL);
-log.info('🖥️', '[GENIUS] Hostname:', window.location.hostname);
+log.info("🌐", "[GENIUS] Base URL:", API_BASE_URL);
+log.info("🖥️", "[GENIUS] Hostname:", window.location.hostname);
 
 // ===========================================
 // 📊 PERFORMANCE METRICS TRACKER
@@ -95,15 +95,16 @@ class PerformanceTracker {
 
   recordRequest(endpoint, latency, success, error = null) {
     this.metrics.totalRequests++;
-    
+
     if (success) {
       this.metrics.successfulRequests++;
     } else {
       this.metrics.failedRequests++;
       if (error) {
-        const errorType = error.code || error.message || 'unknown';
-        this.metrics.errorTypes.set(errorType, 
-          (this.metrics.errorTypes.get(errorType) || 0) + 1
+        const errorType = error.code || error.message || "unknown";
+        this.metrics.errorTypes.set(
+          errorType,
+          (this.metrics.errorTypes.get(errorType) || 0) + 1,
         );
       }
     }
@@ -113,18 +114,26 @@ class PerformanceTracker {
     if (this.metrics.latencies.length > this.maxLatencySamples) {
       this.metrics.latencies.shift();
     }
-    this.metrics.avgLatency = this.metrics.latencies.reduce((a, b) => a + b, 0) / this.metrics.latencies.length;
+    this.metrics.avgLatency =
+      this.metrics.latencies.reduce((a, b) => a + b, 0) /
+      this.metrics.latencies.length;
 
     // Track per-endpoint stats
     if (!this.metrics.endpointStats.has(endpoint)) {
-      this.metrics.endpointStats.set(endpoint, { calls: 0, errors: 0, avgLatency: 0, latencies: [] });
+      this.metrics.endpointStats.set(endpoint, {
+        calls: 0,
+        errors: 0,
+        avgLatency: 0,
+        latencies: [],
+      });
     }
     const stat = this.metrics.endpointStats.get(endpoint);
     stat.calls++;
     if (!success) stat.errors++;
     stat.latencies.push(latency);
     if (stat.latencies.length > 20) stat.latencies.shift();
-    stat.avgLatency = stat.latencies.reduce((a, b) => a + b, 0) / stat.latencies.length;
+    stat.avgLatency =
+      stat.latencies.reduce((a, b) => a + b, 0) / stat.latencies.length;
   }
 
   recordCacheHit() {
@@ -133,16 +142,23 @@ class PerformanceTracker {
 
   getSuccessRate() {
     if (this.metrics.totalRequests === 0) return 100;
-    return (this.metrics.successfulRequests / this.metrics.totalRequests * 100).toFixed(1);
+    return (
+      (this.metrics.successfulRequests / this.metrics.totalRequests) *
+      100
+    ).toFixed(1);
   }
 
   getMetrics() {
     return {
       ...this.metrics,
       successRate: this.getSuccessRate(),
-      cacheHitRate: this.metrics.totalRequests > 0 
-        ? (this.metrics.cachedResponses / this.metrics.totalRequests * 100).toFixed(1) 
-        : 0,
+      cacheHitRate:
+        this.metrics.totalRequests > 0
+          ? (
+              (this.metrics.cachedResponses / this.metrics.totalRequests) *
+              100
+            ).toFixed(1)
+          : 0,
       errorTypes: Object.fromEntries(this.metrics.errorTypes),
       endpointStats: Object.fromEntries(this.metrics.endpointStats),
     };
@@ -170,13 +186,13 @@ class PredictivePrefetcher {
     this.prefetchedData = new Map();
     this.prefetchExpiry = 30000; // 30 seconds
     this.lastPage = null;
-    
+
     // Pattern weights - เรียนรู้ว่าหลังจากหน้าไหนมักไปหน้าไหน
     this.patterns = {
-      'dashboard': ['bot_status', 'positions', 'risk_data', 'pipeline'],
-      'trading': ['positions', 'bot_status', 'account'],
-      'analysis': ['pipeline', 'titan', 'omega', 'signals'],
-      'settings': ['bot_settings', 'trading_config'],
+      dashboard: ["bot_status", "positions", "risk_data", "pipeline"],
+      trading: ["positions", "bot_status", "account"],
+      analysis: ["pipeline", "titan", "omega", "signals"],
+      settings: ["bot_settings", "trading_config"],
     };
   }
 
@@ -184,10 +200,13 @@ class PredictivePrefetcher {
   recordNavigation(page) {
     if (this.lastPage) {
       const key = `${this.lastPage}->${page}`;
-      this.navigationPatterns.set(key, (this.navigationPatterns.get(key) || 0) + 1);
+      this.navigationPatterns.set(
+        key,
+        (this.navigationPatterns.get(key) || 0) + 1,
+      );
     }
     this.lastPage = page;
-    
+
     // Prefetch data for this page
     this.prefetchForPage(page);
   }
@@ -195,8 +214,8 @@ class PredictivePrefetcher {
   // 🔮 Prefetch data likely to be needed
   async prefetchForPage(page) {
     const endpoints = this.patterns[page] || [];
-    log.debug('[Prefetch] Prefetching for page:', page, endpoints);
-    
+    log.debug("[Prefetch] Prefetching for page:", page, endpoints);
+
     for (const endpoint of endpoints) {
       if (!this.prefetchQueue.has(endpoint)) {
         this.prefetchQueue.add(endpoint);
@@ -207,14 +226,14 @@ class PredictivePrefetcher {
 
   async prefetchEndpoint(endpoint) {
     // Will be connected to actual API calls
-    log.debug('[Prefetch] Queued:', endpoint);
+    log.debug("[Prefetch] Queued:", endpoint);
   }
 
   // Get prefetched data if available and fresh
   getPrefetched(key) {
     const cached = this.prefetchedData.get(key);
     if (cached && Date.now() - cached.time < this.prefetchExpiry) {
-      log.perf('[Prefetch] HIT:', key);
+      log.perf("[Prefetch] HIT:", key);
       return cached.data;
     }
     return null;
@@ -239,10 +258,10 @@ const prefetcher = new PredictivePrefetcher();
 class PriorityQueue {
   constructor() {
     this.queues = {
-      critical: [],  // Trading actions - must execute
-      high: [],      // Bot control, positions
-      normal: [],    // Data fetching
-      low: [],       // Analytics, prefetch
+      critical: [], // Trading actions - must execute
+      high: [], // Bot control, positions
+      normal: [], // Data fetching
+      low: [], // Analytics, prefetch
     };
     this.processing = false;
     this.maxConcurrent = 4;
@@ -259,11 +278,14 @@ class PriorityQueue {
     this.processing = true;
 
     // Process by priority
-    for (const priority of ['critical', 'high', 'normal', 'low']) {
-      while (this.queues[priority].length > 0 && this.activeRequests < this.maxConcurrent) {
+    for (const priority of ["critical", "high", "normal", "low"]) {
+      while (
+        this.queues[priority].length > 0 &&
+        this.activeRequests < this.maxConcurrent
+      ) {
         const request = this.queues[priority].shift();
         this.activeRequests++;
-        
+
         request.execute().finally(() => {
           this.activeRequests--;
           this.process();
@@ -293,12 +315,12 @@ const requestQueue = new PriorityQueue();
 
 class CircuitBreaker {
   constructor() {
-    this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+    this.state = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
     this.failureCount = 0;
     this.successCount = 0;
-    this.failureThreshold = 5;
-    this.successThreshold = 3;
-    this.timeout = 30000; // 30 seconds
+    this.failureThreshold = 10;   // Increased from 5 (allow more failures before opening)
+    this.successThreshold = 2;    // Decreased from 3 (recover faster)
+    this.timeout = 15000;         // Decreased from 30000 (try again sooner)
     this.lastFailureTime = null;
     this.listeners = new Set();
   }
@@ -309,7 +331,7 @@ class CircuitBreaker {
   }
 
   notifyListeners() {
-    this.listeners.forEach(cb => cb(this.getState()));
+    this.listeners.forEach((cb) => cb(this.getState()));
   }
 
   getState() {
@@ -322,13 +344,13 @@ class CircuitBreaker {
   }
 
   canRequest() {
-    if (this.state === 'CLOSED') return true;
-    if (this.state === 'OPEN') {
+    if (this.state === "CLOSED") return true;
+    if (this.state === "OPEN") {
       // Check if timeout has passed
       if (Date.now() - this.lastFailureTime > this.timeout) {
-        this.state = 'HALF_OPEN';
+        this.state = "HALF_OPEN";
         this.notifyListeners();
-        log.info('🔄', '[Circuit] Moving to HALF_OPEN state');
+        log.info("🔄", "[Circuit] Moving to HALF_OPEN state");
         return true;
       }
       return false;
@@ -337,13 +359,13 @@ class CircuitBreaker {
   }
 
   recordSuccess() {
-    if (this.state === 'HALF_OPEN') {
+    if (this.state === "HALF_OPEN") {
       this.successCount++;
       if (this.successCount >= this.successThreshold) {
-        this.state = 'CLOSED';
+        this.state = "CLOSED";
         this.failureCount = 0;
         this.successCount = 0;
-        log.success('[Circuit] CLOSED - Service recovered!');
+        log.success("[Circuit] CLOSED - Service recovered!");
         this.notifyListeners();
       }
     } else {
@@ -356,9 +378,12 @@ class CircuitBreaker {
     this.lastFailureTime = Date.now();
     this.successCount = 0;
 
-    if (this.state === 'HALF_OPEN' || this.failureCount >= this.failureThreshold) {
-      this.state = 'OPEN';
-      log.error('[Circuit] OPEN - Too many failures, blocking requests');
+    if (
+      this.state === "HALF_OPEN" ||
+      this.failureCount >= this.failureThreshold
+    ) {
+      this.state = "OPEN";
+      log.error("[Circuit] OPEN - Too many failures, blocking requests");
       this.notifyListeners();
     }
   }
@@ -374,12 +399,14 @@ class OfflineQueue {
   constructor() {
     this.queue = [];
     this.maxQueueSize = 50;
-    this.storageKey = 'trademify_offline_queue';
+    this.storageKey = "trademify_offline_queue";
     this.loadFromStorage();
-    
+
     // Listen for online/offline events
-    window.addEventListener('online', () => this.sync());
-    window.addEventListener('offline', () => log.warn('[Offline] Device went offline'));
+    window.addEventListener("online", () => this.sync());
+    window.addEventListener("offline", () =>
+      log.warn("[Offline] Device went offline"),
+    );
   }
 
   loadFromStorage() {
@@ -387,7 +414,7 @@ class OfflineQueue {
       const saved = localStorage.getItem(this.storageKey);
       if (saved) {
         this.queue = JSON.parse(saved);
-        log.info('📥', `[Offline] Loaded ${this.queue.length} queued requests`);
+        log.info("📥", `[Offline] Loaded ${this.queue.length} queued requests`);
       }
     } catch (e) {
       this.queue = [];
@@ -398,7 +425,7 @@ class OfflineQueue {
     try {
       localStorage.setItem(this.storageKey, JSON.stringify(this.queue));
     } catch (e) {
-      log.warn('[Offline] Failed to save queue to storage');
+      log.warn("[Offline] Failed to save queue to storage");
     }
   }
 
@@ -406,31 +433,34 @@ class OfflineQueue {
     if (this.queue.length >= this.maxQueueSize) {
       this.queue.shift(); // Remove oldest
     }
-    
+
     this.queue.push({
       ...request,
       queuedAt: Date.now(),
       id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     });
-    
+
     this.saveToStorage();
-    log.info('📥', `[Offline] Queued request: ${request.method} ${request.url}`);
-    
+    log.info(
+      "📥",
+      `[Offline] Queued request: ${request.method} ${request.url}`,
+    );
+
     return this.queue.length;
   }
 
   async sync() {
     if (this.queue.length === 0) return;
-    
-    log.info('🔄', `[Offline] Syncing ${this.queue.length} queued requests...`);
-    
+
+    log.info("🔄", `[Offline] Syncing ${this.queue.length} queued requests...`);
+
     const toProcess = [...this.queue];
     this.queue = [];
     this.saveToStorage();
-    
+
     let success = 0;
     let failed = 0;
-    
+
     for (const request of toProcess) {
       try {
         await axios({
@@ -438,7 +468,7 @@ class OfflineQueue {
           url: request.url,
           data: request.data,
           baseURL: API_BASE_URL,
-          timeout: 10000,
+          timeout: 30000, // Increased from 10000
         });
         success++;
       } catch (e) {
@@ -449,8 +479,10 @@ class OfflineQueue {
         }
       }
     }
-    
-    log.success(`[Offline] Sync complete: ${success} success, ${failed} failed`);
+
+    log.success(
+      `[Offline] Sync complete: ${success} success, ${failed} failed`,
+    );
   }
 
   getQueueSize() {
@@ -481,17 +513,17 @@ class GeniusConnectionManager {
     this.cache = new Map();
     this.cacheConfig = new Map(); // Per-endpoint cache config
     this.reconnecting = false;
-    
+
     // 🎯 Connection quality metrics
-    this.connectionQuality = 'excellent'; // excellent, good, poor, offline
+    this.connectionQuality = "excellent"; // excellent, good, poor, offline
     this.latencyHistory = [];
     this.maxLatencyHistory = 20;
-    
-    // 🕐 Adaptive timeout
-    this.baseTimeout = 10000;
+
+    // 🕐 Adaptive timeout - INCREASED for VPS latency
+    this.baseTimeout = 30000; // 30 seconds base
     this.currentTimeout = this.baseTimeout;
-    this.minTimeout = 5000;
-    this.maxTimeout = 30000;
+    this.minTimeout = 15000; // 15 seconds minimum (was 5000)
+    this.maxTimeout = 60000; // 60 seconds maximum (was 30000)
 
     // Start monitoring
     this.startHealthMonitoring();
@@ -500,42 +532,49 @@ class GeniusConnectionManager {
 
   // 📡 Connection quality detection
   detectConnectionQuality() {
-    if ('connection' in navigator) {
+    if ("connection" in navigator) {
       const conn = navigator.connection;
       const updateQuality = () => {
-        if (conn.effectiveType === '4g') this.connectionQuality = 'excellent';
-        else if (conn.effectiveType === '3g') this.connectionQuality = 'good';
-        else if (conn.effectiveType === '2g') this.connectionQuality = 'poor';
-        else this.connectionQuality = 'poor';
-        
-        log.debug('[Connection] Quality:', this.connectionQuality, conn.effectiveType);
+        if (conn.effectiveType === "4g") this.connectionQuality = "excellent";
+        else if (conn.effectiveType === "3g") this.connectionQuality = "good";
+        else if (conn.effectiveType === "2g") this.connectionQuality = "poor";
+        else this.connectionQuality = "poor";
+
+        log.debug(
+          "[Connection] Quality:",
+          this.connectionQuality,
+          conn.effectiveType,
+        );
         this.adjustTimeout();
       };
-      
-      conn.addEventListener('change', updateQuality);
+
+      conn.addEventListener("change", updateQuality);
       updateQuality();
     }
   }
 
   // 🕐 Adjust timeout based on connection quality and latency
   adjustTimeout() {
-    const avgLatency = this.latencyHistory.length > 0 
-      ? this.latencyHistory.reduce((a, b) => a + b, 0) / this.latencyHistory.length 
-      : 500;
-    
-    const qualityMultiplier = {
-      'excellent': 1,
-      'good': 1.5,
-      'poor': 2.5,
-      'offline': 3,
-    }[this.connectionQuality] || 1;
+    const avgLatency =
+      this.latencyHistory.length > 0
+        ? this.latencyHistory.reduce((a, b) => a + b, 0) /
+          this.latencyHistory.length
+        : 500;
+
+    const qualityMultiplier =
+      {
+        excellent: 1,
+        good: 1.5,
+        poor: 2.5,
+        offline: 3,
+      }[this.connectionQuality] || 1;
 
     this.currentTimeout = Math.min(
       this.maxTimeout,
-      Math.max(this.minTimeout, avgLatency * 3 * qualityMultiplier)
+      Math.max(this.minTimeout, avgLatency * 3 * qualityMultiplier),
     );
-    
-    log.debug('[Timeout] Adjusted to:', this.currentTimeout, 'ms');
+
+    log.debug("[Timeout] Adjusted to:", this.currentTimeout, "ms");
   }
 
   recordLatency(latency) {
@@ -554,7 +593,7 @@ class GeniusConnectionManager {
 
   notifyListeners() {
     const status = this.getStatus();
-    this.listeners.forEach(cb => cb(status));
+    this.listeners.forEach((cb) => cb(status));
   }
 
   getStatus() {
@@ -566,11 +605,19 @@ class GeniusConnectionManager {
       reconnecting: this.reconnecting,
       connectionQuality: this.connectionQuality,
       currentTimeout: this.currentTimeout,
-      avgLatency: this.latencyHistory.length > 0 
-        ? Math.round(this.latencyHistory.reduce((a, b) => a + b, 0) / this.latencyHistory.length)
-        : 0,
-      health: this.consecutiveErrors === 0 ? 'excellent' : 
-              this.consecutiveErrors < 3 ? 'degraded' : 'critical',
+      avgLatency:
+        this.latencyHistory.length > 0
+          ? Math.round(
+              this.latencyHistory.reduce((a, b) => a + b, 0) /
+                this.latencyHistory.length,
+            )
+          : 0,
+      health:
+        this.consecutiveErrors === 0
+          ? "excellent"
+          : this.consecutiveErrors < 3
+            ? "degraded"
+            : "critical",
       circuitState: circuitBreaker.state,
       offlineQueueSize: offlineQueue.getQueueSize(),
       cacheSize: this.cache.size,
@@ -582,11 +629,11 @@ class GeniusConnectionManager {
     this.consecutiveErrors = 0;
     this.lastSuccessTime = Date.now();
     this.reconnecting = false;
-    
+
     if (latency > 0) {
       this.recordLatency(latency);
     }
-    
+
     circuitBreaker.recordSuccess();
     this.notifyListeners();
   }
@@ -594,12 +641,12 @@ class GeniusConnectionManager {
   markFailure(error) {
     this.consecutiveErrors++;
     this.lastErrorTime = Date.now();
-    
+
     circuitBreaker.recordFailure();
 
     if (this.consecutiveErrors >= 3) {
       this.isOnline = false;
-      this.connectionQuality = 'offline';
+      this.connectionQuality = "offline";
     }
 
     this.notifyListeners();
@@ -609,31 +656,33 @@ class GeniusConnectionManager {
   async attemptReconnect() {
     if (this.reconnecting) return false;
     if (!circuitBreaker.canRequest()) {
-      log.warn('[Reconnect] Circuit breaker is OPEN');
+      log.warn("[Reconnect] Circuit breaker is OPEN");
       return false;
     }
 
     this.reconnecting = true;
     this.notifyListeners();
 
-    log.info('🔄', '[Genius] Attempting to reconnect...');
+    log.info("🔄", "[Genius] Attempting to reconnect...");
 
     try {
       const start = Date.now();
-      const response = await axios.get(`${API_BASE_URL}/health`, { timeout: 5000 });
+      const response = await axios.get(`${API_BASE_URL}/health`, {
+        timeout: 5000,
+      });
       const latency = Date.now() - start;
-      
+
       if (response.data) {
-        log.success('[Genius] Reconnected successfully!');
+        log.success("[Genius] Reconnected successfully!");
         this.markSuccess(latency);
-        
+
         // Sync offline queue
         offlineQueue.sync();
-        
+
         return true;
       }
     } catch (e) {
-      log.warn('[Genius] Reconnect failed');
+      log.warn("[Genius] Reconnect failed");
     }
 
     this.reconnecting = false;
@@ -668,26 +717,26 @@ class GeniusConnectionManager {
   getCached(key, options = {}) {
     const cached = this.cache.get(key);
     if (!cached) return null;
-    
+
     const { staleWhileRevalidate = false, ttl = 5000 } = options;
     const age = Date.now() - cached.time;
-    
+
     if (age < ttl) {
       perfTracker.recordCacheHit();
       return { data: cached.data, fresh: true };
     }
-    
+
     if (staleWhileRevalidate && age < ttl * 3) {
       perfTracker.recordCacheHit();
       return { data: cached.data, fresh: false, stale: true };
     }
-    
+
     return null;
   }
 
   setCache(key, data, ttl = 5000) {
     this.cache.set(key, { data, time: Date.now(), ttl });
-    
+
     // Clean old entries
     if (this.cache.size > 200) {
       const entries = Array.from(this.cache.entries());
@@ -703,7 +752,7 @@ class GeniusConnectionManager {
       this.cache.clear();
       return;
     }
-    
+
     for (const key of this.cache.keys()) {
       if (key.includes(pattern)) {
         this.cache.delete(key);
@@ -714,7 +763,7 @@ class GeniusConnectionManager {
   // 🔀 Request deduplication with timeout
   async deduplicateRequest(key, requestFn, timeout = 5000) {
     if (this.pendingRequests.has(key)) {
-      log.debug('[Dedupe] Reusing pending request:', key);
+      log.debug("[Dedupe] Reusing pending request:", key);
       return this.pendingRequests.get(key);
     }
 
@@ -759,14 +808,16 @@ apiClient.interceptors.request.use(
   (config) => {
     // Update timeout dynamically
     config.timeout = connectionManager.currentTimeout;
-    
+
     // Add request timestamp for latency tracking
     config.metadata = { startTime: Date.now() };
-    
+
     const status = connectionManager.isOnline ? "🟢" : "🔴";
     const quality = connectionManager.connectionQuality;
-    log.debug(`${status} [${quality}] ${config.method?.toUpperCase()} ${config.url}`);
-    
+    log.debug(
+      `${status} [${quality}] ${config.method?.toUpperCase()} ${config.url}`,
+    );
+
     return config;
   },
   (error) => Promise.reject(error),
@@ -775,20 +826,22 @@ apiClient.interceptors.request.use(
 // Response interceptor with metrics
 apiClient.interceptors.response.use(
   (response) => {
-    const latency = Date.now() - (response.config.metadata?.startTime || Date.now());
+    const latency =
+      Date.now() - (response.config.metadata?.startTime || Date.now());
     const endpoint = response.config.url;
-    
+
     connectionManager.markSuccess(latency);
     perfTracker.recordRequest(endpoint, latency, true);
-    
+
     log.perf(`[${latency}ms] ${endpoint}`);
-    
+
     return response.data;
   },
   (error) => {
-    const latency = Date.now() - (error.config?.metadata?.startTime || Date.now());
-    const endpoint = error.config?.url || 'unknown';
-    
+    const latency =
+      Date.now() - (error.config?.metadata?.startTime || Date.now());
+    const endpoint = error.config?.url || "unknown";
+
     connectionManager.markFailure(error);
     perfTracker.recordRequest(endpoint, latency, false, error);
 
@@ -1070,7 +1123,7 @@ export function getLastApiError() {
 
 /**
  * 🧬 GENIUS API CALL - The Ultimate API Wrapper
- * 
+ *
  * Features:
  * - Circuit breaker protection
  * - Predictive prefetching
@@ -1088,7 +1141,7 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
     maxRetries = 2,
     silent = false,
     critical = false,
-    priority = 'normal', // critical, high, normal, low
+    priority = "normal", // critical, high, normal, low
     staleWhileRevalidate = false,
     offlineQueue: queueOffline = false,
     optimisticData = null,
@@ -1100,69 +1153,77 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
 
   // 1. Check mock mode
   if (USE_MOCK) {
-    if (!silent) log.debug('[MOCK] Using mock data');
+    if (!silent) log.debug("[MOCK] Using mock data");
     const result = mockFn();
     result._isMock = true;
-    result._source = 'mock';
+    result._source = "mock";
     return result;
   }
 
   // 2. Check circuit breaker
   if (!circuitBreaker.canRequest()) {
-    log.warn('[Circuit] Request blocked - circuit is OPEN');
-    
+    log.warn("[Circuit] Request blocked - circuit is OPEN");
+
     // Return cached or mock data
     if (cacheKey) {
-      const cached = connectionManager.getCached(cacheKey, { staleWhileRevalidate: true, ttl: cacheTTL });
+      const cached = connectionManager.getCached(cacheKey, {
+        staleWhileRevalidate: true,
+        ttl: cacheTTL,
+      });
       if (cached) {
-        cached.data._source = 'circuit_fallback';
+        cached.data._source = "circuit_fallback";
         return cached.data;
       }
     }
-    
+
     if (critical && queueOffline) {
       // Queue for later
       offlineQueue.add({
-        method: 'GET',
-        url: cacheKey || 'unknown',
+        method: "GET",
+        url: cacheKey || "unknown",
         critical: true,
       });
     }
-    
+
     const result = mockFn();
     result._isMock = true;
-    result._source = 'circuit_fallback';
+    result._source = "circuit_fallback";
     return result;
   }
 
   // 3. Check cache with stale-while-revalidate
   if (cacheKey) {
-    const cached = connectionManager.getCached(cacheKey, { staleWhileRevalidate, ttl: cacheTTL });
-    
+    const cached = connectionManager.getCached(cacheKey, {
+      staleWhileRevalidate,
+      ttl: cacheTTL,
+    });
+
     if (cached) {
       if (cached.fresh) {
-        if (!silent) log.debug('[Cache] Fresh data:', cacheKey);
-        cached.data._source = 'cache';
+        if (!silent) log.debug("[Cache] Fresh data:", cacheKey);
+        cached.data._source = "cache";
         return cached.data;
       }
-      
+
       if (cached.stale && staleWhileRevalidate) {
-        if (!silent) log.debug('[Cache] Stale data, revalidating:', cacheKey);
-        
+        if (!silent) log.debug("[Cache] Stale data, revalidating:", cacheKey);
+
         // Return stale data immediately
-        cached.data._source = 'stale';
+        cached.data._source = "stale";
         cached.data._revalidating = true;
-        
+
         // Revalidate in background
         geniusApiCall(apiCall, mockFn, {
           ...options,
           cacheKey,
           staleWhileRevalidate: false,
           silent: true,
-        }).then((freshData) => {
-          if (onRevalidate) onRevalidate(freshData);
-        }).catch(() => {});
-        
+        })
+          .then((freshData) => {
+            if (onRevalidate) onRevalidate(freshData);
+          })
+          .catch(() => {});
+
         return cached.data;
       }
     }
@@ -1176,17 +1237,18 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
       optimisticData: null,
       silent: true,
     }).catch((err) => {
-      log.error('[Optimistic] Background request failed:', err);
+      log.error("[Optimistic] Background request failed:", err);
     });
-    
-    const result = typeof optimisticData === 'function' ? optimisticData() : optimisticData;
-    result._source = 'optimistic';
+
+    const result =
+      typeof optimisticData === "function" ? optimisticData() : optimisticData;
+    result._source = "optimistic";
     return result;
   }
 
   // 5. Execute API call with smart retry
   let lastError = null;
-  
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // Deduplicate request
@@ -1202,23 +1264,26 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
       apiConnected = true;
       lastApiError = null;
       result._isMock = false;
-      result._source = 'api';
+      result._source = "api";
       result._attempt = attempt + 1;
       result._latency = Date.now() - startTime;
 
       // Prefetch related data
       if (prefetchRelated.length > 0) {
-        log.debug('[Prefetch] Queueing related:', prefetchRelated);
-        prefetchRelated.forEach(key => prefetcher.prefetchEndpoint(key));
+        log.debug("[Prefetch] Queueing related:", prefetchRelated);
+        prefetchRelated.forEach((key) => prefetcher.prefetchEndpoint(key));
       }
 
       return result;
-      
     } catch (error) {
       lastError = error;
 
       // Don't retry on client errors (4xx)
-      if (error.response && error.response.status >= 400 && error.response.status < 500) {
+      if (
+        error.response &&
+        error.response.status >= 400 &&
+        error.response.status < 500
+      ) {
         break;
       }
 
@@ -1227,9 +1292,12 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
         const baseDelay = Math.min(1000 * Math.pow(2, attempt), 5000);
         const jitter = Math.random() * 500; // Add randomness to prevent thundering herd
         const delay = baseDelay + jitter;
-        
-        if (!silent) log.debug(`[Retry] Attempt ${attempt + 2}/${maxRetries + 1} in ${Math.round(delay)}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+
+        if (!silent)
+          log.debug(
+            `[Retry] Attempt ${attempt + 2}/${maxRetries + 1} in ${Math.round(delay)}ms...`,
+          );
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -1241,11 +1309,11 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
   // Queue critical requests for offline sync
   if (critical && queueOffline) {
     offlineQueue.add({
-      method: 'GET',
-      url: cacheKey || 'unknown',
+      method: "GET",
+      url: cacheKey || "unknown",
       critical: true,
     });
-    log.info('📥', '[Offline] Queued critical request');
+    log.info("📥", "[Offline] Queued critical request");
   }
 
   // Critical requests should throw
@@ -1255,12 +1323,12 @@ async function geniusApiCall(apiCall, mockFn, options = {}) {
 
   // Fallback to mock
   if (!silent) {
-    log.warn('[Fallback] Using mock data after failures');
+    log.warn("[Fallback] Using mock data after failures");
   }
 
   const result = mockFn();
   result._isMock = true;
-  result._source = 'fallback';
+  result._source = "fallback";
   result._error = lastApiError;
   return result;
 }
@@ -1904,9 +1972,9 @@ const api = {
 
     const connect = () => {
       eventSource = new EventSource(this.getEventsUrl());
-      
+
       eventSource.onopen = () => {
-        log.success('[SSE] Connected to event stream');
+        log.success("[SSE] Connected to event stream");
         reconnectAttempts = 0;
       };
 
@@ -1915,24 +1983,27 @@ const api = {
           const data = JSON.parse(event.data);
           onMessage(data);
         } catch (e) {
-          log.error('[SSE] Parse error:', e);
+          log.error("[SSE] Parse error:", e);
         }
       };
 
       eventSource.onerror = (error) => {
-        log.warn('[SSE] Connection error');
+        log.warn("[SSE] Connection error");
         eventSource.close();
-        
+
         if (onError) onError(error);
-        
+
         // Auto-reconnect with backoff
         if (reconnectAttempts < maxReconnectAttempts) {
           reconnectAttempts++;
           const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts - 1);
-          log.info('🔄', `[SSE] Reconnecting in ${Math.round(delay/1000)}s (attempt ${reconnectAttempts})`);
+          log.info(
+            "🔄",
+            `[SSE] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts})`,
+          );
           setTimeout(connect, delay);
         } else {
-          log.error('[SSE] Max reconnect attempts reached');
+          log.error("[SSE] Max reconnect attempts reached");
         }
       };
     };
@@ -1944,7 +2015,7 @@ const api = {
       close: () => {
         if (eventSource) {
           eventSource.close();
-          log.info('📴', '[SSE] Disconnected');
+          log.info("📴", "[SSE] Disconnected");
         }
       },
       getReadyState: () => eventSource?.readyState,
@@ -2004,7 +2075,7 @@ const api = {
   // 🧹 Clear all caches
   clearCache(pattern = null) {
     connectionManager.invalidateCache(pattern);
-    log.info('🧹', '[Cache] Cleared', pattern || 'all');
+    log.info("🧹", "[Cache] Cleared", pattern || "all");
   },
 
   // 📦 Get cache statistics
@@ -2080,30 +2151,43 @@ const api = {
   // 🔧 Debug mode toggle
   setDebugMode(enabled) {
     window.TRADEMIFY_DEBUG = enabled;
-    log.info(enabled ? '🔍' : '🔇', '[Debug]', enabled ? 'Enabled' : 'Disabled');
+    log.info(
+      enabled ? "🔍" : "🔇",
+      "[Debug]",
+      enabled ? "Enabled" : "Disabled",
+    );
   },
 
   // 📤 Export metrics for analysis
   exportMetrics() {
     const metrics = this.getGeniusStatus();
-    const blob = new Blob([JSON.stringify(metrics, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(metrics, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `trademify-metrics-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    log.success('[Export] Metrics exported');
+    log.success("[Export] Metrics exported");
   },
 };
 
 // 🧬 Auto-log genius status on load
 setTimeout(() => {
   const status = api.getGeniusStatus();
-  console.log('%c🧬 GENIUS API LOADED', 'color: #00ff00; font-size: 14px; font-weight: bold');
-  console.log('%cConnection:', 'color: #888', status.connection.isOnline ? '🟢 Online' : '🔴 Offline');
-  console.log('%cCircuit:', 'color: #888', status.circuit.state);
-  console.log('%cCache:', 'color: #888', `${status.cache.size} items`);
+  console.log(
+    "%c🧬 GENIUS API LOADED",
+    "color: #00ff00; font-size: 14px; font-weight: bold",
+  );
+  console.log(
+    "%cConnection:",
+    "color: #888",
+    status.connection.isOnline ? "🟢 Online" : "🔴 Offline",
+  );
+  console.log("%cCircuit:", "color: #888", status.circuit.state);
+  console.log("%cCache:", "color: #888", `${status.cache.size} items`);
 }, 1000);
 
 export default api;
