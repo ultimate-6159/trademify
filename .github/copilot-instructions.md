@@ -5,8 +5,8 @@
 **This system runs on Windows VPS ONLY - NO MOCK MODE**
 
 - **VPS**: Windows Server at `66.42.50.149`
-- **Broker**: Exness MT5 (Exness-MT5Real39)
-- **Account**: 267643655 (Standard)
+- **Broker**: Exness MT5 (Exness-MT5Trial14)
+- **Account**: 415146568 (Demo/Trial)
 - **Symbols**: `EURUSDm`, `GBPUSDm`, `XAUUSDm` (Exness micro lots - มี "m" ต่อท้าย)
 - **MT5 Terminal**: Must be running on VPS with AutoTrading enabled
 

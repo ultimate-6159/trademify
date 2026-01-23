@@ -23,7 +23,7 @@ if errorlevel 1 (
 )
 
 echo [3/5] Installing any new dependencies...
-cd backend
+cd /d D:\projectx\trademify\backend
 pip install -r requirements.txt --quiet
 
 echo [4/5] Starting API server...
