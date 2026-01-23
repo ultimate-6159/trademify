@@ -545,12 +545,13 @@ class UltraIntelligence:
         self, prices: np.ndarray, signal_side: str
     ) -> Tuple[bool, str]:
         """ตรวจสอบ momentum"""
-        if len(prices) < 20:
+        if len(prices) < 21:
             return True, "Insufficient data for momentum"
         
         # Calculate momentum indicators
-        returns = np.diff(prices[-20:]) / prices[-21:-1]
-        recent_returns = returns[-5:]
+        # np.diff(prices[-20:]) returns (19,) elements, so we need prices[-20:-1] which is also (19,)
+        returns = np.diff(prices[-20:]) / prices[-20:-1]
+        recent_returns = returns[-5:] if len(returns) >= 5 else returns
         
         avg_momentum = np.mean(recent_returns) * 100
         

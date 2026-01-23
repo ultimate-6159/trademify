@@ -574,10 +574,13 @@ class SupremeIntelligence:
         if abs(price_change) < 1:  # Price range-bound
             if vol_trend > 20:
                 # Check if volume on up or down days
-                up_days = prices[1:] > prices[:-1]
-                if volumes is not None:
-                    up_vol = np.mean(volumes[1:][up_days[-29:]])
-                    down_vol = np.mean(volumes[1:][~up_days[-29:]])
+                # Use the same slice length for both prices comparison and volumes
+                if volumes is not None and len(prices) >= 30 and len(volumes) >= 30:
+                    price_slice = prices[-30:]
+                    vol_slice = volumes[-30:]
+                    up_days = price_slice[1:] > price_slice[:-1]  # shape (29,)
+                    up_vol = np.mean(vol_slice[1:][up_days])  # vol_slice[1:] is (29,), up_days is (29,)
+                    down_vol = np.mean(vol_slice[1:][~up_days])
                     
                     if up_vol > down_vol * 1.2:
                         return InstitutionalActivity.ACCUMULATING
