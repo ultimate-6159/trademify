@@ -6,10 +6,17 @@ MetaTrader 5 Connector
 1. Filling Mode - รองรับ IOC, FOK, RETURN
 2. Price Precision - Round ราคาตาม symbol digits
 3. Volume Validation - เช็ค lot size ตาม min/max/step
+
+🔧 Auto-Reconnect Feature:
+- Heartbeat check ทุก 30 วินาที
+- Auto reconnect เมื่อหลุด
+- Max retry 5 ครั้ง
 """
 import asyncio
 import logging
 import math
+import time
+import threading
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -81,6 +88,10 @@ class MT5Config:
     server: str = ""
     path: str = ""  # Path to terminal64.exe
     timeout: int = 60000
+    # Auto-reconnect settings
+    heartbeat_interval: int = 30  # วินาที
+    max_reconnect_attempts: int = 5
+    reconnect_delay: int = 5  # วินาที
 
 
 @dataclass
@@ -108,6 +119,10 @@ class MT5Broker(BaseBroker):
     - Filling Mode: ลอง IOC -> FOK -> RETURN
     - Price Precision: Round ตาม digits
     - Volume: Validate ตาม min/max/step
+    
+    🔧 Auto-Reconnect:
+    - Heartbeat check
+    - Auto reconnect when disconnected
     """
     
     def __init__(self, config: MT5Config):
@@ -120,6 +135,13 @@ class MT5Broker(BaseBroker):
         self._positions: Dict[str, Position] = {}
         self._orders: Dict[str, Order] = {}
         self._symbol_specs: Dict[str, SymbolSpec] = {}
+        
+        # Auto-reconnect state
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._stop_heartbeat = threading.Event()
+        self._reconnect_count = 0
+        self._last_heartbeat = time.time()
+        self._connection_lock = threading.Lock()
     
     async def connect(self) -> bool:
         """เชื่อมต่อกับ MT5 Terminal - ใช้ connection ที่มีอยู่แล้ว"""
@@ -167,6 +189,9 @@ class MT5Broker(BaseBroker):
                 logger.info(f"   Balance: {account.balance} {account.currency}")
                 logger.info(f"   Trade Mode: {'Hedge' if account.margin_mode == 0 else 'Netting'}")
             
+            # Start heartbeat thread
+            self._start_heartbeat()
+            
             return True
             
         except ImportError:
@@ -177,8 +202,121 @@ class MT5Broker(BaseBroker):
             logger.error(f"Failed to connect to MT5: {e}")
             return False
     
+    def _start_heartbeat(self):
+        """เริ่ม heartbeat thread สำหรับตรวจสอบ connection"""
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            return  # Already running
+        
+        self._stop_heartbeat.clear()
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+        logger.info(f"🔄 MT5 Heartbeat started (interval: {self.config.heartbeat_interval}s)")
+    
+    def _stop_heartbeat_thread(self):
+        """หยุด heartbeat thread"""
+        self._stop_heartbeat.set()
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=5)
+            self._heartbeat_thread = None
+        logger.info("🛑 MT5 Heartbeat stopped")
+    
+    def _heartbeat_loop(self):
+        """Loop ตรวจสอบ connection และ auto-reconnect"""
+        while not self._stop_heartbeat.is_set():
+            try:
+                # Wait for interval
+                self._stop_heartbeat.wait(self.config.heartbeat_interval)
+                if self._stop_heartbeat.is_set():
+                    break
+                
+                # Check connection
+                if not self._check_connection():
+                    logger.warning("💔 MT5 connection lost! Attempting reconnect...")
+                    self._attempt_reconnect()
+                else:
+                    self._last_heartbeat = time.time()
+                    self._reconnect_count = 0  # Reset on success
+                    
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+    
+    def _check_connection(self) -> bool:
+        """ตรวจสอบว่า MT5 ยังเชื่อมต่ออยู่หรือไม่"""
+        with self._connection_lock:
+            try:
+                if not self._mt5:
+                    return False
+                
+                # Try to get terminal info
+                terminal_info = self._mt5.terminal_info()
+                if not terminal_info:
+                    return False
+                
+                # Try to get account info
+                account = self._mt5.account_info()
+                if not account:
+                    return False
+                
+                # Connection OK
+                return True
+                
+            except Exception as e:
+                logger.error(f"Connection check failed: {e}")
+                return False
+    
+    def _attempt_reconnect(self):
+        """พยายาม reconnect กับ MT5"""
+        with self._connection_lock:
+            if self._reconnect_count >= self.config.max_reconnect_attempts:
+                logger.error(f"❌ Max reconnect attempts ({self.config.max_reconnect_attempts}) reached!")
+                self._connected = False
+                return
+            
+            self._reconnect_count += 1
+            logger.info(f"🔄 Reconnect attempt {self._reconnect_count}/{self.config.max_reconnect_attempts}...")
+            
+            try:
+                # Try shutdown first
+                try:
+                    self._mt5.shutdown()
+                except:
+                    pass
+                
+                # Wait before reconnect
+                time.sleep(self.config.reconnect_delay)
+                
+                # Reinitialize
+                if not self._mt5.initialize():
+                    logger.error(f"Reconnect failed: MT5 initialize error")
+                    return
+                
+                # Check if connected
+                terminal_info = self._mt5.terminal_info()
+                if terminal_info:
+                    account = self._mt5.account_info()
+                    if account:
+                        self._connected = True
+                        logger.info(f"✅ MT5 Reconnected successfully! Account: {account.login}")
+                        self._reconnect_count = 0
+                        return
+                
+                logger.warning(f"Reconnect attempt {self._reconnect_count} failed")
+                
+            except Exception as e:
+                logger.error(f"Reconnect error: {e}")
+    
+    def ensure_connected(self) -> bool:
+        """ตรวจสอบและ reconnect ถ้าจำเป็น - เรียกก่อนทำ operation"""
+        if self._connected and self._check_connection():
+            return True
+        
+        logger.warning("MT5 not connected, attempting reconnect...")
+        self._attempt_reconnect()
+        return self._connected
+    
     async def disconnect(self) -> None:
-        """ตัดการเชื่อมต่อ - ไม่ shutdown MT5 เพราะอาจมี component อื่นใช้อยู่"""
+        """ตัดการเชื่อมต่อ - หยุด heartbeat ด้วย"""
+        self._stop_heartbeat_thread()
         self._connected = False
         logger.info("MT5 Broker disconnected (MT5 terminal still running)")
     
@@ -311,8 +449,10 @@ class MT5Broker(BaseBroker):
         return self._mt5.ORDER_FILLING_IOC
     
     async def get_account_info(self) -> Dict[str, Any]:
-        """ดึงข้อมูลบัญชี"""
-        if not self._connected:
+        """ดึงข้อมูลบัญชี - พร้อม auto-reconnect"""
+        # Ensure connection before operation
+        if not self.ensure_connected():
+            logger.warning("MT5 not connected - cannot get account info")
             return {}
         
         try:
@@ -332,6 +472,26 @@ class MT5Broker(BaseBroker):
                         "profit": account.profit,
                     }
                     return self._account_info
+                else:
+                    # Account info failed - try reconnect
+                    logger.warning("Failed to get account info, attempting reconnect...")
+                    self._attempt_reconnect()
+                    if self._connected:
+                        account = self._mt5.account_info()
+                        if account:
+                            self._account_info = {
+                                "login": account.login,
+                                "name": account.name,
+                                "server": account.server,
+                                "currency": account.currency,
+                                "balance": account.balance,
+                                "equity": account.equity,
+                                "margin": account.margin,
+                                "margin_free": account.margin_free,
+                                "margin_level": account.margin_level,
+                                "profit": account.profit,
+                            }
+                            return self._account_info
             
             # MT5 not available
             logger.warning("MT5 not connected - cannot get account info")
@@ -360,9 +520,11 @@ class MT5Broker(BaseBroker):
         - Price normalization
         - Volume validation
         - Detailed error logging
+        - Auto-reconnect if disconnected
         """
-        if not self._connected:
-            return TradeResult(success=False, error="Not connected")
+        # Ensure connection before trading
+        if not self.ensure_connected():
+            return TradeResult(success=False, error="MT5 not connected - reconnect failed")
         
         try:
             if self._mt5:
