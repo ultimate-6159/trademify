@@ -8,7 +8,7 @@
           AI Trading Control Center
         </h1>
         <p class="text-gray-400 mt-1">
-          Real-time 16-Layer Analysis → Signal → Execution
+          Real-time 20-Layer Omniscient Analysis → Signal → Execution
         </p>
       </div>
 
@@ -289,7 +289,7 @@
           </div>
         </div>
 
-        <!-- CENTER: 16-Layer Pipeline (6 cols) -->
+        <!-- CENTER: 20-Layer Pipeline (6 cols) -->
         <div class="col-span-6">
           <div
             class="bg-gray-800 rounded-xl p-4 border border-gray-700 relative"
@@ -306,7 +306,7 @@
             </div>
 
             <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-2xl">🔬</span> 16-Layer Intelligence Pipeline
+              <span class="text-2xl">�</span> 20-Layer Omniscient Pipeline
               <span
                 class="text-sm font-normal px-2 py-0.5 rounded bg-blue-600/30 text-blue-400"
               >
@@ -682,6 +682,84 @@
                 </div>
               </div>
 
+              <!-- Divider -->
+              <div class="border-t border-yellow-500/50 my-3"></div>
+              <div class="text-xs text-center text-yellow-400 -my-1 font-bold">
+                ⚡ ULTRA INTELLIGENCE LAYERS (10x-100x Smarter) ⚡
+              </div>
+
+              <!-- Ultra Intelligence (17) -->
+              <div class="flex items-center gap-2">
+                <div class="w-8 text-center text-lg">⚡</div>
+                <div
+                  class="flex-1 bg-gradient-to-r from-indigo-900/50 to-indigo-700/30 rounded p-2 border border-indigo-500"
+                >
+                  <div class="flex justify-between items-center">
+                    <span class="font-medium">17. Ultra Intelligence</span>
+                    <span class="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-500/20 rounded">10x</span>
+                  </div>
+                  <div class="text-xs text-gray-400 mt-1">
+                    SMC: {{ layers.ultra?.smc_bias || 'N/A' }} |
+                    Confidence: {{ layers.ultra?.confidence?.toFixed(0) || 0 }}%
+                  </div>
+                </div>
+              </div>
+
+              <!-- Supreme Intelligence (18) -->
+              <div class="flex items-center gap-2">
+                <div class="w-8 text-center text-lg">👑</div>
+                <div
+                  class="flex-1 bg-gradient-to-r from-yellow-900/50 to-yellow-700/30 rounded p-2 border border-yellow-500"
+                >
+                  <div class="flex justify-between items-center">
+                    <span class="font-medium">18. Supreme Intelligence</span>
+                    <span class="text-yellow-400 font-bold px-2 py-0.5 bg-yellow-500/20 rounded">20x</span>
+                  </div>
+                  <div class="text-xs text-gray-400 mt-1">
+                    Score: {{ layers.supreme?.supreme_score?.toFixed(0) || 0 }}% |
+                    Win Prob: {{ (layers.supreme?.win_probability * 100)?.toFixed(0) || 0 }}%
+                  </div>
+                </div>
+              </div>
+
+              <!-- Transcendent Intelligence (19) -->
+              <div class="flex items-center gap-2">
+                <div class="w-8 text-center text-lg">🌌</div>
+                <div
+                  class="flex-1 bg-gradient-to-r from-cyan-900/50 to-cyan-700/30 rounded p-2 border border-cyan-500"
+                >
+                  <div class="flex justify-between items-center">
+                    <span class="font-medium">19. Transcendent Intelligence</span>
+                    <span class="text-cyan-400 font-bold px-2 py-0.5 bg-cyan-500/20 rounded">50x</span>
+                  </div>
+                  <div class="text-xs text-gray-400 mt-1">
+                    Quantum: {{ layers.transcendent?.quantum_state || 'N/A' }} |
+                    Score: {{ layers.transcendent?.transcendent_score?.toFixed(0) || 0 }}%
+                  </div>
+                </div>
+              </div>
+
+              <!-- Omniscient Intelligence (20) -->
+              <div class="flex items-center gap-2">
+                <div class="w-8 text-center text-lg">🔮</div>
+                <div
+                  class="flex-1 bg-gradient-to-r from-pink-900/50 to-purple-700/30 rounded p-2 border-2 border-pink-500"
+                >
+                  <div class="flex justify-between items-center">
+                    <span class="font-bold">20. Omniscient Intelligence</span>
+                    <span class="text-pink-400 font-bold px-2 py-0.5 bg-pink-500/20 rounded animate-pulse">100x</span>
+                  </div>
+                  <div class="text-xs text-gray-400 mt-1">
+                    Consciousness: {{ layers.omniscient?.consciousness_level || 'N/A' }} |
+                    Score: {{ layers.omniscient?.omniscient_score?.toFixed(0) || 0 }}%
+                  </div>
+                  <div class="text-xs text-gray-400">
+                    Edge: {{ layers.omniscient?.edge?.toFixed(2) || 0 }}% |
+                    Can Trade: {{ layers.omniscient?.can_trade ? '✅' : '❌' }}
+                  </div>
+                </div>
+              </div>
+
               <!-- Final Decision -->
               <div
                 class="mt-4 p-4 rounded-lg bg-gradient-to-r from-gray-700 to-gray-800 border-2"
@@ -1009,7 +1087,7 @@
               )
             }}% Active
           </p>
-          <p class="text-xs text-gray-500 mt-2">16-Layer Analysis</p>
+          <p class="text-xs text-gray-500 mt-2">20-Layer Omniscient Analysis</p>
         </div>
       </div>
 
@@ -1282,6 +1360,11 @@ const layers = ref({
   learning: { market_cycle: null, cycles: 0, adaptations: 0 },
   pro: { session: null, news_impact: null, multiplier: 1 },
   sentiment: { level: null, retail_sentiment: 0, override: "NO" },
+  // Ultra Intelligence Layers (17-20)
+  ultra: { smc_bias: null, confidence: 0, multiplier: 1 },
+  supreme: { supreme_score: 0, win_probability: 0, multiplier: 1 },
+  transcendent: { quantum_state: null, transcendent_score: 0, can_trade: false, multiplier: 1 },
+  omniscient: { consciousness_level: null, omniscient_score: 0, edge: 0, can_trade: false, multiplier: 1 },
 });
 
 // Intelligence Modules for Health Display
@@ -1369,6 +1452,27 @@ const intelligenceModules = computed(() => [
       (layers.value.sentiment?.level &&
         layers.value.sentiment?.level !== "N/A") ||
       omegaData.value?.grade !== "N/A",
+  },
+  // Ultra Intelligence Layers (17-20)
+  {
+    name: "Ultra Intelligence (10x)",
+    icon: "⚡",
+    active: layers.value.ultra?.confidence > 0,
+  },
+  {
+    name: "Supreme Intelligence (20x)",
+    icon: "👑",
+    active: layers.value.supreme?.supreme_score > 0,
+  },
+  {
+    name: "Transcendent Intelligence (50x)",
+    icon: "🌌",
+    active: layers.value.transcendent?.transcendent_score > 0,
+  },
+  {
+    name: "Omniscient Intelligence (100x)",
+    icon: "🔮",
+    active: layers.value.omniscient?.omniscient_score > 0,
   },
 ]);
 
@@ -1508,6 +1612,26 @@ const refreshAll = async () => {
         // Sentiment
         if (pl.sentiment) {
           layers.value.sentiment = pl.sentiment;
+        }
+
+        // Ultra Intelligence (Layer 17)
+        if (pl.ultra) {
+          layers.value.ultra = pl.ultra;
+        }
+
+        // Supreme Intelligence (Layer 18)
+        if (pl.supreme) {
+          layers.value.supreme = pl.supreme;
+        }
+
+        // Transcendent Intelligence (Layer 19)
+        if (pl.transcendent) {
+          layers.value.transcendent = pl.transcendent;
+        }
+
+        // Omniscient Intelligence (Layer 20)
+        if (pl.omniscient) {
+          layers.value.omniscient = pl.omniscient;
         }
       }
 
