@@ -340,6 +340,63 @@ async def health_check():
     )
 
 
+@app.post("/api/v1/system/update")
+async def update_and_restart():
+    """
+    🔄 Update code from GitHub and schedule restart
+    
+    1. Git pull to get latest code
+    2. Schedule server restart after response
+    
+    Returns:
+        Status of git pull and restart schedule
+    """
+    import subprocess
+    import sys
+    
+    result = {"git_pull": "skipped", "restart_scheduled": False, "message": ""}
+    
+    try:
+        # Get the project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        # Git pull
+        git_result = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if git_result.returncode == 0:
+            result["git_pull"] = "success"
+            result["message"] = git_result.stdout.strip() or "Already up to date"
+            
+            # Schedule restart
+            async def delayed_restart():
+                import asyncio
+                await asyncio.sleep(2)  # Give time for response to be sent
+                logger.info("🔄 Restarting server after update...")
+                os._exit(0)  # This will cause uvicorn to restart if using --reload
+            
+            import asyncio
+            asyncio.create_task(delayed_restart())
+            result["restart_scheduled"] = True
+        else:
+            result["git_pull"] = "failed"
+            result["message"] = git_result.stderr.strip()
+            
+    except subprocess.TimeoutExpired:
+        result["git_pull"] = "timeout"
+        result["message"] = "Git pull timed out"
+    except Exception as e:
+        result["git_pull"] = "error"
+        result["message"] = str(e)
+    
+    return result
+
+
 @app.get("/api/v1/system/health")
 async def get_system_health():
     """
