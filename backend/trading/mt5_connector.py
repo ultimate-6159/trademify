@@ -346,6 +346,11 @@ class MT5Broker(BaseBroker):
         account = await self.get_account_info()
         return account.get("balance", 10000.0)
     
+    async def get_equity(self) -> float:
+        """ดึง equity ปัจจุบัน"""
+        account = await self.get_account_info()
+        return account.get("equity", account.get("balance", 10000.0))
+    
     async def place_order(self, order: Order) -> TradeResult:
         """
         ส่งคำสั่งเทรด (แก้ไขแล้ว!)
