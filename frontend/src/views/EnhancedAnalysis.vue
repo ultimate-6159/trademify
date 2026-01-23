@@ -1,25 +1,29 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-4 sm:space-y-6 pb-20 md:pb-0">
     <!-- Header -->
-    <div class="flex items-center justify-between">
+    <div
+      class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0"
+    >
       <div>
-        <h1 class="text-3xl font-bold text-white">🤖 AI Enhanced Analysis</h1>
-        <p class="text-gray-400 mt-1">
-          Multi-factor AI Analysis for High Win Rate
+        <h1 class="text-xl sm:text-3xl font-bold text-white">🤖 AI Analysis</h1>
+        <p class="text-gray-400 text-sm sm:text-base mt-1">
+          Multi-factor AI for High Win Rate
         </p>
       </div>
 
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2 sm:gap-4">
         <!-- Bot Status -->
         <div
           :class="botStatusClass"
-          class="px-4 py-2 rounded-lg flex items-center gap-2"
+          class="px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg flex items-center gap-1 sm:gap-2 text-xs sm:text-sm"
         >
           <span
-            class="w-3 h-3 rounded-full"
+            class="w-2 h-2 sm:w-3 sm:h-3 rounded-full"
             :class="botRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-500'"
           ></span>
-          {{ botRunning ? "Bot Running" : "Bot Stopped" }}
+          <span class="hidden xs:inline">{{
+            botRunning ? "Running" : "Stopped"
+          }}</span>
         </div>
 
         <!-- Start/Stop Button -->
@@ -32,15 +36,17 @@
               : 'bg-green-600 hover:bg-green-700',
             !canTrade ? 'opacity-50 cursor-not-allowed' : '',
           ]"
-          class="px-4 py-2 text-white rounded-lg transition-colors"
+          class="px-3 sm:px-4 py-1.5 sm:py-2 text-white rounded-lg transition-colors text-sm"
         >
-          {{ botRunning ? "⏹️ Stop Bot" : "▶️ Start Bot" }}
+          {{ botRunning ? "⏹️ Stop" : "▶️ Start" }}
         </button>
       </div>
     </div>
 
     <!-- View Toggle -->
-    <div class="flex items-center gap-4 bg-gray-800 rounded-lg p-2 w-fit">
+    <div
+      class="flex items-center gap-2 sm:gap-4 bg-gray-800 rounded-lg p-1.5 sm:p-2 w-fit"
+    >
       <button
         @click="viewMode = 'compact'"
         :class="
@@ -48,9 +54,9 @@
             ? 'bg-blue-600 text-white'
             : 'text-gray-400 hover:text-white'
         "
-        class="px-4 py-2 rounded-lg transition-all"
+        class="px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg transition-all text-xs sm:text-sm"
       >
-        📊 Compact View
+        📊 <span class="hidden sm:inline">Compact</span>
       </button>
       <button
         @click="viewMode = 'detailed'"
@@ -59,9 +65,9 @@
             ? 'bg-blue-600 text-white'
             : 'text-gray-400 hover:text-white'
         "
-        class="px-4 py-2 rounded-lg transition-all"
+        class="px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg transition-all text-xs sm:text-sm"
       >
-        🔬 Detailed Factor View
+        🔬 <span class="hidden sm:inline">Detailed</span>
       </button>
     </div>
 
@@ -69,34 +75,38 @@
     <MarketStatusBanner :symbol="getFirstSymbol(botSettings.symbols)" />
 
     <!-- Bot Settings (Collapsible) -->
-    <div class="bg-gray-800 rounded-lg p-4">
+    <div class="bg-gray-800 rounded-lg p-3 sm:p-4">
       <div
         class="flex items-center justify-between cursor-pointer"
         @click="showSettings = !showSettings"
       >
         <div class="flex items-center gap-2">
-          <h2 class="text-lg font-semibold text-white">⚙️ Bot Settings</h2>
-          <span v-if="isUserEditing" class="text-blue-400 text-xs animate-pulse"
+          <h2 class="text-base sm:text-lg font-semibold text-white">
+            ⚙️ Settings
+          </h2>
+          <span
+            v-if="isUserEditing"
+            class="text-blue-400 text-xs animate-pulse hidden sm:inline"
             >✏️ Editing...</span
           >
           <span
             v-else-if="isSyncing"
-            class="text-yellow-400 text-xs animate-pulse"
+            class="text-yellow-400 text-xs animate-pulse hidden sm:inline"
             >🔄 Syncing...</span
           >
-          <span v-else class="text-green-400 text-xs">✓ Saved</span>
+          <span v-else class="text-green-400 text-xs hidden sm:inline">✓</span>
         </div>
         <span class="text-gray-400">{{ showSettings ? "▼" : "▶" }}</span>
       </div>
 
-      <div v-if="showSettings" class="mt-4">
-        <div class="grid grid-cols-4 gap-4">
-          <div>
-            <label class="text-gray-400 text-sm block mb-1">Symbols</label>
+      <div v-if="showSettings" class="mt-3 sm:mt-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+          <div class="col-span-2 sm:col-span-1">
+            <label class="text-gray-400 text-xs block mb-1">Symbols</label>
             <input
               v-model="botSettings.symbols"
-              placeholder="EURUSD,GBPUSD,XAUUSD"
-              class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+              placeholder="EURUSD,GBPUSD"
+              class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
             />
           </div>
           <div>

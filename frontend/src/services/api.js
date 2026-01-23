@@ -792,14 +792,22 @@ const api = {
   async updateBotSettings(settings = {}) {
     return tryApiOrMock(
       () => apiClient.put("/bot/settings", settings),
-      () => ({ status: "updated", message: "Settings updated (mock)", ...settings }),
+      () => ({
+        status: "updated",
+        message: "Settings updated (mock)",
+        ...settings,
+      }),
     );
   },
 
   async restartBot(config = {}) {
     return tryApiOrMock(
       () => apiClient.post("/bot/restart", config),
-      () => ({ status: "restarted", message: "Bot restarted (mock)", ...config }),
+      () => ({
+        status: "restarted",
+        message: "Bot restarted (mock)",
+        ...config,
+      }),
     );
   },
 
@@ -821,7 +829,7 @@ const api = {
         layers: [],
         last_decisions: {},
         quality_filter: { current: "MEDIUM", levels: {} },
-        total_active: 0
+        total_active: 0,
       }),
     );
   },

@@ -326,6 +326,9 @@ class AITradingBot:
         # 🌌✨ Transcendent Intelligence - 50x Smarter (Beyond Human)
         self.transcendent_intelligence: Optional[TranscendentIntelligence] = None
         
+        # 🔮✨ Omniscient Intelligence - 100x Smarter (All-Knowing)
+        self.omniscient_intelligence: Optional[OmniscientIntelligence] = None
+        
         # State
         self._running = False
         self._last_signals: Dict[str, Any] = {}
@@ -1600,11 +1603,12 @@ class AITradingBot:
                     lows = df['low'].values.astype(np.float32)
                     volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
                     
-                    # Calculate ATR
-                    atr = np.mean(np.maximum(
+                    # Calculate ATR safely
+                    tr = np.maximum(
                         highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
-                    ))
+                        np.abs(highs[-14:] - prices[-15:-1])
+                    )
+                    atr = np.mean(tr)
                     
                     # Get balance
                     balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
@@ -1685,10 +1689,11 @@ class AITradingBot:
                     lows = df['low'].values.astype(np.float32)
                     volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
                     
-                    atr = np.mean(np.maximum(
+                    tr = np.maximum(
                         highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
-                    ))
+                        np.abs(highs[-14:] - prices[-15:-1])
+                    )
+                    atr = np.mean(tr)
                     
                     balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
                     equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
@@ -1772,10 +1777,11 @@ class AITradingBot:
                     lows = df['low'].values.astype(np.float32)
                     volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
                     
-                    atr = np.mean(np.maximum(
+                    tr = np.maximum(
                         highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - np.roll(prices[-14:], 1)[1:])
-                    ))
+                        np.abs(highs[-14:] - prices[-15:-1])
+                    )
+                    atr = np.mean(tr)
                     
                     balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
                     equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
@@ -1871,9 +1877,8 @@ class AITradingBot:
                     lows = df['low'].values.astype(np.float32)
                     volumes = df['volume'].values.astype(np.float32) if 'volume' in df else None
                     
-                    account = await self.get_account_info()
-                    balance = account.get("balance", 10000)
-                    equity = account.get("equity", balance)
+                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
                     
                     omniscient_decision = self.omniscient_intelligence.analyze(
                         symbol=symbol,

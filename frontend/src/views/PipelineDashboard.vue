@@ -1,41 +1,46 @@
 <template>
-  <div class="min-h-screen bg-gray-900 text-white p-4">
+  <div class="min-h-screen bg-gray-900 text-white p-2 sm:p-4">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-4">
+    <div
+      class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3"
+    >
       <div>
-        <h1 class="text-3xl font-bold flex items-center gap-3">
-          <span class="text-4xl">🔬</span>
-          AI Trading Control Center
+        <h1
+          class="text-xl sm:text-2xl lg:text-3xl font-bold flex items-center gap-2 sm:gap-3"
+        >
+          <span class="text-2xl sm:text-3xl lg:text-4xl">🔬</span>
+          <span class="hidden xs:inline">AI Trading</span> Control Center
         </h1>
-        <p class="text-gray-400 mt-1">
-          Real-time 20-Layer Omniscient Analysis → Signal → Execution
+        <p class="text-gray-400 mt-1 text-xs sm:text-sm">
+          <span class="hidden sm:inline">Real-time</span> 20-Layer Omniscient
+          Analysis
         </p>
       </div>
 
-      <div class="flex items-center gap-4">
+      <div class="flex flex-wrap items-center gap-2 sm:gap-4">
         <!-- Tab Switcher -->
         <div class="flex bg-gray-800 rounded-lg p-1">
           <button
             @click="activeTab = 'pipeline'"
-            class="px-4 py-2 rounded-md text-sm font-semibold transition-all"
+            class="px-2 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-semibold transition-all"
             :class="
               activeTab === 'pipeline'
                 ? 'bg-blue-600 text-white'
                 : 'text-gray-400 hover:text-white'
             "
           >
-            🔬 Pipeline
+            🔬 <span class="hidden sm:inline">Pipeline</span>
           </button>
           <button
             @click="activeTab = 'health'"
-            class="px-4 py-2 rounded-md text-sm font-semibold transition-all"
+            class="px-2 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-semibold transition-all"
             :class="
               activeTab === 'health'
                 ? 'bg-green-600 text-white'
                 : 'text-gray-400 hover:text-white'
             "
           >
-            🏥 System Health
+            🏥 <span class="hidden sm:inline">Health</span>
           </button>
         </div>
 
@@ -44,7 +49,7 @@
           <select
             v-model="selectedSymbol"
             @change="onSymbolChange"
-            class="bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 pr-8 text-white font-semibold focus:outline-none focus:border-blue-500 cursor-pointer appearance-none"
+            class="bg-gray-700 border border-gray-600 rounded-lg px-2 sm:px-4 py-1.5 sm:py-2 pr-6 sm:pr-8 text-white text-sm font-semibold focus:outline-none focus:border-blue-500 cursor-pointer appearance-none"
             :disabled="isLoading"
           >
             <option v-for="symbol in symbols" :key="symbol" :value="symbol">
@@ -53,23 +58,23 @@
           </select>
           <!-- Dropdown Arrow -->
           <div
-            class="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"
+            class="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs"
           >
             ▼
           </div>
         </div>
 
         <!-- Connection Status -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
           <span
-            class="w-3 h-3 rounded-full"
+            class="w-2 h-2 sm:w-3 sm:h-3 rounded-full"
             :class="isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'"
           ></span>
           <span
-            class="text-sm"
+            class="text-xs sm:text-sm hidden xs:inline"
             :class="isConnected ? 'text-green-400' : 'text-red-400'"
           >
-            {{ isConnected ? "Connected" : "Disconnected" }}
+            {{ isConnected ? "Online" : "Offline" }}
           </span>
         </div>
 
@@ -77,24 +82,26 @@
         <button
           @click="refreshAll"
           :disabled="isLoading"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+          class="px-2 sm:px-4 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1 sm:gap-2"
         >
           <span :class="{ 'animate-spin': isLoading }">🔄</span>
-          Refresh
+          <span class="hidden sm:inline">Refresh</span>
         </button>
       </div>
     </div>
 
     <!-- ==================== PIPELINE TAB ==================== -->
     <div v-if="activeTab === 'pipeline'">
-      <!-- Main Grid: 3 Columns -->
-      <div class="grid grid-cols-12 gap-4">
-        <!-- LEFT: Bot Control & Signal (3 cols) -->
-        <div class="col-span-3 space-y-4">
+      <!-- Main Grid: Responsive -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4">
+        <!-- LEFT: Bot Control & Signal (Mobile: Full, Desktop: 3 cols) -->
+        <div class="lg:col-span-3 space-y-3 sm:space-y-4 order-1 lg:order-1">
           <!-- Bot Control Card -->
-          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-2xl">🤖</span> AI Bot Control
+          <div class="bg-gray-800 rounded-xl p-3 sm:p-4 border border-gray-700">
+            <h2
+              class="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center gap-2"
+            >
+              <span class="text-xl sm:text-2xl">🤖</span> AI Bot Control
             </h2>
 
             <!-- Bot Status -->
@@ -289,10 +296,10 @@
           </div>
         </div>
 
-        <!-- CENTER: 20-Layer Pipeline (6 cols) -->
-        <div class="col-span-6">
+        <!-- CENTER: 20-Layer Pipeline (Mobile: Full, Desktop: 6 cols) -->
+        <div class="lg:col-span-6 order-3 lg:order-2">
           <div
-            class="bg-gray-800 rounded-xl p-4 border border-gray-700 relative"
+            class="bg-gray-800 rounded-xl p-3 sm:p-4 border border-gray-700 relative"
           >
             <!-- Loading Overlay -->
             <div
@@ -696,11 +703,14 @@
                 >
                   <div class="flex justify-between items-center">
                     <span class="font-medium">17. Ultra Intelligence</span>
-                    <span class="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-500/20 rounded">10x</span>
+                    <span
+                      class="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-500/20 rounded"
+                      >10x</span
+                    >
                   </div>
                   <div class="text-xs text-gray-400 mt-1">
-                    SMC: {{ layers.ultra?.smc_bias || 'N/A' }} |
-                    Confidence: {{ layers.ultra?.confidence?.toFixed(0) || 0 }}%
+                    SMC: {{ layers.ultra?.smc_bias || "N/A" }} | Confidence:
+                    {{ layers.ultra?.confidence?.toFixed(0) || 0 }}%
                   </div>
                 </div>
               </div>
@@ -713,11 +723,17 @@
                 >
                   <div class="flex justify-between items-center">
                     <span class="font-medium">18. Supreme Intelligence</span>
-                    <span class="text-yellow-400 font-bold px-2 py-0.5 bg-yellow-500/20 rounded">20x</span>
+                    <span
+                      class="text-yellow-400 font-bold px-2 py-0.5 bg-yellow-500/20 rounded"
+                      >20x</span
+                    >
                   </div>
                   <div class="text-xs text-gray-400 mt-1">
-                    Score: {{ layers.supreme?.supreme_score?.toFixed(0) || 0 }}% |
-                    Win Prob: {{ (layers.supreme?.win_probability * 100)?.toFixed(0) || 0 }}%
+                    Score: {{ layers.supreme?.supreme_score?.toFixed(0) || 0 }}%
+                    | Win Prob:
+                    {{
+                      (layers.supreme?.win_probability * 100)?.toFixed(0) || 0
+                    }}%
                   </div>
                 </div>
               </div>
@@ -729,12 +745,20 @@
                   class="flex-1 bg-gradient-to-r from-cyan-900/50 to-cyan-700/30 rounded p-2 border border-cyan-500"
                 >
                   <div class="flex justify-between items-center">
-                    <span class="font-medium">19. Transcendent Intelligence</span>
-                    <span class="text-cyan-400 font-bold px-2 py-0.5 bg-cyan-500/20 rounded">50x</span>
+                    <span class="font-medium"
+                      >19. Transcendent Intelligence</span
+                    >
+                    <span
+                      class="text-cyan-400 font-bold px-2 py-0.5 bg-cyan-500/20 rounded"
+                      >50x</span
+                    >
                   </div>
                   <div class="text-xs text-gray-400 mt-1">
-                    Quantum: {{ layers.transcendent?.quantum_state || 'N/A' }} |
-                    Score: {{ layers.transcendent?.transcendent_score?.toFixed(0) || 0 }}%
+                    Quantum: {{ layers.transcendent?.quantum_state || "N/A" }} |
+                    Score:
+                    {{
+                      layers.transcendent?.transcendent_score?.toFixed(0) || 0
+                    }}%
                   </div>
                 </div>
               </div>
@@ -747,15 +771,20 @@
                 >
                   <div class="flex justify-between items-center">
                     <span class="font-bold">20. Omniscient Intelligence</span>
-                    <span class="text-pink-400 font-bold px-2 py-0.5 bg-pink-500/20 rounded animate-pulse">100x</span>
+                    <span
+                      class="text-pink-400 font-bold px-2 py-0.5 bg-pink-500/20 rounded animate-pulse"
+                      >100x</span
+                    >
                   </div>
                   <div class="text-xs text-gray-400 mt-1">
-                    Consciousness: {{ layers.omniscient?.consciousness_level || 'N/A' }} |
-                    Score: {{ layers.omniscient?.omniscient_score?.toFixed(0) || 0 }}%
+                    Consciousness:
+                    {{ layers.omniscient?.consciousness_level || "N/A" }} |
+                    Score:
+                    {{ layers.omniscient?.omniscient_score?.toFixed(0) || 0 }}%
                   </div>
                   <div class="text-xs text-gray-400">
-                    Edge: {{ layers.omniscient?.edge?.toFixed(2) || 0 }}% |
-                    Can Trade: {{ layers.omniscient?.can_trade ? '✅' : '❌' }}
+                    Edge: {{ layers.omniscient?.edge?.toFixed(2) || 0 }}% | Can
+                    Trade: {{ layers.omniscient?.can_trade ? "✅" : "❌" }}
                   </div>
                 </div>
               </div>
@@ -792,38 +821,42 @@
           </div>
         </div>
 
-        <!-- RIGHT: Positions & History (3 cols) -->
-        <div class="col-span-3 space-y-4">
+        <!-- RIGHT: Positions & History (Mobile: Full, Desktop: 3 cols) -->
+        <div class="lg:col-span-3 space-y-3 sm:space-y-4 order-2 lg:order-3">
           <!-- Open Positions -->
-          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-2xl">📊</span> Open Positions
-              <span class="text-xs bg-gray-600 px-2 py-1 rounded ml-auto">
+          <div class="bg-gray-800 rounded-xl p-3 sm:p-4 border border-gray-700">
+            <h2
+              class="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center gap-2"
+            >
+              <span class="text-xl sm:text-2xl">📊</span> Open Positions
+              <span
+                class="text-xs bg-gray-600 px-2 py-0.5 sm:py-1 rounded ml-auto"
+              >
                 {{ positions.length }}
               </span>
             </h2>
 
             <div
               v-if="positions.length === 0"
-              class="text-center text-gray-400 py-8"
+              class="text-center text-gray-400 py-4 sm:py-8 text-sm"
             >
               No open positions
             </div>
 
-            <div v-else class="space-y-2 max-h-60 overflow-y-auto">
+            <div v-else class="space-y-2 max-h-48 sm:max-h-60 overflow-y-auto">
               <div
                 v-for="pos in positions"
                 :key="pos.id"
-                class="p-3 rounded bg-gray-700/50 border"
+                class="p-2 sm:p-3 rounded bg-gray-700/50 border"
                 :class="
                   pos.pnl >= 0 ? 'border-green-500/30' : 'border-red-500/30'
                 "
               >
                 <div class="flex justify-between items-center">
                   <div>
-                    <span class="font-bold">{{ pos.symbol }}</span>
+                    <span class="font-bold text-sm">{{ pos.symbol }}</span>
                     <span
-                      class="ml-2 text-xs px-2 py-0.5 rounded"
+                      class="ml-1 sm:ml-2 text-xs px-1.5 sm:px-2 py-0.5 rounded"
                       :class="
                         pos.side === 'BUY'
                           ? 'bg-green-500/20 text-green-400'
@@ -857,23 +890,25 @@
           </div>
 
           <!-- Trade History -->
-          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-2xl">📜</span> Recent Trades
+          <div class="bg-gray-800 rounded-xl p-3 sm:p-4 border border-gray-700">
+            <h2
+              class="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center gap-2"
+            >
+              <span class="text-xl sm:text-2xl">📜</span> Recent Trades
             </h2>
 
             <div
               v-if="tradeHistory.length === 0"
-              class="text-center text-gray-400 py-8"
+              class="text-center text-gray-400 py-4 sm:py-8 text-sm"
             >
               No trades yet
             </div>
 
-            <div v-else class="space-y-2 max-h-80 overflow-y-auto">
+            <div v-else class="space-y-2 max-h-48 sm:max-h-80 overflow-y-auto">
               <div
                 v-for="trade in tradeHistory"
                 :key="trade.id"
-                class="p-2 rounded bg-gray-700/50 text-sm"
+                class="p-2 rounded bg-gray-700/50 text-xs sm:text-sm"
               >
                 <div class="flex justify-between items-center">
                   <span class="font-medium">{{ trade.symbol }}</span>
@@ -895,29 +930,31 @@
           </div>
 
           <!-- Signal History -->
-          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-2xl">📡</span> Signal History
+          <div class="bg-gray-800 rounded-xl p-3 sm:p-4 border border-gray-700">
+            <h2
+              class="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center gap-2"
+            >
+              <span class="text-xl sm:text-2xl">📡</span> Signal History
             </h2>
 
             <div
               v-if="signalHistory.length === 0"
-              class="text-center text-gray-400 py-4"
+              class="text-center text-gray-400 py-4 text-sm"
             >
               No signals yet
             </div>
 
-            <div v-else class="space-y-2 max-h-40 overflow-y-auto">
+            <div v-else class="space-y-2 max-h-32 sm:max-h-40 overflow-y-auto">
               <div
                 v-for="sig in signalHistory.slice(0, 10)"
                 :key="sig.timestamp"
-                class="flex justify-between items-center text-sm p-2 rounded bg-gray-700/30"
+                class="flex justify-between items-center text-xs sm:text-sm p-2 rounded bg-gray-700/30"
               >
                 <span class="text-gray-400">{{ sig.symbol }}</span>
                 <span :class="getSignalClass(sig.signal)">{{
                   sig.signal
                 }}</span>
-                <span class="text-xs text-gray-500">{{
+                <span class="text-xs text-gray-500 hidden sm:inline">{{
                   formatTime(sig.timestamp)
                 }}</span>
               </div>
@@ -927,55 +964,57 @@
       </div>
 
       <!-- Footer Stats -->
-      <div class="mt-4 grid grid-cols-6 gap-4">
+      <div
+        class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4"
+      >
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Total Trades</div>
-          <div class="text-xl font-bold text-white">
+          <div class="text-lg sm:text-xl font-bold text-white">
             {{ stats.total_trades || 0 }}
           </div>
         </div>
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Win Rate</div>
-          <div class="text-xl font-bold text-green-400">
+          <div class="text-lg sm:text-xl font-bold text-green-400">
             {{ stats.win_rate?.toFixed(1) || 0 }}%
           </div>
         </div>
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Profit Factor</div>
-          <div class="text-xl font-bold text-blue-400">
+          <div class="text-lg sm:text-xl font-bold text-blue-400">
             {{ stats.profit_factor?.toFixed(2) || 0 }}
           </div>
         </div>
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Total P&L</div>
           <div
-            class="text-xl font-bold"
+            class="text-lg sm:text-xl font-bold"
             :class="stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'"
           >
             ${{ formatNumber(stats.total_pnl || 0) }}
           </div>
         </div>
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Avg Win</div>
-          <div class="text-xl font-bold text-green-400">
+          <div class="text-lg sm:text-xl font-bold text-green-400">
             ${{ formatNumber(stats.avg_win || 0) }}
           </div>
         </div>
         <div
-          class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700"
+          class="bg-gray-800 rounded-lg p-2 sm:p-3 text-center border border-gray-700"
         >
           <div class="text-xs text-gray-400">Avg Loss</div>
-          <div class="text-xl font-bold text-red-400">
+          <div class="text-lg sm:text-xl font-bold text-red-400">
             ${{ formatNumber(stats.avg_loss || 0) }}
           </div>
         </div>
@@ -1363,8 +1402,19 @@ const layers = ref({
   // Ultra Intelligence Layers (17-20)
   ultra: { smc_bias: null, confidence: 0, multiplier: 1 },
   supreme: { supreme_score: 0, win_probability: 0, multiplier: 1 },
-  transcendent: { quantum_state: null, transcendent_score: 0, can_trade: false, multiplier: 1 },
-  omniscient: { consciousness_level: null, omniscient_score: 0, edge: 0, can_trade: false, multiplier: 1 },
+  transcendent: {
+    quantum_state: null,
+    transcendent_score: 0,
+    can_trade: false,
+    multiplier: 1,
+  },
+  omniscient: {
+    consciousness_level: null,
+    omniscient_score: 0,
+    edge: 0,
+    can_trade: false,
+    multiplier: 1,
+  },
 });
 
 // Intelligence Modules for Health Display

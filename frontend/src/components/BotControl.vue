@@ -1,14 +1,16 @@
 <template>
-  <div class="bg-gray-800 rounded-lg p-6">
+  <div class="bg-gray-800 rounded-lg p-3 sm:p-6">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
-      <h2 class="text-xl font-bold text-white flex items-center gap-2">
-        <span class="text-2xl">🤖</span>
-        AI Trading Bot
+    <div class="flex items-center justify-between mb-4 sm:mb-6">
+      <h2
+        class="text-lg sm:text-xl font-bold text-white flex items-center gap-2"
+      >
+        <span class="text-xl sm:text-2xl">🤖</span>
+        <span class="hidden xs:inline">AI Trading</span> Bot
       </h2>
 
       <!-- Status Badge -->
-      <div :class="statusBadgeClass">
+      <div :class="statusBadgeClass" class="text-xs sm:text-sm">
         {{ botStatus.running ? "🟢 RUNNING" : "⏹️ STOPPED" }}
       </div>
     </div>
@@ -16,56 +18,60 @@
     <!-- Connection Warning -->
     <div
       v-if="!isConnected"
-      class="bg-red-900/30 border border-red-500 rounded-lg p-4 mb-4"
+      class="bg-red-900/30 border border-red-500 rounded-lg p-3 sm:p-4 mb-4"
     >
-      <div class="flex items-center gap-3">
-        <span class="text-2xl">⚠️</span>
-        <div>
-          <div class="text-red-400 font-semibold">
-            Cannot connect to Backend API
+      <div class="flex items-start gap-2 sm:gap-3">
+        <span class="text-xl sm:text-2xl">⚠️</span>
+        <div class="flex-1 min-w-0">
+          <div class="text-red-400 font-semibold text-sm">
+            Cannot connect to Backend
           </div>
-          <div class="text-gray-400 text-sm">
-            Make sure the backend is running on port 8000
+          <div class="text-gray-400 text-xs">
+            Make sure backend is running on port 8000
           </div>
         </div>
       </div>
     </div>
 
     <!-- Bot Status Cards -->
-    <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="bg-gray-700 rounded-lg p-4">
-        <div class="text-gray-400 text-sm mb-1">Broker</div>
-        <div class="text-xl font-bold text-blue-400">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
+      <div class="bg-gray-700 rounded-lg p-2 sm:p-4">
+        <div class="text-gray-400 text-xs mb-1">Broker</div>
+        <div class="text-base sm:text-xl font-bold text-blue-400">
           {{ botStatus.broker_type || "MT5" }}
         </div>
       </div>
 
-      <div class="bg-gray-700 rounded-lg p-4">
-        <div class="text-gray-400 text-sm mb-1">Quality Level</div>
-        <div :class="qualityClass">{{ botSettings.min_quality || "HIGH" }}</div>
+      <div class="bg-gray-700 rounded-lg p-2 sm:p-4">
+        <div class="text-gray-400 text-xs mb-1">Quality</div>
+        <div :class="qualityClass" class="text-base sm:text-xl">
+          {{ botSettings.min_quality || "HIGH" }}
+        </div>
       </div>
 
-      <div class="bg-gray-700 rounded-lg p-4">
-        <div class="text-gray-400 text-sm mb-1">Symbols</div>
-        <div class="text-lg font-bold text-white">{{ symbolCount }}</div>
+      <div class="bg-gray-700 rounded-lg p-2 sm:p-4">
+        <div class="text-gray-400 text-xs mb-1">Symbols</div>
+        <div class="text-base sm:text-lg font-bold text-white">
+          {{ symbolCount }}
+        </div>
       </div>
 
-      <div class="bg-gray-700 rounded-lg p-4">
-        <div class="text-gray-400 text-sm mb-1">Interval</div>
-        <div class="text-xl font-bold text-white">
+      <div class="bg-gray-700 rounded-lg p-2 sm:p-4">
+        <div class="text-gray-400 text-xs mb-1">Interval</div>
+        <div class="text-base sm:text-xl font-bold text-white">
           {{ botSettings.interval || 60 }}s
         </div>
       </div>
     </div>
 
     <!-- Symbols Display -->
-    <div class="bg-gray-700 rounded-lg p-4 mb-6">
-      <div class="text-gray-400 text-sm mb-2">Trading Symbols</div>
-      <div class="flex flex-wrap gap-2">
+    <div class="bg-gray-700 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+      <div class="text-gray-400 text-xs sm:text-sm mb-2">Trading Symbols</div>
+      <div class="flex flex-wrap gap-1.5 sm:gap-2">
         <span
           v-for="symbol in symbolList"
           :key="symbol"
-          class="px-3 py-1 bg-blue-600 text-white rounded-full text-sm"
+          class="px-2 sm:px-3 py-0.5 sm:py-1 bg-blue-600 text-white rounded-full text-xs sm:text-sm"
         >
           {{ symbol }}
         </span>
@@ -73,16 +79,18 @@
     </div>
 
     <!-- Quality Selector -->
-    <div class="bg-gray-700 rounded-lg p-4 mb-6">
-      <div class="text-gray-400 text-sm mb-2">Signal Quality Filter</div>
-      <div class="grid grid-cols-4 gap-2">
+    <div class="bg-gray-700 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+      <div class="text-gray-400 text-xs sm:text-sm mb-2">
+        Signal Quality Filter
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <button
           v-for="quality in qualityLevels"
           :key="quality.value"
           @click="setQuality(quality.value)"
           :disabled="!botStatus.running"
           :class="[
-            'px-4 py-3 rounded-lg text-sm font-semibold transition-all',
+            'px-2 sm:px-4 py-2 sm:py-3 rounded-lg text-xs sm:text-sm font-semibold transition-all',
             botSettings.min_quality === quality.value
               ? quality.activeClass
               : 'bg-gray-600 text-gray-300 hover:bg-gray-500',
@@ -101,17 +109,19 @@
     <!-- Last Signals -->
     <div
       v-if="lastSignals && Object.keys(lastSignals).length > 0"
-      class="bg-gray-700 rounded-lg p-4 mb-6"
+      class="bg-gray-700 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6"
     >
-      <div class="text-gray-400 text-sm mb-3">Latest Signals</div>
+      <div class="text-gray-400 text-xs sm:text-sm mb-2 sm:mb-3">
+        Latest Signals
+      </div>
       <div class="space-y-2">
         <div
           v-for="(signal, symbol) in lastSignals"
           :key="symbol"
-          class="flex items-center justify-between bg-gray-600 rounded-lg px-4 py-2"
+          class="flex flex-col sm:flex-row sm:items-center justify-between bg-gray-600 rounded-lg px-3 sm:px-4 py-2 gap-1 sm:gap-0"
         >
-          <span class="text-white font-medium">{{ symbol }}</span>
-          <div class="flex items-center gap-4">
+          <span class="text-white font-medium text-sm">{{ symbol }}</span>
+          <div class="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm">
             <span :class="signalClass(signal.signal)">
               {{ signalEmoji(signal.signal) }} {{ signal.signal }}
             </span>
@@ -127,12 +137,12 @@
     </div>
 
     <!-- Control Buttons -->
-    <div class="flex gap-3">
+    <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
       <button
         v-if="!botStatus.running"
         @click="startBot"
         :disabled="isLoading"
-        class="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+        class="flex-1 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
       >
         <span v-if="isLoading" class="animate-spin">⏳</span>
         <span v-else>🚀</span>
@@ -143,7 +153,7 @@
         v-else
         @click="stopBot"
         :disabled="isLoading"
-        class="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+        class="flex-1 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
       >
         <span v-if="isLoading" class="animate-spin">⏳</span>
         <span v-else>🛑</span>
@@ -152,9 +162,9 @@
 
       <button
         @click="showSettings = true"
-        class="px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-semibold transition-colors"
+        class="px-4 sm:px-6 py-2.5 sm:py-3 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-semibold transition-colors text-sm sm:text-base"
       >
-        ⚙️ Settings
+        ⚙️ <span class="hidden sm:inline">Settings</span>
       </button>
     </div>
 

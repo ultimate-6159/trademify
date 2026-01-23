@@ -1,18 +1,21 @@
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <h1 class="text-3xl font-bold text-white">Auto Trading</h1>
-      <div class="flex items-center gap-4">
+  <div class="space-y-4 sm:space-y-6 pb-20 md:pb-0">
+    <div
+      class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0"
+    >
+      <h1 class="text-xl sm:text-3xl font-bold text-white">Auto Trading</h1>
+      <div class="flex items-center gap-2 sm:gap-4">
         <!-- Sync Indicator -->
-        <div class="flex items-center gap-2 text-sm">
+        <div class="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm">
           <span
             v-if="tradingStore.isSyncing"
             class="text-yellow-400 animate-pulse"
           >
-            🔄 Syncing...
+            🔄 <span class="hidden xs:inline">Syncing...</span>
           </span>
           <span v-else-if="tradingStore.lastSyncTime" class="text-gray-400">
-            ✅ Synced {{ formatSyncTime(tradingStore.lastSyncTime) }}
+            ✅ <span class="hidden sm:inline">Synced</span>
+            {{ formatSyncTime(tradingStore.lastSyncTime) }}
           </span>
           <button
             @click="tradingStore.forceSync"
@@ -22,7 +25,7 @@
             Refresh
           </button>
         </div>
-        <span :class="connectionStatusClass">
+        <span :class="connectionStatusClass" class="text-xs sm:text-sm">
           {{ connectionStatus }}
         </span>
       </div>
@@ -34,19 +37,21 @@
     <!-- API Connection Warning -->
     <div
       v-if="!tradingStore.apiConnected"
-      class="bg-red-900/30 border border-red-500 rounded-lg p-4"
+      class="bg-red-900/30 border border-red-500 rounded-lg p-3 sm:p-4"
     >
-      <div class="flex items-center gap-3">
-        <span class="text-3xl">⚠️</span>
-        <div>
-          <h3 class="text-red-400 font-semibold">Backend API Not Connected</h3>
-          <p class="text-gray-400 text-sm">
-            Cannot connect to trading server. Make sure the backend is running:
+      <div class="flex items-start gap-2 sm:gap-3">
+        <span class="text-2xl sm:text-3xl">⚠️</span>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-red-400 font-semibold text-sm sm:text-base">
+            Backend API Not Connected
+          </h3>
+          <p class="text-gray-400 text-xs sm:text-sm">
+            Cannot connect to trading server.
           </p>
           <code
-            class="text-xs text-yellow-400 bg-gray-800 px-2 py-1 rounded mt-2 block"
+            class="text-xs text-yellow-400 bg-gray-800 px-2 py-1 rounded mt-2 block overflow-x-auto"
           >
-            cd backend && uvicorn api.main:app --host 0.0.0.0 --port 8000
+            uvicorn api.main:app --host 0.0.0.0 --port 8000
           </code>
         </div>
       </div>
@@ -58,7 +63,7 @@
     <!-- Trading Control (Legacy) -->
     <TradingControl />
 
-    <div class="grid grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
       <!-- Positions -->
       <PositionMonitor />
 
@@ -67,18 +72,24 @@
     </div>
 
     <!-- Manual Trade Section -->
-    <div class="bg-gray-800 rounded-lg p-6">
-      <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
-        <span class="text-2xl">✍️</span>
+    <div class="bg-gray-800 rounded-lg p-3 sm:p-6">
+      <h2
+        class="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center gap-2"
+      >
+        <span class="text-xl sm:text-2xl">✍️</span>
         Manual Trade
       </h2>
 
-      <div class="grid grid-cols-6 gap-4">
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4"
+      >
         <div>
-          <label class="text-gray-400 text-sm mb-1 block">Symbol</label>
+          <label class="text-gray-400 text-xs sm:text-sm mb-1 block"
+            >Symbol</label
+          >
           <select
             v-model="manualTrade.symbol"
-            class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+            class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
           >
             <optgroup label="Major Pairs">
               <option value="EURUSD">EUR/USD</option>
@@ -93,54 +104,60 @@
               <option value="XAGUSD">XAG/USD (Silver)</option>
             </optgroup>
             <optgroup label="Indices">
-              <option value="US30">US30 (Dow Jones)</option>
-              <option value="NAS100">NAS100 (Nasdaq)</option>
-              <option value="US500">US500 (S&P 500)</option>
+              <option value="US30">US30</option>
+              <option value="NAS100">NAS100</option>
+              <option value="US500">US500</option>
             </optgroup>
           </select>
         </div>
         <div>
-          <label class="text-gray-400 text-sm mb-1 block">Side</label>
+          <label class="text-gray-400 text-xs sm:text-sm mb-1 block"
+            >Side</label
+          >
           <select
             v-model="manualTrade.side"
-            class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+            class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
           >
             <option value="BUY">BUY</option>
             <option value="SELL">SELL</option>
           </select>
         </div>
         <div>
-          <label class="text-gray-400 text-sm mb-1 block">Quantity</label>
+          <label class="text-gray-400 text-xs sm:text-sm mb-1 block">Qty</label>
           <input
             v-model.number="manualTrade.quantity"
             type="number"
             step="0.001"
-            class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+            class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label class="text-gray-400 text-sm mb-1 block">Stop Loss</label>
+          <label class="text-gray-400 text-xs sm:text-sm mb-1 block"
+            >Stop Loss</label
+          >
           <input
             v-model.number="manualTrade.stop_loss"
             type="number"
             step="0.01"
-            class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+            class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label class="text-gray-400 text-sm mb-1 block">Take Profit</label>
+          <label class="text-gray-400 text-xs sm:text-sm mb-1 block"
+            >Take Profit</label
+          >
           <input
             v-model.number="manualTrade.take_profit"
             type="number"
             step="0.01"
-            class="w-full bg-gray-700 text-white rounded-lg px-3 py-2"
+            class="w-full bg-gray-700 text-white rounded-lg px-2 sm:px-3 py-2 text-sm"
           />
         </div>
-        <div class="flex items-end">
+        <div class="flex items-end col-span-2 sm:col-span-1">
           <button
             @click="submitManualTrade"
             :disabled="!canSubmitTrade"
-            class="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg"
+            class="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm"
           >
             Open Trade
           </button>
@@ -148,23 +165,29 @@
       </div>
 
       <!-- Price Info -->
-      <div v-if="currentPrice" class="mt-4 text-sm text-gray-400">
-        Current Price:
+      <div
+        v-if="currentPrice"
+        class="mt-3 sm:mt-4 text-xs sm:text-sm text-gray-400"
+      >
+        Price:
         <span class="text-white font-semibold">
           {{ formatPrice(currentPrice, manualTrade.symbol) }}
         </span>
         <span
           v-if="priceSource"
-          class="text-xs ml-2 px-2 py-0.5 rounded"
+          class="text-xs ml-1 sm:ml-2 px-1.5 sm:px-2 py-0.5 rounded"
           :class="priceSourceClass"
         >
           {{ priceSourceLabel }}
         </span>
-        <span v-if="!isLivePrice" class="text-xs ml-2 text-yellow-400">
-          ⚠️ Delayed/Cached
+        <span v-if="!isLivePrice" class="text-xs ml-1 sm:ml-2 text-yellow-400">
+          ⚠️ <span class="hidden sm:inline">Delayed/Cached</span>
         </span>
       </div>
-      <div v-else-if="priceError" class="mt-4 text-sm text-yellow-400">
+      <div
+        v-else-if="priceError"
+        class="mt-3 sm:mt-4 text-xs sm:text-sm text-yellow-400"
+      >
         ⚠️ {{ priceError }}
       </div>
     </div>
