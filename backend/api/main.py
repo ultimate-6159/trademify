@@ -2381,8 +2381,14 @@ async def update_bot_settings_endpoint(request: BotSettingsRequest):
 @app.get("/api/v1/intelligence/pipeline")
 async def get_pipeline_data(symbol: str = "EURUSDm"):
     """
-    Get complete 16-Layer Pipeline data for Dashboard display
+    Get complete 20-Layer Omniscient Pipeline data for Dashboard display
     Returns real-time data from all intelligence modules for the selected symbol
+    
+    Layers 1-16: Foundation & Advanced Intelligence
+    Layer 17: Ultra Intelligence (10x Smarter)
+    Layer 18: Supreme Intelligence (20x Smarter)
+    Layer 19: Transcendent Intelligence (50x Smarter)
+    Layer 20: Omniscient Intelligence (100x Smarter)
     """
     global _auto_bot
     
@@ -2636,6 +2642,58 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         "active": len(sentiment_result) > 0
     }
     layers["sentiment"] = sentiment_status
+    
+    # 17. Ultra Intelligence (10x Smarter)
+    ultra_by_symbol = getattr(_auto_bot, '_last_ultra_decision_by_symbol', {}) or {}
+    ultra_data = ultra_by_symbol.get(symbol, getattr(_auto_bot, '_last_ultra_decision', {})) or {}
+    layers["ultra"] = {
+        "smc_bias": ultra_data.get("smc_bias", "N/A"),
+        "confidence": ultra_data.get("confidence", 0),
+        "session_quality": ultra_data.get("session_quality", "N/A"),
+        "volatility_state": ultra_data.get("volatility_state", "N/A"),
+        "liquidity_zone": ultra_data.get("liquidity_zone", "N/A"),
+        "can_trade": ultra_data.get("can_trade", False),
+        "multiplier": 10
+    }
+    
+    # 18. Supreme Intelligence (20x Smarter)
+    supreme_by_symbol = getattr(_auto_bot, '_last_supreme_decision_by_symbol', {}) or {}
+    supreme_data = supreme_by_symbol.get(symbol, getattr(_auto_bot, '_last_supreme_decision', {})) or {}
+    layers["supreme"] = {
+        "supreme_score": supreme_data.get("supreme_score", 0),
+        "win_probability": supreme_data.get("win_probability", 0),
+        "market_entropy": supreme_data.get("market_entropy", "N/A"),
+        "fractal_dimension": supreme_data.get("fractal_dimension", 0),
+        "can_trade": supreme_data.get("can_trade", False),
+        "multiplier": 20
+    }
+    
+    # 19. Transcendent Intelligence (50x Smarter)
+    transcendent_by_symbol = getattr(_auto_bot, '_last_transcendent_decision_by_symbol', {}) or {}
+    transcendent_data = transcendent_by_symbol.get(symbol, getattr(_auto_bot, '_last_transcendent_decision', {})) or {}
+    layers["transcendent"] = {
+        "transcendent_score": transcendent_data.get("transcendent_score", 0),
+        "quantum_state": transcendent_data.get("quantum_state", "N/A"),
+        "win_probability": transcendent_data.get("win_probability", 0),
+        "black_swan_risk": transcendent_data.get("black_swan_risk", 0),
+        "signal_purity": transcendent_data.get("signal_purity", 0),
+        "can_trade": transcendent_data.get("can_trade", False),
+        "multiplier": 50
+    }
+    
+    # 20. Omniscient Intelligence (100x Smarter)
+    omniscient_by_symbol = getattr(_auto_bot, '_last_omniscient_decision_by_symbol', {}) or {}
+    omniscient_data = omniscient_by_symbol.get(symbol, getattr(_auto_bot, '_last_omniscient_decision', {})) or {}
+    layers["omniscient"] = {
+        "omniscient_score": omniscient_data.get("omniscient_score", 0),
+        "consciousness_level": omniscient_data.get("consciousness_level", "N/A"),
+        "physics_state": omniscient_data.get("physics_state", "N/A"),
+        "edge": omniscient_data.get("edge", 0),
+        "win_probability": omniscient_data.get("win_probability", 0),
+        "can_trade": omniscient_data.get("can_trade", False),
+        "prophecies": omniscient_data.get("prophecies", [])[:3],
+        "multiplier": 100
+    }
     
     # Current Signal (symbol-specific from last_analysis which is already symbol-filtered)
     current_signal = {
