@@ -2453,6 +2453,9 @@ class AITradingBot:
     
     async def run(self, interval_seconds: int = 60):
         """Run the enhanced trading bot"""
+        # Store interval for status reporting
+        self._interval = interval_seconds
+        
         logger.info("")
         logger.info("=" * 60)
         logger.info("🤖 Starting Enhanced Trading Bot")
@@ -2682,6 +2685,14 @@ class AITradingBot:
             "last_signals": self._convert_for_json(self._last_signals),
             "daily_stats": self._convert_for_json(self._daily_stats),
             "open_positions": len(self.trading_engine.positions) if self.trading_engine else 0,
+            # Bot config for dashboard
+            "config": {
+                "symbols": self.symbols,
+                "timeframe": self.timeframe,
+                "htf_timeframe": self.htf_timeframe,
+                "quality": self.min_quality.value if hasattr(self.min_quality, 'value') else str(self.min_quality),
+                "interval": getattr(self, '_interval', 60),
+            }
         }
         return self._convert_for_json(status)
 

@@ -2590,16 +2590,25 @@ async def get_pipeline_data(symbol: str = "EURUSDm"):
         "max_daily_loss": 5.0
     }
     
-    # Get account info from MT5
+    # Get account info from bot's broker (most reliable when bot is running)
     try:
-        import MetaTrader5 as mt5
-        info = mt5.account_info()
-        if info:
-            risk_status["balance"] = info.balance
-            risk_status["equity"] = info.equity
-            risk_status["leverage"] = info.leverage
+        if _auto_bot.trading_engine and _auto_bot.trading_engine.broker:
+            account_info = await _auto_bot.trading_engine.broker.get_account_info()
+            if account_info:
+                risk_status["balance"] = account_info.get("balance", 0)
+                risk_status["equity"] = account_info.get("equity", 0)
+                risk_status["leverage"] = account_info.get("leverage", 0)
     except Exception:
-        pass
+        # Fallback to direct MT5
+        try:
+            import MetaTrader5 as mt5
+            info = mt5.account_info()
+            if info:
+                risk_status["balance"] = info.balance
+                risk_status["equity"] = info.equity
+                risk_status["leverage"] = info.leverage
+        except Exception:
+            pass
     
     if hasattr(_auto_bot, 'risk_guardian') and _auto_bot.risk_guardian:
         try:
@@ -2866,20 +2875,37 @@ async def get_risk_data():
     # Get real account info - try multiple methods
     account_fetched = False
     
-    # Method 1: Try from MT5 service
-    try:
-        mt5_service = get_mt5_service()
-        if mt5_service and mt5_service.is_connected():
-            account = await mt5_service.get_account_info()
-            if account and account.get("connected") and not account.get("error"):
-                risk_data["balance"] = account.get("balance", 0)
-                risk_data["equity"] = account.get("equity", 0)
-                risk_data["leverage"] = account.get("leverage", 0)
-                account_fetched = True
-    except Exception as e:
-        logger.debug(f"MT5 service not available: {e}")
+    # Method 1: Try from bot's trading engine broker (BEST - always connected when bot runs)
+    if _auto_bot and hasattr(_auto_bot, 'trading_engine') and _auto_bot.trading_engine:
+        try:
+            broker = _auto_bot.trading_engine.broker
+            if broker:
+                # Get account info from broker
+                account_info = await broker.get_account_info()
+                if account_info:
+                    risk_data["balance"] = account_info.get("balance", 0)
+                    risk_data["equity"] = account_info.get("equity", 0)
+                    risk_data["leverage"] = account_info.get("leverage", 0)
+                    account_fetched = True
+                    logger.debug(f"Got account from broker: balance={risk_data['balance']}")
+        except Exception as e:
+            logger.debug(f"Bot broker not available: {e}")
     
-    # Method 2: Try direct MT5 if service not connected
+    # Method 2: Try from MT5 service
+    if not account_fetched:
+        try:
+            mt5_service = get_mt5_service()
+            if mt5_service and mt5_service.is_connected():
+                account = await mt5_service.get_account_info()
+                if account and account.get("connected") and not account.get("error"):
+                    risk_data["balance"] = account.get("balance", 0)
+                    risk_data["equity"] = account.get("equity", 0)
+                    risk_data["leverage"] = account.get("leverage", 0)
+                    account_fetched = True
+        except Exception as e:
+            logger.debug(f"MT5 service not available: {e}")
+    
+    # Method 3: Try direct MT5 if service not connected
     if not account_fetched:
         try:
             import MetaTrader5 as mt5
