@@ -153,7 +153,14 @@ class SupremeIntelligence:
     - Execution Quality Scoring
     """
     
-    def __init__(self):
+    # Configurable thresholds (can be adjusted for trial/aggressive modes)
+    MIN_CONFIDENCE = 60          # Default: 70, Trial: 60
+    MIN_WIN_PROBABILITY = 45     # Default: 55, Trial: 45
+    MIN_CONFLUENCE = 40          # Default: 50, Trial: 40
+    ALLOW_DORMANT = True         # Allow trading in DORMANT market (for trial)
+    ALLOW_WAIT_TIMING = True     # Allow WAIT timing (for trial)
+    
+    def __init__(self, aggressive_mode: bool = True):
         # Performance History
         self._trade_history: deque = deque(maxlen=1000)
         self._signal_history: deque = deque(maxlen=500)
@@ -377,19 +384,40 @@ class SupremeIntelligence:
         weight_adjustments = self._suggest_weight_adjustments()
         
         # ===============================
-        # FINAL DECISION
+        # FINAL DECISION (with configurable thresholds)
         # ===============================
+        # Check entropy - allow DORMANT if configured
+        entropy_ok = entropy_level not in [MarketEntropy.CHAOTIC]
+        if not self.ALLOW_DORMANT:
+            entropy_ok = entropy_level not in [MarketEntropy.CHAOTIC, MarketEntropy.DORMANT]
+            
+        # Check timing - allow WAIT if configured  
+        timing_ok = exec_timing not in [ExecutionTiming.AVOID]
+        if not self.ALLOW_WAIT_TIMING:
+            timing_ok = exec_timing not in [ExecutionTiming.AVOID, ExecutionTiming.WAIT]
+        
         can_trade = (
-            final_confidence >= 70 and
-            win_probability >= 55 and
-            confluence_score >= 50 and
-            entropy_level not in [MarketEntropy.CHAOTIC, MarketEntropy.DORMANT] and
-            exec_timing not in [ExecutionTiming.AVOID, ExecutionTiming.WAIT] and
-            optimal_size >= 0.25
+            final_confidence >= self.MIN_CONFIDENCE and
+            win_probability >= self.MIN_WIN_PROBABILITY and
+            confluence_score >= self.MIN_CONFLUENCE and
+            entropy_ok and
+            timing_ok and
+            optimal_size >= 0.20
         )
         
         if not can_trade:
-            warnings.append("❌ Conditions not optimal for trading")
+            fail_reasons = []
+            if final_confidence < self.MIN_CONFIDENCE:
+                fail_reasons.append(f"Confidence {final_confidence:.0f}% < {self.MIN_CONFIDENCE}%")
+            if win_probability < self.MIN_WIN_PROBABILITY:
+                fail_reasons.append(f"Win Prob {win_probability:.0f}% < {self.MIN_WIN_PROBABILITY}%")
+            if confluence_score < self.MIN_CONFLUENCE:
+                fail_reasons.append(f"Confluence {confluence_score:.0f}% < {self.MIN_CONFLUENCE}%")
+            if not entropy_ok:
+                fail_reasons.append(f"Entropy: {entropy_level}")
+            if not timing_ok:
+                fail_reasons.append(f"Timing: {exec_timing}")
+            warnings.append(f"❌ Trade blocked: {', '.join(fail_reasons)}")
         
         return SupremeDecision(
             can_trade=can_trade,

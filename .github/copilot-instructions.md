@@ -37,17 +37,17 @@ Data Lake (.parquet/.npy) → FAISS Pattern Matching → Enhanced AI Analyzer �
 
 ## Backend Module Responsibilities
 
-| Module | Purpose | Key Class |
-|--------|---------|-----------|
-| `ai_trading_bot.py` | **Main AI Trading Bot** | `AITradingBot` |
-| `data_processing/data_lake.py` | Store OHLC in `.parquet` | `DataLake` |
-| `data_processing/normalizer.py` | Z-score/log-return normalization | `Normalizer` |
+| Module                              | Purpose                            | Key Class                       |
+| ----------------------------------- | ---------------------------------- | ------------------------------- |
+| `ai_trading_bot.py`                 | **Main AI Trading Bot**            | `AITradingBot`                  |
+| `data_processing/data_lake.py`      | Store OHLC in `.parquet`           | `DataLake`                      |
+| `data_processing/normalizer.py`     | Z-score/log-return normalization   | `Normalizer`                    |
 | `similarity_engine/faiss_engine.py` | Similarity search (millions in ms) | `FAISSEngine`, `PatternMatcher` |
-| `analysis/enhanced_analyzer.py` | Multi-factor AI analysis | `EnhancedAnalyzer` |
-| `analysis/voting_system.py` | Generate BUY/SELL/WAIT signals | `VotingSystem` |
-| `trading/engine.py` | Auto-trading core engine | `TradingEngine`, `RiskManager` |
-| `trading/binance_connector.py` | Binance (Crypto) | `BinanceBroker` |
-| `trading/mt5_connector.py` | MetaTrader 5 (Forex) | `MT5Broker` |
+| `analysis/enhanced_analyzer.py`     | Multi-factor AI analysis           | `EnhancedAnalyzer`              |
+| `analysis/voting_system.py`         | Generate BUY/SELL/WAIT signals     | `VotingSystem`                  |
+| `trading/engine.py`                 | Auto-trading core engine           | `TradingEngine`, `RiskManager`  |
+| `trading/binance_connector.py`      | Binance (Crypto)                   | `BinanceBroker`                 |
+| `trading/mt5_connector.py`          | MetaTrader 5 (Forex)               | `MT5Broker`                     |
 
 ## AI Trading Bot Usage
 
@@ -67,12 +67,14 @@ python ai_trading_bot.py --broker MT5 --symbols EURUSDm,XAUUSDm --quality PREMIU
 ## Key Patterns & Conventions
 
 ### Backend (Python)
+
 - **Single Bot**: `AITradingBot` in `ai_trading_bot.py` - NO other trading bots
 - Config classes in `config/settings.py` - `DataConfig`, `PatternConfig`, `VotingConfig`
 - All numpy arrays must be `float32` for FAISS compatibility
 - Use dataclasses with `to_dict()` for API responses
 
 ### Frontend (Vue.js)
+
 - Pinia stores with Composition API
 - `signal.js` - Pattern analysis state
 - `trading.js` - Auto-trading control state
@@ -97,15 +99,18 @@ docker-compose --profile bot up -d  # With AI Bot
 ## API Endpoints
 
 ### Bot Control
+
 - `POST /api/v1/bot/start` - Start AI Bot
 - `POST /api/v1/bot/stop` - Stop AI Bot
 - `GET /api/v1/bot/status` - Bot Status
 
 ### Pattern Analysis
+
 - `POST /api/v1/build-index` - Build FAISS index
 - `POST /api/v1/analyze` - Analyze pattern
 
 ### Auto Trading
+
 - `GET /api/v1/trading/status` - Get trading system status
 - `GET /api/v1/trading/settings` - Get current settings
 - `PUT /api/v1/trading/settings` - Update settings
@@ -123,7 +128,7 @@ docker-compose --profile bot up -d  # With AI Bot
 ## Adding New Features
 
 - **New symbol**: Add to `DataConfig.DEFAULT_SYMBOLS` in `settings.py`
-- **New timeframe**: Add to `DataConfig.TIMEFRAMES`  
+- **New timeframe**: Add to `DataConfig.TIMEFRAMES`
 - **New signal type**: Extend `Signal` enum in `voting_system.py`
 - **New broker**: Extend `BaseBroker` in `trading/engine.py`
 - **New chart**: Create component in `frontend/src/components/`, use `v-chart`

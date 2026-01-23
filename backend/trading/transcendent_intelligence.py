@@ -1312,14 +1312,19 @@ class TranscendentIntelligence:
         )
         
         # 19. Can trade decision
+        # Configurable thresholds for trial mode
+        MIN_TRANSCENDENT_SCORE = 50   # Default: 60, Trial: 50
+        MIN_WIN_PROB = 0.40           # Default: 0.45, Trial: 0.40
+        ALLOW_NOISY = True            # Allow noisy signals in trial mode
+        
         can_trade_checks = [
-            decision.transcendent_score >= 60,
-            decision.signal_purity not in [SignalPurity.NOISY],
+            decision.transcendent_score >= MIN_TRANSCENDENT_SCORE,
+            decision.signal_purity not in [SignalPurity.NOISY] or ALLOW_NOISY,
             decision.risk_topology not in [RiskTopology.SINGULARITY],
             decision.black_swan.level in [BlackSwanLevel.NONE, BlackSwanLevel.GRAY_SWAN],
-            decision.expected_value > 0,
-            decision.win_probability > 0.45,
-            decision.quantum_position_size > 0.005,  # At least 0.5%
+            decision.expected_value > -0.001,  # Allow small negative EV in trial
+            decision.win_probability > MIN_WIN_PROB,
+            decision.quantum_position_size > 0.003,  # At least 0.3%
         ]
         
         decision.can_trade = all(can_trade_checks)
@@ -1331,13 +1336,13 @@ class TranscendentIntelligence:
             decision.insights.append(f"📊 Position Size: {decision.quantum_position_size:.1%}")
         else:
             failed_checks = []
-            if decision.transcendent_score < 60:
+            if decision.transcendent_score < MIN_TRANSCENDENT_SCORE:
                 failed_checks.append(f"Score too low ({decision.transcendent_score:.0f})")
-            if decision.signal_purity == SignalPurity.NOISY:
+            if decision.signal_purity == SignalPurity.NOISY and not ALLOW_NOISY:
                 failed_checks.append("Noisy signal")
-            if decision.expected_value <= 0:
+            if decision.expected_value <= -0.001:
                 failed_checks.append("Negative expected value")
-            if decision.win_probability <= 0.45:
+            if decision.win_probability <= MIN_WIN_PROB:
                 failed_checks.append(f"Low win prob ({decision.win_probability:.0%})")
             
             decision.warnings.append(f"❌ BLOCKED: {', '.join(failed_checks)}")
