@@ -1,230 +1,292 @@
 # ============================================
 # Trademify - Complete VPS Setup Script
 # รันครั้งเดียว ติดตั้งทุกอย่างอัตโนมัติ
+# สำหรับ Windows Server / Windows 10/11
 # ============================================
+# Usage: 
+#   Set-ExecutionPolicy Bypass -Scope Process -Force
+#   irm https://raw.githubusercontent.com/ultimate-6159/trademify/main/vps/setup-vps-complete.ps1 | iex
+# หรือ:
+#   .\setup-vps-complete.ps1
+# ============================================
+
+param(
+    [string]$InstallPath = "C:\trademify",
+    [switch]$SkipMT5 = $false
+)
 
 $ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
 
+# Enable TLS 1.2/1.3
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+function Write-Step { param($step, $msg) Write-Host "[$step] $msg" -ForegroundColor Yellow }
+function Write-OK { param($msg) Write-Host "  ✓ $msg" -ForegroundColor Green }
+function Write-Err { param($msg) Write-Host "  ✗ $msg" -ForegroundColor Red }
+function Write-Info { param($msg) Write-Host "  $msg" -ForegroundColor Gray }
+
+Clear-Host
 Write-Host ""
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "   Trademify VPS Setup - One Click Install" -ForegroundColor Cyan  
-Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║                                                           ║" -ForegroundColor Cyan
+Write-Host "║   🤖 TRADEMIFY AI TRADING BOT - VPS SETUP                ║" -ForegroundColor Cyan
+Write-Host "║   One-Click Installation for Windows                      ║" -ForegroundColor Cyan
+Write-Host "║                                                           ║" -ForegroundColor Cyan
+Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# Enable TLS 1.2
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$TotalSteps = 7
+$TempDir = "$env:TEMP\trademify-setup"
+New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-# Create temp directory
-$TempDir = "C:\trademify-temp"
-if (!(Test-Path $TempDir)) {
-    New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+# ============================================
+# Step 1: Check Admin Rights
+# ============================================
+Write-Step "1/$TotalSteps" "Checking administrator rights..."
+
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Err "Please run as Administrator!"
+    Write-Info "Right-click PowerShell -> Run as Administrator"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+Write-OK "Running as Administrator"
+
+# ============================================
+# Step 2: Install Python 3.11+
+# ============================================
+Write-Step "2/$TotalSteps" "Checking Python..."
+
+$python = Get-Command python -ErrorAction SilentlyContinue
+$needPython = $true
+
+if ($python) {
+    $ver = python --version 2>&1
+    if ($ver -match "3\.(1[1-9]|[2-9]\d)") {
+        Write-OK "Python already installed: $ver"
+        $needPython = $false
+    }
 }
 
-# ============================================
-# Step 1: Install Python 3.11
-# ============================================
-Write-Host "[1/6] Installing Python 3.11..." -ForegroundColor Yellow
-
-$PythonInstalled = Get-Command python -ErrorAction SilentlyContinue
-if (!$PythonInstalled) {
-    Write-Host "  Downloading Python..." -ForegroundColor Gray
-    $PythonUrl = "https://www.python.org/ftp/python/3.11.7/python-3.11.7-amd64.exe"
-    $PythonInstaller = "$TempDir\python-installer.exe"
-    Invoke-WebRequest -Uri $PythonUrl -OutFile $PythonInstaller
+if ($needPython) {
+    Write-Info "Downloading Python 3.11..."
+    $pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+    $pythonExe = "$TempDir\python-installer.exe"
     
-    Write-Host "  Installing Python..." -ForegroundColor Gray
-    Start-Process -FilePath $PythonInstaller -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0' -Wait
-    
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    try {
+        Invoke-WebRequest -Uri $pythonUrl -OutFile $pythonExe -UseBasicParsing
+        Write-Info "Installing Python (this may take a minute)..."
+        Start-Process -FilePath $pythonExe -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_pip=1', 'Include_test=0' -Wait
+        
+        # Refresh PATH
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Write-OK "Python installed successfully"
+    } catch {
+        Write-Err "Failed to install Python: $_"
+        Write-Info "Please install Python 3.11+ manually from https://python.org"
+    }
 }
-Write-Host "  OK Python installed" -ForegroundColor Green
-
-# ============================================
-# Step 2: Install Node.js
-# ============================================
-Write-Host "[2/6] Installing Node.js 20..." -ForegroundColor Yellow
-
-$NodeInstalled = Get-Command node -ErrorAction SilentlyContinue
-if (!$NodeInstalled) {
-    Write-Host "  Downloading Node.js..." -ForegroundColor Gray
-    $NodeUrl = "https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi"
-    $NodeInstaller = "$TempDir\node-installer.msi"
-    Invoke-WebRequest -Uri $NodeUrl -OutFile $NodeInstaller
-    
-    Write-Host "  Installing Node.js..." -ForegroundColor Gray
-    Start-Process msiexec.exe -ArgumentList '/i', $NodeInstaller, '/quiet', '/norestart' -Wait
-    
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-}
-Write-Host "  OK Node.js installed" -ForegroundColor Green
 
 # ============================================
 # Step 3: Install Git
 # ============================================
-Write-Host "[3/6] Installing Git..." -ForegroundColor Yellow
+Write-Step "3/$TotalSteps" "Checking Git..."
 
-$GitInstalled = Get-Command git -ErrorAction SilentlyContinue
-if (!$GitInstalled) {
-    Write-Host "  Downloading Git..." -ForegroundColor Gray
-    $GitUrl = "https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe"
-    $GitInstaller = "$TempDir\git-installer.exe"
-    Invoke-WebRequest -Uri $GitUrl -OutFile $GitInstaller
+$git = Get-Command git -ErrorAction SilentlyContinue
+if ($git) {
+    Write-OK "Git already installed"
+} else {
+    Write-Info "Downloading Git..."
+    $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
+    $gitExe = "$TempDir\git-installer.exe"
     
-    Write-Host "  Installing Git..." -ForegroundColor Gray
-    Start-Process -FilePath $GitInstaller -ArgumentList '/VERYSILENT', '/NORESTART' -Wait
+    try {
+        Invoke-WebRequest -Uri $gitUrl -OutFile $gitExe -UseBasicParsing
+        Write-Info "Installing Git..."
+        Start-Process -FilePath $gitExe -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL' -Wait
+        
+        # Refresh PATH
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Write-OK "Git installed successfully"
+    } catch {
+        Write-Err "Failed to install Git: $_"
+    }
+}
+
+# ============================================
+# Step 4: Clone/Update Repository
+# ============================================
+Write-Step "4/$TotalSteps" "Setting up Trademify repository..."
+
+if (Test-Path "$InstallPath\.git") {
+    Write-Info "Updating existing installation..."
+    Set-Location $InstallPath
+    git pull origin main 2>&1 | Out-Null
+    Write-OK "Repository updated"
+} else {
+    if (Test-Path $InstallPath) {
+        Write-Info "Removing old installation..."
+        Remove-Item -Recurse -Force $InstallPath -ErrorAction SilentlyContinue
+    }
     
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-}
-Write-Host "  OK Git installed" -ForegroundColor Green
-
-# Refresh PATH one more time
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
-# ============================================
-# Step 4: Clone Trademify
-# ============================================
-Write-Host "[4/6] Cloning Trademify..." -ForegroundColor Yellow
-
-Set-Location C:\
-if (Test-Path "C:\trademify") {
-    Write-Host "  Removing existing installation..." -ForegroundColor Gray
-    Remove-Item -Recurse -Force "C:\trademify" -ErrorAction SilentlyContinue
+    Write-Info "Cloning repository..."
+    git clone https://github.com/ultimate-6159/trademify.git $InstallPath 2>&1 | Out-Null
+    Write-OK "Repository cloned to $InstallPath"
 }
 
-git clone https://github.com/ultimate-6159/trademify.git
-Set-Location C:\trademify
-Write-Host "  OK Repository cloned" -ForegroundColor Green
+Set-Location $InstallPath
 
 # ============================================
-# Step 5: Setup Backend
+# Step 5: Setup Python Environment
 # ============================================
-Write-Host "[5/6] Setting up Backend (this takes 2-5 minutes)..." -ForegroundColor Yellow
+Write-Step "5/$TotalSteps" "Setting up Python environment (2-5 minutes)..."
 
-Set-Location C:\trademify
-python -m venv venv
-& .\venv\Scripts\Activate.ps1
-
-Set-Location backend
-Write-Host "  Installing Python packages..." -ForegroundColor Gray
-pip install --upgrade pip --quiet 2>$null
-pip install -r requirements.txt --quiet 2>$null
-pip install MetaTrader5 --quiet 2>$null
-
-# Create .env from example
-if (!(Test-Path ".env")) {
-    Copy-Item ".env.example" ".env"
+# Create venv
+if (-not (Test-Path "$InstallPath\venv")) {
+    Write-Info "Creating virtual environment..."
+    python -m venv venv 2>&1 | Out-Null
 }
+
+# Activate and install
+Write-Info "Installing Python packages..."
+& "$InstallPath\venv\Scripts\python.exe" -m pip install --upgrade pip -q 2>&1 | Out-Null
+& "$InstallPath\venv\Scripts\pip.exe" install -r "$InstallPath\backend\requirements.txt" -q 2>&1 | Out-Null
+& "$InstallPath\venv\Scripts\pip.exe" install MetaTrader5 -q 2>&1 | Out-Null
+
+Write-OK "Python environment ready"
+
+# ============================================
+# Step 6: Configure Environment
+# ============================================
+Write-Step "6/$TotalSteps" "Configuring environment..."
 
 # Create logs directory
-if (!(Test-Path "C:\trademify\logs")) {
-    New-Item -ItemType Directory -Path "C:\trademify\logs" -Force | Out-Null
+New-Item -ItemType Directory -Path "$InstallPath\logs" -Force | Out-Null
+New-Item -ItemType Directory -Path "$InstallPath\backend\logs" -Force | Out-Null
+
+# Create .env if not exists
+$envFile = "$InstallPath\backend\.env"
+if (-not (Test-Path $envFile)) {
+    Write-Info "Creating .env configuration file..."
+    Copy-Item "$InstallPath\backend\.env.example" $envFile -Force
 }
 
-Write-Host "  OK Backend ready" -ForegroundColor Green
-
-# ============================================
-# Step 6: Setup Frontend
-# ============================================
-Write-Host "[6/6] Setting up Frontend..." -ForegroundColor Yellow
-
-Set-Location C:\trademify\frontend
-Write-Host "  Installing npm packages..." -ForegroundColor Gray
-npm install --silent 2>$null
-Write-Host "  OK Frontend ready" -ForegroundColor Green
-
-# ============================================
 # Configure Firewall
-# ============================================
-Write-Host ""
-Write-Host "Configuring Firewall..." -ForegroundColor Yellow
-netsh advfirewall firewall delete rule name="Trademify API" 2>$null
-netsh advfirewall firewall delete rule name="Trademify Frontend" 2>$null
+Write-Info "Configuring firewall..."
+netsh advfirewall firewall delete rule name="Trademify API" 2>&1 | Out-Null
+netsh advfirewall firewall delete rule name="Trademify Frontend" 2>&1 | Out-Null
 netsh advfirewall firewall add rule name="Trademify API" dir=in action=allow protocol=tcp localport=8000 | Out-Null
 netsh advfirewall firewall add rule name="Trademify Frontend" dir=in action=allow protocol=tcp localport=5173 | Out-Null
-Write-Host "  OK Firewall configured" -ForegroundColor Green
+
+Write-OK "Environment configured"
 
 # ============================================
-# Create Desktop Shortcuts
+# Step 7: Create Desktop Shortcuts
 # ============================================
-Write-Host ""
-Write-Host "Creating Desktop Shortcuts..." -ForegroundColor Yellow
+Write-Step "7/$TotalSteps" "Creating shortcuts..."
+
 $Desktop = [Environment]::GetFolderPath("Desktop")
+$WshShell = New-Object -ComObject WScript.Shell
 
-# Start All shortcut
-$WshShell = New-Object -comObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$Desktop\Start Trademify.lnk")
-$Shortcut.TargetPath = "C:\trademify\vps\start-services.bat"
-$Shortcut.WorkingDirectory = "C:\trademify"
-$Shortcut.IconLocation = "shell32.dll,137"
-$Shortcut.Save()
+# Start shortcut
+$shortcut = $WshShell.CreateShortcut("$Desktop\Start Trademify.lnk")
+$shortcut.TargetPath = "$InstallPath\vps\start-services.bat"
+$shortcut.WorkingDirectory = $InstallPath
+$shortcut.IconLocation = "shell32.dll,137"
+$shortcut.Save()
 
-# Stop All shortcut
-$Shortcut = $WshShell.CreateShortcut("$Desktop\Stop Trademify.lnk")
-$Shortcut.TargetPath = "C:\trademify\vps\stop-services.bat"
-$Shortcut.WorkingDirectory = "C:\trademify"
-$Shortcut.IconLocation = "shell32.dll,131"
-$Shortcut.Save()
+# Stop shortcut
+$shortcut = $WshShell.CreateShortcut("$Desktop\Stop Trademify.lnk")
+$shortcut.TargetPath = "$InstallPath\vps\stop-services.bat"
+$shortcut.WorkingDirectory = $InstallPath
+$shortcut.IconLocation = "shell32.dll,131"
+$shortcut.Save()
 
-# Status Check shortcut
-$Shortcut = $WshShell.CreateShortcut("$Desktop\Trademify Status.lnk")
-$Shortcut.TargetPath = "C:\trademify\vps\check-status.bat"
-$Shortcut.WorkingDirectory = "C:\trademify"
-$Shortcut.IconLocation = "shell32.dll,23"
-$Shortcut.Save()
+# Status shortcut
+$shortcut = $WshShell.CreateShortcut("$Desktop\Trademify Status.lnk")
+$shortcut.TargetPath = "$InstallPath\vps\check-status.bat"
+$shortcut.WorkingDirectory = $InstallPath
+$shortcut.IconLocation = "shell32.dll,23"
+$shortcut.Save()
 
-Write-Host "  OK Desktop shortcuts created" -ForegroundColor Green
-
-# ============================================
-# Setup Auto-Start on Boot
-# ============================================
-Write-Host ""
-Write-Host "Setting up Auto-Start on Boot..." -ForegroundColor Yellow
+# Auto-start on boot
 $StartupFolder = [Environment]::GetFolderPath("Startup")
 Copy-Item "$Desktop\Start Trademify.lnk" "$StartupFolder\Start Trademify.lnk" -Force
-Write-Host "  OK Auto-start configured" -ForegroundColor Green
+
+Write-OK "Shortcuts created on Desktop"
+Write-OK "Auto-start on boot enabled"
 
 # ============================================
 # Cleanup
 # ============================================
-Write-Host ""
-Write-Host "Cleaning up..." -ForegroundColor Yellow
 Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
-Write-Host "  OK Cleanup complete" -ForegroundColor Green
 
 # ============================================
 # Get VPS IP
 # ============================================
-$IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.*" } | Select-Object -First 1).IPAddress
+$IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+    $_.InterfaceAlias -notlike "*Loopback*" -and 
+    $_.IPAddress -notlike "169.*" -and
+    $_.IPAddress -notlike "127.*"
+} | Select-Object -First 1).IPAddress
+
+if (-not $IP) { $IP = "localhost" }
 
 # ============================================
 # Done!
 # ============================================
 Write-Host ""
-Write-Host "============================================" -ForegroundColor Green
-Write-Host "   Installation Complete!" -ForegroundColor Green
-Write-Host "============================================" -ForegroundColor Green
+Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "║                                                           ║" -ForegroundColor Green
+Write-Host "║   ✅ INSTALLATION COMPLETE!                              ║" -ForegroundColor Green
+Write-Host "║                                                           ║" -ForegroundColor Green
+Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "Your VPS IP: $IP" -ForegroundColor Cyan
+Write-Host "  📍 Installed to: $InstallPath" -ForegroundColor White
+Write-Host "  🌐 Your IP: $IP" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Next Steps:" -ForegroundColor Yellow
-Write-Host "1. Install MT5 from your broker and login" -ForegroundColor White
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "2. Edit credentials:" -ForegroundColor White
-Write-Host "   notepad C:\trademify\backend\.env" -ForegroundColor Gray
+Write-Host "  📋 NEXT STEPS:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "3. Start services (double-click on Desktop):" -ForegroundColor White
-Write-Host "   'Start Trademify'" -ForegroundColor Gray
+Write-Host "  1. Install MetaTrader 5 from your broker" -ForegroundColor White
+Write-Host "     - Download from Exness/XM/IC Markets etc." -ForegroundColor Gray
+Write-Host "     - Login to your account" -ForegroundColor Gray
+Write-Host "     - Enable 'Allow Algo Trading'" -ForegroundColor Gray
 Write-Host ""
-Write-Host "Access URLs:" -ForegroundColor Yellow
-Write-Host "   Frontend:  http://${IP}:5173" -ForegroundColor Cyan
-Write-Host "   API Docs:  http://${IP}:8000/docs" -ForegroundColor Cyan
+Write-Host "  2. Edit MT5 credentials:" -ForegroundColor White
+Write-Host "     notepad $InstallPath\backend\.env" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Press any key to start services now..." -ForegroundColor Yellow
+Write-Host "     Set these values:" -ForegroundColor Gray
+Write-Host "     MT5_LOGIN=your_account_number" -ForegroundColor DarkGray
+Write-Host "     MT5_PASSWORD=your_password" -ForegroundColor DarkGray
+Write-Host "     MT5_SERVER=Your-Broker-Server" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  3. Start Trademify (double-click on Desktop):" -ForegroundColor White
+Write-Host "     'Start Trademify'" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  🔗 ACCESS URLS:" -ForegroundColor Yellow
+Write-Host "     API Docs:  http://${IP}:8000/docs" -ForegroundColor Cyan
+Write-Host "     Health:    http://${IP}:8000/health" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor DarkGray
+Write-Host ""
+
+# Ask to start
+$response = Read-Host "Start Trademify now? (Y/n)"
+if ($response -eq "" -or $response -match "^[Yy]") {
+    Write-Host ""
+    Write-Host "Starting Trademify..." -ForegroundColor Yellow
+    Start-Process "$InstallPath\vps\start-services.bat"
+    Write-Host ""
+    Write-Host "✅ Trademify is starting! Check the new window." -ForegroundColor Green
+    Write-Host "   API will be available at http://${IP}:8000" -ForegroundColor Cyan
+}
+
+Write-Host ""
+Write-Host "Press any key to close..." -ForegroundColor DarkGray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-
-# Start services
-Start-Process "C:\trademify\vps\start-services.bat"
-

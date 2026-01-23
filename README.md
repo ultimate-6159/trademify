@@ -1,208 +1,187 @@
-# 🤖 Trademify - AI Trading Bot Expert System
+# 🤖 Trademify - AI Trading Bot
 
-**ระบบเทรดอัตโนมัติด้วย AI เพียงหนึ่งเดียว - แม่นยำ เสถียร ฉลาดล้ำลึก**
+**ระบบเทรดอัตโนมัติด้วย AI - Pattern Recognition + Multi-Factor Analysis**
 
-![Trademify AI Bot](https://img.shields.io/badge/AI-Trading%20Bot-blue)
-![Python](https://img.shields.io/badge/Python-3.11+-green)
-![FAISS](https://img.shields.io/badge/FAISS-Pattern%20Recognition-orange)
-![Vue.js](https://img.shields.io/badge/Vue.js-3.x-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.11+-blue)
+![MT5](https://img.shields.io/badge/MT5-Forex-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## 🎯 What is Trademify?
+## 🎯 Features
 
-Trademify เป็นระบบเทรดอัตโนมัติแบบ AI ที่:
+- **🔍 FAISS Pattern Recognition** - ค้นหา Pattern ที่คล้ายในประวัติ (milliseconds)
+- **🧠 100+ AI Indicators** - RSI, MACD, Smart Money, Order Flow, Sentiment
+- **⭐ Quality Filtering** - PREMIUM/HIGH/MEDIUM/LOW signal filtering
+- **📊 Auto Trading** - เทรดอัตโนมัติผ่าน MT5
+- **🛡️ Risk Management** - Max 2% per trade, 5% daily loss limit
+- **☁️ Firebase Sync** - Real-time dashboard sync
 
-1. **🔍 Pattern Recognition** - ค้นหา Pattern กราฟในอดีตที่เหมือนกับปัจจุบัน (FAISS)
-2. **🧠 Multi-Factor AI Analysis** - วิเคราะห์ RSI, MACD, Volume, MTF
-3. **⭐ Quality Filtering** - กรองสัญญาณตามคุณภาพ (PREMIUM/HIGH/MEDIUM/LOW)
-4. **📊 Auto Trading** - เทรดอัตโนมัติตามสัญญาณ AI
-5. **🛡️ Risk Management** - บริหารความเสี่ยงอัจฉริยะ
+## 🚀 Quick Install (Windows VPS)
 
-## 🚀 Quick Start
+**One-Click Installation:**
 
-### 1. Paper Trading (แนะนำสำหรับเริ่มต้น)
-
-```bash
-# Clone repository
-git clone https://github.com/ultimate-6159/trademify.git
-cd trademify
-
-# Setup
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# หรือ: venv\Scripts\activate  # Windows
-
-cd backend
-pip install -r requirements.txt
-
-# Start AI Bot (Paper Trading - Safe)
-python ai_trading_bot.py --broker MT5 --symbols EURUSD,GBPUSD,XAUUSD --quality HIGH
+```powershell
+# Run as Administrator
+Set-ExecutionPolicy Bypass -Scope Process -Force
+irm https://raw.githubusercontent.com/ultimate-6159/trademify/main/vps/setup-vps-complete.ps1 | iex
 ```
 
-### 2. Docker (Production)
+หรือ download และรัน:
 
-```bash
-# Start all services
-docker-compose up -d
+```powershell
+# 1. Clone repository
+git clone https://github.com/ultimate-6159/trademify.git C:\trademify
+cd C:\trademify
 
-# Start with AI Bot
-docker-compose --profile bot up -d
+# 2. Run setup script
+powershell -ExecutionPolicy Bypass -File vps\setup-vps-complete.ps1
 ```
 
-### 3. Windows VPS
+## 📋 Requirements
 
-```batch
-# Run
-start-bot.bat MT5 EURUSD,GBPUSD,XAUUSD H1 HIGH 60
-```
-
-## 📊 AI Trading Bot
-
-### Signal Quality Levels
-
-| Quality  | Confidence | Win Rate | คำแนะนำ |
-|----------|------------|----------|---------|
-| PREMIUM  | ≥85%       | 85%+     | ปลอดภัยสุด, น้อยเทรด |
-| HIGH     | ≥75%       | 75-85%   | **แนะนำ** |
-| MEDIUM   | ≥65%       | 65-75%   | เทรดมากขึ้น |
-| LOW      | ≥50%       | 50-65%   | เสี่ยงสูง |
-
-### Usage Examples
-
-```bash
-# Forex (MT5) - Paper Trading
-python ai_trading_bot.py --broker MT5 --symbols EURUSD,GBPUSD,XAUUSD --quality HIGH
-
-# Crypto (Binance) - Paper Trading  
-python ai_trading_bot.py --broker BINANCE --symbols BTCUSDT,ETHUSDT --quality HIGH
-
-# Live Trading (⚠️ ระวัง - ใช้เงินจริง!)
-python ai_trading_bot.py --broker MT5 --symbols EURUSD --quality PREMIUM --real
-```
-
-### Command Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--broker` | MT5 | MT5 (Forex) หรือ BINANCE (Crypto) |
-| `--symbols` | EURUSD,GBPUSD,XAUUSD | สัญลักษณ์ที่ต้องการเทรด |
-| `--timeframe` | H1 | Timeframe (M5, M15, H1, H4, D1) |
-| `--htf` | H4 | Higher Timeframe สำหรับ MTF |
-| `--quality` | HIGH | PREMIUM, HIGH, MEDIUM, LOW |
-| `--interval` | 60 | ช่วงเวลาวิเคราะห์ (วินาที) |
-| `--risk` | 2.0 | % ความเสี่ยงต่อเทรด |
-| `--real` | false | ⚠️ เทรดจริง (ใช้เงินจริง) |
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  TRADEMIFY AI TRADING BOT                   │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
-│  │ Data Lake   │    │   FAISS     │    │  Enhanced   │     │
-│  │ (.parquet)  │───▶│  Pattern    │───▶│  Analyzer   │     │
-│  │             │    │  Matching   │    │  (AI)       │     │
-│  └─────────────┘    └─────────────┘    └─────────────┘     │
-│                                              │              │
-│                                              ▼              │
-│                                      ┌─────────────┐       │
-│                                      │   Quality   │       │
-│                                      │   Filter    │       │
-│                                      └─────────────┘       │
-│                                              │              │
-│                            ┌─────────────────┼──────────┐  │
-│                            ▼                 ▼          ▼  │
-│                     ┌──────────┐      ┌──────────┐  ┌─────┐│
-│                     │   MT5    │      │ Binance  │  │ API ││
-│                     │ (Forex)  │      │ (Crypto) │  │     ││
-│                     └──────────┘      └──────────┘  └─────┘│
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 📁 Project Structure (Simplified)
-
-```
-trademify/
-├── backend/
-│   ├── ai_trading_bot.py       # 🤖 AI Trading Bot (หลัก)
-│   ├── api/
-│   │   └── main.py             # FastAPI Server
-│   ├── analysis/
-│   │   ├── enhanced_analyzer.py # Multi-factor AI
-│   │   └── voting_system.py    # Signal Voting
-│   ├── similarity_engine/
-│   │   └── faiss_engine.py     # Pattern Matching
-│   ├── trading/
-│   │   ├── engine.py           # Trading Engine
-│   │   ├── binance_connector.py
-│   │   └── mt5_connector.py
-│   └── requirements.txt
-├── frontend/                   # Vue.js Dashboard
-├── start-bot.bat               # Windows Quick Start
-├── trading-service.sh          # Linux Service
-└── docker-compose.yml          # Docker Deployment
-```
+- Windows 10/11 หรือ Windows Server 2016+
+- Python 3.11+
+- MetaTrader 5 (จาก broker ของคุณ)
+- 4GB RAM ขึ้นไป
 
 ## ⚙️ Configuration
 
-### Environment Variables
+แก้ไขไฟล์ `backend\.env`:
 
-```bash
-# MT5 (Forex)
-MT5_LOGIN=12345678
+```env
+# MT5 Credentials (จาก broker)
+MT5_LOGIN=your_account_number
 MT5_PASSWORD=your_password
-MT5_SERVER=YourBroker-Server
+MT5_SERVER=Your-Broker-Server
 
-# Binance (Crypto)
-BINANCE_API_KEY=your_api_key
-BINANCE_API_SECRET=your_api_secret
+# Trading Settings
+TRADING_MODE=SNIPER          # SNIPER/CONSERVATIVE/BALANCED/AGGRESSIVE
+MIN_CONFIDENCE=65.0          # Minimum confidence %
+MAX_RISK_PER_TRADE=2.0       # Max risk per trade %
+MAX_DAILY_LOSS=5.0           # Max daily loss %
 ```
 
-### Risk Management
+## 🎮 Usage
 
-```python
-RiskManager(
-    max_risk_per_trade=2.0,    # 2% ต่อเทรด
-    max_daily_loss=5.0,        # 5% ต่อวัน
-    max_positions=5,           # 5 positions สูงสุด
-    max_drawdown=10.0          # 10% drawdown สูงสุด
-)
+### Desktop Shortcuts (หลังติดตั้ง)
+
+| Shortcut           | คำอธิบาย        |
+| ------------------ | --------------- |
+| `Start Trademify`  | เริ่ม API + Bot |
+| `Stop Trademify`   | หยุดทุก service |
+| `Trademify Status` | ดูสถานะ         |
+
+### Command Line
+
+```batch
+:: Start API + Bot
+vps\start-services.bat
+
+:: Stop all
+vps\stop-services.bat
+
+:: Check status
+vps\check-status.bat
+
+:: Run bot directly
+start-bot.bat MT5 EURUSDm,GBPUSDm,XAUUSDm H1 HIGH 60
 ```
 
-## 📊 API Endpoints
+### Bot Parameters
 
-### Bot Control
-```http
-POST /api/v1/bot/start   # Start AI Bot
-POST /api/v1/bot/stop    # Stop AI Bot
-GET  /api/v1/bot/status  # Bot Status
+```
+start-bot.bat [BROKER] [SYMBOLS] [TIMEFRAME] [QUALITY] [INTERVAL]
+
+BROKER    : MT5 (default)
+SYMBOLS   : EURUSDm,GBPUSDm,XAUUSDm (comma-separated, Exness format)
+TIMEFRAME : H1 (M5/M15/H1/H4/D1)
+QUALITY   : MEDIUM (PREMIUM/HIGH/MEDIUM/LOW)
+INTERVAL  : 60 (seconds between analysis)
 ```
 
-### Analysis
-```http
-POST /api/v1/build-index  # Build Pattern Index
-POST /api/v1/analyze      # Analyze Pattern
-GET  /api/v1/events       # SSE Real-time Updates
+## 📊 Signal Quality Levels
+
+| Level       | Confidence | คำแนะนำ              |
+| ----------- | ---------- | -------------------- |
+| **PREMIUM** | ≥85%       | ปลอดภัยสุด, เทรดน้อย |
+| **HIGH**    | ≥75%       | แนะนำทั่วไป          |
+| **MEDIUM**  | ≥65%       | เทรดบ่อยขึ้น         |
+| **LOW**     | ≥50%       | เสี่ยงสูง            |
+
+## 🏗️ Project Structure
+
 ```
+C:\trademify\
+├── backend/
+│   ├── ai_trading_bot.py      # 🤖 Main Trading Bot
+│   ├── api/main.py            # FastAPI Server
+│   ├── analysis/              # AI Analysis Modules
+│   ├── trading/               # Trading Engine + Intelligence
+│   └── .env                   # Configuration
+├── frontend/                  # Vue.js Dashboard (optional)
+├── vps/
+│   ├── setup-vps-complete.ps1 # One-click installer
+│   ├── start-services.bat     # Start all
+│   ├── stop-services.bat      # Stop all
+│   └── check-status.bat       # Status check
+├── start-bot.bat              # Quick bot start
+└── README.md
+```
+
+## 🔗 API Endpoints
+
+| Endpoint                    | Method | Description    |
+| --------------------------- | ------ | -------------- |
+| `/health`                   | GET    | Health check   |
+| `/api/v1/bot/status`        | GET    | Bot status     |
+| `/api/v1/bot/start`         | POST   | Start bot      |
+| `/api/v1/bot/stop`          | POST   | Stop bot       |
+| `/api/v1/trading/positions` | GET    | Open positions |
+
+**API Docs:** http://localhost:8000/docs
 
 ## 🛡️ Safety Features
 
-1. **Paper Trading Default** - เริ่มต้นด้วย Paper Trading เสมอ
-2. **Quality Filter** - กรองเฉพาะสัญญาณคุณภาพสูง
-3. **Risk Limits** - จำกัดความเสี่ยงอัตโนมัติ
-4. **Live Warning** - แจ้งเตือน 5 วินาทีก่อนเทรดจริง
-5. **Auto Stop Loss** - ตั้ง SL/TP อัตโนมัติตามประวัติ
+1. **Risk Limits** - Max 2% per trade, 5% daily, 10% drawdown
+2. **Quality Filter** - Only trade high-confidence signals
+3. **Session Filter** - Best during London-NY overlap
+4. **News Filter** - Pause during major news
+5. **Trailing Stop** - Lock profits automatically
+6. **Break-Even** - Move SL to entry when profitable
+
+## 🔧 Troubleshooting
+
+### MT5 ไม่เชื่อมต่อ
+
+```powershell
+# ตรวจสอบ MT5
+cd C:\trademify\backend
+..\venv\Scripts\Activate.ps1
+python check_mt5.py
+```
+
+### API ไม่ตอบสนอง
+
+```batch
+:: Restart services
+vps\stop-services.bat
+vps\start-services.bat
+```
+
+### ดู Logs
+
+```powershell
+Get-Content C:\trademify\backend\logs\trading_bot.log -Tail 50
+```
 
 ## ⚠️ Disclaimer
 
-> **คำเตือน**: ซอฟต์แวร์นี้มีไว้เพื่อการศึกษาเท่านั้น การเทรดมีความเสี่ยงสูงต่อการสูญเสียเงินทุน ผลการเทรดในอดีตไม่ได้รับประกันผลลัพธ์ในอนาคต ใช้งานด้วยความรับผิดชอบของตัวเอง
-
----
+> **คำเตือน**: การเทรดมีความเสี่ยงสูง ผลการเทรดในอดีตไม่รับประกันผลในอนาคต
+> ใช้งานด้วยความรับผิดชอบของตัวเอง ทดสอบด้วย Demo Account ก่อนเสมอ
 
 ## 📝 License
 
-MIT License - See [LICENSE](LICENSE) for details.
+MIT License - See [LICENSE](LICENSE)
+
+---
 
 **Made with ❤️ for Smart Traders**
