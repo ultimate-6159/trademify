@@ -154,9 +154,9 @@ class SupremeIntelligence:
     """
     
     # Configurable thresholds (can be adjusted for trial/aggressive modes)
-    MIN_CONFIDENCE = 60          # Default: 70, Trial: 60
-    MIN_WIN_PROBABILITY = 45     # Default: 55, Trial: 45
-    MIN_CONFLUENCE = 40          # Default: 50, Trial: 40
+    MIN_CONFIDENCE = 45          # Default: 70, Trial: 45
+    MIN_WIN_PROBABILITY = 35     # Default: 55, Trial: 35
+    MIN_CONFLUENCE = 30          # Default: 50, Trial: 30
     ALLOW_DORMANT = True         # Allow trading in DORMANT market (for trial)
     ALLOW_WAIT_TIMING = True     # Allow WAIT timing (for trial)
     

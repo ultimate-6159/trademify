@@ -400,11 +400,17 @@ class MultiTimeframeAnalyzer:
             score = 60
             message = f"⚠️ H1+H4 {h1_trend}, D1 ไม่เห็นด้วย"
             can_trade = True
+        elif h1_trend != "neutral":
+            # ผ่อนปรน: อนุญาตถ้า H1 มีทิศทางชัดเจน
+            alignment = f"h1_{h1_trend}"
+            score = 45
+            message = f"⚠️ H1 {h1_trend} เท่านั้น - ระวัง"
+            can_trade = True  # Trial mode: อนุญาตให้เทรด
         else:
             alignment = "mixed"
             score = 30
-            message = "❌ TF ไม่ตรงกัน - รอก่อน"
-            can_trade = False
+            message = "⚠️ TF ไม่ชัดเจน - ใช้ความระวัง"
+            can_trade = True  # Trial mode: อนุญาตให้เทรด
         
         return MTFAnalysis(
             h1_trend=h1_trend,
@@ -937,7 +943,7 @@ class ConfluenceAnalyzer:
         agreeing = sum(1 for v in factors.values() if v)
         score = (agreeing / total) * 100 if total > 0 else 0
         
-        # Recommendation
+        # Recommendation - ผ่อนปรนสำหรับ trial mode
         if agreeing >= 5:
             rec = f"strong_{signal_side.lower()}"
             can_trade = True
@@ -948,12 +954,12 @@ class ConfluenceAnalyzer:
             message = f"✅ Confluence พอใช้ได้ {agreeing}/{total}"
         elif agreeing >= 2:
             rec = "weak_" + signal_side.lower()
-            can_trade = False
-            message = f"⚠️ Confluence ต่ำ {agreeing}/{total} - รอจังหวะดีกว่า"
+            can_trade = True  # Trial mode: อนุญาตให้เทรด
+            message = f"⚠️ Confluence ต่ำ {agreeing}/{total} - ระวัง"
         else:
-            rec = "neutral"
-            can_trade = False
-            message = f"❌ ปัจจัยไม่เห็นด้วย {agreeing}/{total}"
+            rec = "very_weak_" + signal_side.lower()
+            can_trade = True  # Trial mode: อนุญาตให้เทรด
+            message = f"⚠️ Confluence ต่ำมาก {agreeing}/{total} - ใช้ position เล็ก"
         
         return ConfluenceResult(
             total_factors=total,
@@ -1173,16 +1179,16 @@ class AdvancedIntelligence:
         # Final decision
         can_trade = confluence_result.can_trade
         
-        # Override: No trade if Kelly is negative
+        # Override: Kelly warning only (ไม่บล็อก ใน trial mode)
         if kelly_size <= 0:
-            can_trade = False
-            warnings.append("❌ Blocked by negative Kelly")
+            # can_trade = False  # Disabled for trial
+            warnings.append("⚠️ Kelly says no edge - use small size")
         
-        # Override: No trade in high volatility if not strong confluence
+        # Override: High volatility warning only (ไม่บล็อก ใน trial mode)
         if regime and regime.regime == MarketRegime.HIGH_VOLATILITY:
             if confluence_result.agreeing_factors < 5:
-                can_trade = False
-                warnings.append("❌ High volatility + low confluence")
+                # can_trade = False  # Disabled for trial
+                warnings.append("⚠️ High volatility + low confluence - reduce size")
         
         # Calculate final position factor
         final_factor = position_factor

@@ -1312,9 +1312,9 @@ class TranscendentIntelligence:
         )
         
         # 19. Can trade decision
-        # Configurable thresholds for trial mode
-        MIN_TRANSCENDENT_SCORE = 50   # Default: 60, Trial: 50
-        MIN_WIN_PROB = 0.40           # Default: 0.45, Trial: 0.40
+        # Configurable thresholds for trial mode - ผ่อนปรนมากขึ้น
+        MIN_TRANSCENDENT_SCORE = 35   # Default: 60, Trial: 35
+        MIN_WIN_PROB = 0.30           # Default: 0.45, Trial: 0.30
         ALLOW_NOISY = True            # Allow noisy signals in trial mode
         
         can_trade_checks = [

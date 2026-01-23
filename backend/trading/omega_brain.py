@@ -1142,11 +1142,11 @@ class OmegaBrain:
         # 9. Determine Grade
         grade = self._determine_grade(omega_score, len(edge_factors), len(risk_factors))
         
-        # 10. Final Decision
+        # 10. Final Decision - ผ่อนปรนสำหรับ trial mode
         should_trade = (
-            omega_score >= self.min_omega_score and
-            grade not in [OmegaGrade.GAMMA, OmegaGrade.REJECT] and
-            len(risk_factors) < 4
+            omega_score >= 45 and  # ลดจาก 60 เป็น 45
+            grade not in [OmegaGrade.REJECT] and  # อนุญาต GAMMA
+            len(risk_factors) < 6  # เพิ่มจาก 4 เป็น 6
         )
         
         # Position multiplier based on grade
