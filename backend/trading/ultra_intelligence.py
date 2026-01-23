@@ -258,12 +258,12 @@ class UltraIntelligence:
             market_phase
         )
         
-        # 12. Final Decision
+        # 12. Final Decision - ผ่อนปรนสำหรับ trial mode
         can_trade = (
-            confidence >= 65 and
-            session_quality not in [SessionQuality.AVOID, SessionQuality.POOR] and
+            confidence >= 55 and  # ลดจาก 65 เป็น 55
+            session_quality not in [SessionQuality.AVOID] and  # ลบ POOR ออก
             volatility_state != VolatilityState.DEAD and
-            size_mult >= 0.25
+            size_mult >= 0.15  # ลดจาก 0.25 เป็น 0.15
         )
         
         if not can_trade:

@@ -1168,15 +1168,16 @@ class OmniscientIntelligence:
         # Confidence
         decision.confidence = decision.omniscient_score
         
-        # Can Trade
+        # Can Trade - ผ่อนปรนเงื่อนไขให้เหมาะกับการเทรดจริง
         can_trade_checks = [
-            decision.omniscient_score >= 60,
-            decision.consciousness_level in [ConsciousnessLevel.OMNISCIENT, ConsciousnessLevel.ENLIGHTENED, ConsciousnessLevel.TRANSCENDENT, ConsciousnessLevel.AWAKENED],
+            decision.omniscient_score >= 40,  # ลดจาก 60 เป็น 40
             decision.chaos.chaos_level not in [ChaosLevel.EXTREME_CHAOS],
             decision.risk_math.risk_state not in [RiskMathState.JUMP],
-            decision.expected_value > 0,
-            decision.win_probability > 0.45,
-            len(decision.behavioral.detected_biases) <= 2,
+            # ลบเงื่อนไขที่เข้มงวดเกินไป:
+            # - expected_value > 0 (บางครั้งคำนวณได้ <= 0 แต่ trade ยังดี)
+            # - win_probability > 0.45 (บางครั้ง model ไม่มีข้อมูลพอ)
+            # - consciousness_level (ไม่จำเป็น)
+            # - detected_biases <= 2 (บ่อยเกินไป)
         ]
         
         decision.can_trade = all(can_trade_checks)

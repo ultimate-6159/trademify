@@ -12,7 +12,9 @@
     </span>
 
     <!-- Latency -->
-    <span v-if="status.avgLatency > 0" class="latency"> {{ status.avgLatency }}ms </span>
+    <span v-if="status.avgLatency > 0" class="latency">
+      {{ status.avgLatency }}ms
+    </span>
 
     <!-- Reconnecting Spinner -->
     <svg v-if="status.reconnecting" class="spinner" viewBox="0 0 24 24">
@@ -57,7 +59,9 @@
           </div>
           <div class="detail-row">
             <span class="label">Timeout:</span>
-            <span>{{ Math.round((status.currentTimeout || 10000) / 1000) }}s</span>
+            <span
+              >{{ Math.round((status.currentTimeout || 10000) / 1000) }}s</span
+            >
           </div>
         </div>
 
@@ -66,7 +70,9 @@
           <div class="section-title">🛡️ Circuit Breaker</div>
           <div class="detail-row">
             <span class="label">State:</span>
-            <span :class="circuitClass">{{ status.circuitState || 'CLOSED' }}</span>
+            <span :class="circuitClass">{{
+              status.circuitState || "CLOSED"
+            }}</span>
           </div>
           <div class="detail-row" v-if="status.consecutiveErrors > 0">
             <span class="label">Errors:</span>
@@ -100,7 +106,11 @@
           </div>
           <div class="detail-row">
             <span class="label">Offline Queue:</span>
-            <span :class="(status.offlineQueueSize || 0) > 0 ? 'text-yellow-400' : ''">
+            <span
+              :class="
+                (status.offlineQueueSize || 0) > 0 ? 'text-yellow-400' : ''
+              "
+            >
               {{ status.offlineQueueSize || 0 }} pending
             </span>
           </div>
@@ -119,10 +129,14 @@
             class="action-btn primary"
             :disabled="status.reconnecting"
           >
-            {{ status.reconnecting ? 'กำลังเชื่อมต่อ...' : '🔄 เชื่อมต่อใหม่' }}
+            {{ status.reconnecting ? "กำลังเชื่อมต่อ..." : "🔄 เชื่อมต่อใหม่" }}
           </button>
-          <button @click.stop="clearCache" class="action-btn">🧹 ล้าง Cache</button>
-          <button @click.stop="exportMetrics" class="action-btn">📤 Export</button>
+          <button @click.stop="clearCache" class="action-btn">
+            🧹 ล้าง Cache
+          </button>
+          <button @click.stop="exportMetrics" class="action-btn">
+            📤 Export
+          </button>
         </div>
       </div>
     </transition>
@@ -131,7 +145,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import api, { onConnectionChange, getConnectionStatus, getPerformanceMetrics } from "@/services/api";
+import api, {
+  onConnectionChange,
+  getConnectionStatus,
+  getPerformanceMetrics,
+} from "@/services/api";
 
 const showDetails = ref(false);
 const status = ref(getConnectionStatus());
@@ -150,7 +168,7 @@ onMounted(() => {
     try {
       metrics.value = getPerformanceMetrics();
     } catch (e) {
-      console.warn('Failed to get metrics');
+      console.warn("Failed to get metrics");
     }
   };
   updateMetrics();
@@ -191,22 +209,24 @@ const qualityClass = computed(() => ({
   "quality-offline": status.value.connectionQuality === "offline",
 }));
 
-const qualityText = computed(() =>
-  ({
-    excellent: "4G",
-    good: "3G",
-    poor: "2G",
-    offline: "📴",
-  })[status.value.connectionQuality] || "",
+const qualityText = computed(
+  () =>
+    ({
+      excellent: "4G",
+      good: "3G",
+      poor: "2G",
+      offline: "📴",
+    })[status.value.connectionQuality] || "",
 );
 
-const qualityTextFull = computed(() =>
-  ({
-    excellent: "🚀 ดีเยี่ยม",
-    good: "👍 ดี",
-    poor: "⚠️ ช้า",
-    offline: "📴 ออฟไลน์",
-  })[status.value.connectionQuality] || "ไม่ทราบ",
+const qualityTextFull = computed(
+  () =>
+    ({
+      excellent: "🚀 ดีเยี่ยม",
+      good: "👍 ดี",
+      poor: "⚠️ ช้า",
+      offline: "📴 ออฟไลน์",
+    })[status.value.connectionQuality] || "ไม่ทราบ",
 );
 
 const healthClass = computed(() => ({
@@ -215,12 +235,13 @@ const healthClass = computed(() => ({
   "text-red-400": status.value.health === "critical",
 }));
 
-const healthText = computed(() =>
-  ({
-    excellent: "✅ ดีเยี่ยม",
-    degraded: "⚠️ ไม่เสถียร",
-    critical: "❌ วิกฤต",
-  })[status.value.health] || "ไม่ทราบ",
+const healthText = computed(
+  () =>
+    ({
+      excellent: "✅ ดีเยี่ยม",
+      degraded: "⚠️ ไม่เสถียร",
+      critical: "❌ วิกฤต",
+    })[status.value.health] || "ไม่ทราบ",
 );
 
 const circuitClass = computed(() => ({
@@ -244,7 +265,7 @@ const toggleDetails = () => {
     try {
       metrics.value = getPerformanceMetrics();
     } catch (e) {
-      console.warn('Failed to get metrics');
+      console.warn("Failed to get metrics");
     }
   }
 };
@@ -258,7 +279,7 @@ const clearCache = () => {
   try {
     metrics.value = getPerformanceMetrics();
   } catch (e) {
-    console.warn('Failed to get metrics');
+    console.warn("Failed to get metrics");
   }
 };
 
