@@ -1163,3 +1163,277 @@ async def get_pattern_evolution():
     except Exception as e:
         logger.error(f"Error getting pattern evolution: {e}")
         return {"success": False, "error": str(e)}
+
+
+# =====================
+# 🧪 BACKTEST API ENDPOINTS
+# =====================
+
+class BacktestRequest(BaseModel):
+    """Request สำหรับรัน Backtest"""
+    symbol: str = Field(default="EURUSDm", description="Symbol to backtest")
+    timeframe: str = Field(default="H1", description="Timeframe")
+    years: int = Field(default=10, ge=1, le=20, description="Years of data")
+    initial_balance: float = Field(default=10000, ge=100, description="Initial balance")
+    min_quality: str = Field(default="MEDIUM", description="Min signal quality")
+    min_pass_rate: float = Field(default=0.40, ge=0.1, le=1.0, description="Min layer pass rate")
+    max_risk_per_trade: float = Field(default=2.0, ge=0.1, le=10.0, description="Max risk per trade %")
+    max_drawdown: float = Field(default=20.0, ge=5.0, le=50.0, description="Max drawdown %")
+    use_full_intelligence: bool = Field(default=True, description="Use all 20 layers")
+    generate_html_report: bool = Field(default=True, description="Generate HTML report")
+
+
+class BacktestStatusResponse(BaseModel):
+    """Response for backtest status"""
+    running: bool
+    progress: float
+    symbol: Optional[str]
+    timeframe: Optional[str]
+    current_bar: Optional[int]
+    total_bars: Optional[int]
+    trades_executed: Optional[int]
+    current_balance: Optional[float]
+
+
+# Global backtest state
+_backtest_task = None
+_backtest_status = {
+    "running": False,
+    "progress": 0,
+    "symbol": None,
+    "timeframe": None,
+    "current_bar": 0,
+    "total_bars": 0,
+    "trades_executed": 0,
+    "current_balance": 0,
+    "result": None,
+    "error": None
+}
+
+
+@router.post("/backtest/start")
+async def start_backtest(request: BacktestRequest, background_tasks: BackgroundTasks):
+    """
+    🧪 Start a backtest with specified parameters
+    
+    This runs the backtest in the background and returns immediately.
+    Use /backtest/status to check progress.
+    """
+    global _backtest_status, _backtest_task
+    
+    if _backtest_status["running"]:
+        raise HTTPException(status_code=400, detail="Backtest already running")
+    
+    # Reset status
+    _backtest_status = {
+        "running": True,
+        "progress": 0,
+        "symbol": request.symbol,
+        "timeframe": request.timeframe,
+        "current_bar": 0,
+        "total_bars": 0,
+        "trades_executed": 0,
+        "current_balance": request.initial_balance,
+        "result": None,
+        "error": None
+    }
+    
+    # Run backtest in background
+    background_tasks.add_task(
+        run_backtest_task,
+        request
+    )
+    
+    return {
+        "success": True,
+        "message": f"Backtest started for {request.symbol} {request.timeframe} ({request.years} years)",
+        "status_endpoint": "/api/v1/trading/backtest/status"
+    }
+
+
+async def run_backtest_task(request: BacktestRequest):
+    """Background task to run backtest"""
+    global _backtest_status
+    
+    try:
+        from backtesting import BacktestEngine, BacktestConfig, BacktestReporter
+        
+        config = BacktestConfig(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            years=request.years,
+            initial_balance=request.initial_balance,
+            min_quality=request.min_quality,
+            min_layer_pass_rate=request.min_pass_rate,
+            max_risk_per_trade=request.max_risk_per_trade,
+            max_drawdown=request.max_drawdown,
+            use_full_intelligence=request.use_full_intelligence,
+            save_report=True
+        )
+        
+        engine = BacktestEngine(config)
+        
+        # Override progress tracking
+        original_simulate = engine._simulate
+        
+        async def tracked_simulate():
+            await engine.initialize()
+            if not await engine.load_data():
+                return
+            
+            _backtest_status["total_bars"] = engine.total_bars
+            
+            window_size = config.pattern_window_size
+            
+            for i in range(window_size, len(engine.data)):
+                if not _backtest_status["running"]:
+                    break  # Cancelled
+                    
+                # Update progress
+                _backtest_status["current_bar"] = i
+                _backtest_status["progress"] = (i / len(engine.data)) * 100
+                _backtest_status["trades_executed"] = len([t for t in engine.trades if t.status.value != "open"])
+                _backtest_status["current_balance"] = engine.balance
+                
+                # Process bar (simplified - actual logic in engine)
+                current_time = engine.data.index[i]
+                current_bar = engine.data.iloc[i]
+                
+                await engine._check_open_trades(current_time, current_bar)
+                
+                window_data = engine.data.iloc[i-window_size+1:i+1].copy()
+                signal = await engine._analyze_bar(window_data, current_time, current_bar)
+                
+                if signal and engine._should_execute(signal):
+                    await engine._execute_signal(signal, current_time, current_bar)
+                
+                open_pnl = engine._calculate_open_pnl(current_bar['close'])
+                engine.equity = engine.balance + open_pnl
+                
+                engine.equity_curve.append({
+                    'datetime': current_time,
+                    'balance': engine.balance,
+                    'equity': engine.equity,
+                    'open_trades': len([t for t in engine.trades if t.status.value == "open"]),
+                })
+            
+            await engine._close_all_trades(engine.data.index[-1], engine.data.iloc[-1])
+        
+        # Run with tracking
+        await tracked_simulate()
+        
+        # Calculate results
+        result = engine._calculate_results()
+        
+        # Generate HTML report
+        if request.generate_html_report:
+            reporter = BacktestReporter()
+            html_path = reporter.generate_html_report(result)
+            _backtest_status["html_report"] = html_path
+        
+        # Store result summary
+        _backtest_status["result"] = {
+            "total_trades": result.total_trades,
+            "winning_trades": result.winning_trades,
+            "losing_trades": result.losing_trades,
+            "win_rate": result.win_rate,
+            "total_pnl": result.total_pnl,
+            "total_return": result.total_return,
+            "annualized_return": result.annualized_return,
+            "profit_factor": result.profit_factor,
+            "max_drawdown": result.max_drawdown,
+            "sharpe_ratio": result.sharpe_ratio,
+            "calmar_ratio": result.calmar_ratio,
+            "avg_win": result.avg_win,
+            "avg_loss": result.avg_loss,
+            "expectancy": result.expectancy,
+            "avg_holding_time": result.avg_holding_time,
+            "max_consecutive_wins": result.max_consecutive_wins,
+            "max_consecutive_losses": result.max_consecutive_losses,
+            "best_trading_hours": result.best_trading_hours,
+            "best_trading_days": result.best_trading_days,
+            "processing_time": result.processing_time
+        }
+        
+        _backtest_status["running"] = False
+        _backtest_status["progress"] = 100
+        
+        logger.info(f"✅ Backtest completed: {result.total_trades} trades, {result.win_rate:.1f}% win rate")
+        
+    except Exception as e:
+        logger.error(f"❌ Backtest error: {e}")
+        import traceback
+        traceback.print_exc()
+        _backtest_status["running"] = False
+        _backtest_status["error"] = str(e)
+
+
+@router.get("/backtest/status")
+async def get_backtest_status():
+    """
+    📊 Get current backtest status and progress
+    """
+    return _backtest_status
+
+
+@router.post("/backtest/stop")
+async def stop_backtest():
+    """
+    ⏹️ Stop running backtest
+    """
+    global _backtest_status
+    
+    if not _backtest_status["running"]:
+        return {"success": False, "message": "No backtest running"}
+    
+    _backtest_status["running"] = False
+    
+    return {"success": True, "message": "Backtest stop requested"}
+
+
+@router.get("/backtest/results")
+async def get_backtest_results():
+    """
+    📈 Get last backtest results
+    """
+    if _backtest_status["result"] is None:
+        return {"success": False, "error": "No backtest results available"}
+    
+    return {
+        "success": True,
+        "result": _backtest_status["result"],
+        "html_report": _backtest_status.get("html_report"),
+        "completed_at": datetime.now().isoformat()
+    }
+
+
+@router.get("/backtest/available-data")
+async def get_available_backtest_data():
+    """
+    📂 Get available historical data for backtesting
+    """
+    try:
+        from backtesting.data_loader import HistoricalDataLoader
+        
+        loader = HistoricalDataLoader()
+        
+        # Check common symbols
+        symbols = ["EURUSDm", "GBPUSDm", "XAUUSDm", "EURUSD", "BTCUSDT", "ETHUSDT"]
+        available = {}
+        
+        for symbol in symbols:
+            info = loader.get_available_data_range(symbol)
+            if info.get("cached_files", 0) > 0:
+                available[symbol] = info
+        
+        return {
+            "success": True,
+            "available_symbols": available,
+            "supported_timeframes": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"],
+            "max_years": 10,
+            "data_sources": ["MT5", "Yahoo Finance", "Binance (crypto)", "Local cache"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available data: {e}")
+        return {"success": False, "error": str(e)}
