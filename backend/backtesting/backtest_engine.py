@@ -75,9 +75,9 @@ class BacktestConfig:
     max_drawdown: float = 20.0  # %
     
     # Signal settings
-    min_quality: str = "MEDIUM"  # PREMIUM, HIGH, MEDIUM, LOW
-    min_confidence: float = 65.0
-    min_layer_pass_rate: float = 0.40
+    min_quality: str = "LOW"  # PREMIUM, HIGH, MEDIUM, LOW (LOW = 40+, MEDIUM = 65+, HIGH = 75+, PREMIUM = 85+)
+    min_confidence: float = 40.0  # Minimum confidence score (40-100)
+    min_layer_pass_rate: float = 0.20  # Minimum layer pass rate (0.0-1.0), 20% for technical mode
     
     # Execution settings
     slippage_pips: float = 1.0
@@ -87,6 +87,11 @@ class BacktestConfig:
     # Analysis settings
     use_full_intelligence: bool = True  # Use all 20 layers
     pattern_window_size: int = 60
+    
+    # Signal generation mode
+    # "pattern" = Use FAISS pattern matching (requires pattern database)
+    # "technical" = Use technical indicators only (no pattern database needed)
+    signal_mode: str = "technical"
     
     # Output settings
     save_trades: bool = True
@@ -391,6 +396,210 @@ class BacktestEngine:
     ) -> Optional[Dict[str, Any]]:
         """Analyze a bar for trading signals"""
         try:
+            # Choose signal generation mode
+            if self.config.signal_mode == "technical":
+                return await self._analyze_bar_technical(window_data, current_time, current_bar)
+            else:
+                return await self._analyze_bar_pattern(window_data, current_time, current_bar)
+                
+        except Exception as e:
+            logger.debug(f"Analysis error: {e}")
+            return None
+    
+    async def _analyze_bar_technical(
+        self,
+        window_data: pd.DataFrame,
+        current_time: datetime,
+        current_bar: pd.Series
+    ) -> Optional[Dict[str, Any]]:
+        """Generate signals using technical indicators only (no FAISS needed)"""
+        try:
+            df = window_data
+            close = df['close'].values
+            high = df['high'].values
+            low = df['low'].values
+            
+            if len(close) < 50:
+                logger.debug(f"Not enough data: {len(close)} < 50")
+                return None
+            
+            # Calculate indicators
+            # SMA
+            sma_20 = np.mean(close[-20:])
+            sma_50 = np.mean(close[-50:])
+            current_price = close[-1]
+            
+            # EMA (simplified)
+            ema_12 = self._ema(close, 12)
+            ema_26 = self._ema(close, 26)
+            
+            # MACD
+            macd = ema_12 - ema_26
+            signal_line = self._ema(np.array([macd]), 9) if macd else 0
+            
+            # RSI
+            delta = np.diff(close)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain[-14:]) if len(gain) >= 14 else 0
+            avg_loss = np.mean(loss[-14:]) if len(loss) >= 14 else 0
+            rs = avg_gain / max(avg_loss, 0.0001)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # ATR (Average True Range) - Fixed calculation
+            high_14 = high[-14:]
+            low_14 = low[-14:]
+            close_14 = close[-14:]
+            prev_close = np.roll(close_14, 1)
+            prev_close[0] = close_14[0]  # First element has no previous close
+            
+            tr1 = high_14 - low_14
+            tr2 = np.abs(high_14 - prev_close)
+            tr3 = np.abs(low_14 - prev_close)
+            tr = np.maximum(np.maximum(tr1, tr2), tr3)
+            atr = np.mean(tr) if len(tr) > 0 else 0
+            
+            # Bollinger Bands
+            bb_sma = np.mean(close[-20:])
+            bb_std = np.std(close[-20:])
+            bb_upper = bb_sma + (2 * bb_std)
+            bb_lower = bb_sma - (2 * bb_std)
+            
+            # Trend detection
+            trend_bullish = current_price > sma_20 > sma_50
+            trend_bearish = current_price < sma_20 < sma_50
+            
+            # Signal generation logic
+            signal = None
+            confidence = 0
+            quality = "LOW"
+            
+            # BUY conditions
+            buy_score = 0
+            if trend_bullish:
+                buy_score += 25
+            if rsi < 40:  # Oversold
+                buy_score += 30
+            if rsi > 30 and rsi < 50:  # Rising from oversold
+                buy_score += 15
+            if current_price < bb_lower * 1.02:  # Near lower BB
+                buy_score += 25
+            if macd > signal_line:  # MACD bullish
+                buy_score += 15
+            if current_price > sma_20 and close[-2] < sma_20:  # Price crosses above SMA
+                buy_score += 30
+            if current_price > sma_50 and close[-2] < sma_50:  # Price crosses above SMA50
+                buy_score += 20
+            
+            # SELL conditions
+            sell_score = 0
+            if trend_bearish:
+                sell_score += 25
+            if rsi > 60:  # Overbought
+                sell_score += 30
+            if rsi < 70 and rsi > 50:  # Falling from overbought
+                sell_score += 15
+            if current_price > bb_upper * 0.98:  # Near upper BB
+                sell_score += 25
+            if macd < signal_line:  # MACD bearish
+                sell_score += 15
+            if current_price < sma_20 and close[-2] > sma_20:  # Price crosses below SMA
+                sell_score += 30
+            if current_price < sma_50 and close[-2] > sma_50:  # Price crosses below SMA50
+                sell_score += 20
+            
+            # Determine signal
+            min_score = 40  # Minimum score to generate signal (lowered from 50)
+            
+            if buy_score >= min_score and buy_score > sell_score:
+                signal = "BUY"
+                confidence = min(buy_score, 95)
+            elif sell_score >= min_score and sell_score > buy_score:
+                signal = "SELL"
+                confidence = min(sell_score, 95)
+            else:
+                return None
+            
+            # Determine quality based on confidence
+            if confidence >= 85:
+                quality = "PREMIUM"
+            elif confidence >= 75:
+                quality = "HIGH"
+            elif confidence >= 65:
+                quality = "MEDIUM"
+            else:
+                quality = "LOW"
+            
+            # Filter by quality
+            quality_order = {'PREMIUM': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+            min_quality_level = quality_order.get(self.config.min_quality, 2)
+            signal_quality_level = quality_order.get(quality, 1)
+            
+            if signal_quality_level < min_quality_level:
+                return None
+            
+            if confidence < self.config.min_confidence:
+                return None
+            
+            # Run intelligence layers
+            layer_results = await self._run_intelligence_layers(window_data, signal, {
+                'enhanced_confidence': confidence,
+                'quality': quality
+            })
+            
+            pass_rate = layer_results.get('pass_rate', 0)
+            if pass_rate < self.config.min_layer_pass_rate:
+                return None
+            
+            # Calculate SL/TP
+            atr_multiplier = 2.0
+            if signal == "BUY":
+                stop_loss = current_price - (atr * atr_multiplier)
+                take_profit = current_price + (atr * atr_multiplier * 2)  # 2:1 R:R
+            else:
+                stop_loss = current_price + (atr * atr_multiplier)
+                take_profit = current_price - (atr * atr_multiplier * 2)
+            
+            return {
+                'signal': signal,
+                'quality': quality,
+                'confidence': confidence,
+                'pass_rate': pass_rate,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'position_multiplier': layer_results.get('multiplier', 1.0),
+                'analysis': {
+                    'rsi': rsi,
+                    'macd': macd,
+                    'trend': 'bullish' if trend_bullish else ('bearish' if trend_bearish else 'neutral'),
+                    'atr': atr
+                },
+                'layer_results': layer_results
+            }
+            
+        except Exception as e:
+            logger.debug(f"Technical analysis error: {e}")
+            return None
+    
+    def _ema(self, data: np.ndarray, period: int) -> float:
+        """Calculate EMA"""
+        if len(data) < period:
+            return np.mean(data) if len(data) > 0 else 0
+        
+        multiplier = 2 / (period + 1)
+        ema = data[0]
+        for price in data[1:]:
+            ema = (price * multiplier) + (ema * (1 - multiplier))
+        return ema
+    
+    async def _analyze_bar_pattern(
+        self,
+        window_data: pd.DataFrame,
+        current_time: datetime,
+        current_bar: pd.Series
+    ) -> Optional[Dict[str, Any]]:
+        """Analyze a bar using FAISS pattern matching (original method)"""
+        try:
             # Prepare data for pattern matching
             prices = window_data['close'].values
             
@@ -515,10 +724,10 @@ class BacktestEngine:
             (signal == 'BUY' and trend_bullish) or (signal == 'SELL' and trend_bearish) or (not trend_bullish and not trend_bearish),
             
             # Layer 6: RSI check
-            (signal == 'BUY' and rsi < 70) or (signal == 'SELL' and rsi > 30),
+            (signal == 'BUY' and rsi < 75) or (signal == 'SELL' and rsi > 25),
             
             # Layer 7: Volatility check
-            atr_pct < 5.0,  # Not too volatile
+            atr_pct < 10.0,  # Not too volatile
             
             # Layer 8: Price position
             (signal == 'BUY' and current_price > low[-20:].min()) or (signal == 'SELL' and current_price < high[-20:].max()),
@@ -526,9 +735,9 @@ class BacktestEngine:
             # Layer 9-12: More checks
             True, True, True, True,
             
-            # Layer 13-16: Additional checks
-            analysis.get('enhanced_confidence', 0) > 60,
-            analysis.get('quality', 'LOW') in ['PREMIUM', 'HIGH', 'MEDIUM'],
+            # Layer 13-16: Additional checks (relaxed for technical mode)
+            analysis.get('enhanced_confidence', 0) >= 40,  # Lowered from 60
+            analysis.get('quality', 'LOW') in ['PREMIUM', 'HIGH', 'MEDIUM', 'LOW'],  # Include LOW
             True, True,
             
             # Layer 17-20: Adaptive layers

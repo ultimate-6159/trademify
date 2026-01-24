@@ -409,13 +409,19 @@ class BacktestReporter:
             pnl_class = 'profit' if trade.pnl > 0 else 'loss'
             side_class = 'text-green-400' if trade.side == 'BUY' else 'text-red-400'
             
+            # Format exit price
+            if trade.exit_price is not None:
+                exit_price_str = f"{trade.exit_price:.5f}"
+            else:
+                exit_price_str = "Open"
+            
             row = f"""
             <tr class="border-b border-gray-800">
                 <td class="py-2">{trade.id}</td>
                 <td class="py-2 {side_class}">{trade.side}</td>
                 <td class="py-2">{trade.entry_time.strftime('%Y-%m-%d %H:%M') if trade.entry_time else 'N/A'}</td>
                 <td class="py-2 text-right">{trade.entry_price:.5f}</td>
-                <td class="py-2 text-right">{trade.exit_price:.5f if trade.exit_price else 'Open'}</td>
+                <td class="py-2 text-right">{exit_price_str}</td>
                 <td class="py-2 text-right {pnl_class}">${trade.pnl:+.2f}</td>
                 <td class="py-2">{trade.status.value if trade.status else 'Open'}</td>
                 <td class="py-2 text-right">{trade.signal_quality}</td>

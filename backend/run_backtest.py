@@ -68,6 +68,13 @@ async def main():
     )
     
     parser.add_argument(
+        "--signal-mode",
+        default="technical",
+        choices=["technical", "pattern"],
+        help="Signal generation mode: technical (indicators) or pattern (FAISS)"
+    )
+    
+    parser.add_argument(
         "--min-pass-rate",
         type=float,
         default=0.40,
@@ -124,6 +131,7 @@ async def main():
     print(f"   Period:           {args.years} years")
     print(f"   Initial Balance:  ${args.balance:,.2f}")
     print(f"   Min Quality:      {args.quality}")
+    print(f"   Signal Mode:      {args.signal_mode}")
     print(f"   Min Pass Rate:    {args.min_pass_rate:.0%}")
     print(f"   Max Risk/Trade:   {args.max_risk}%")
     print(f"   Max Drawdown:     {args.max_drawdown}%")
@@ -141,6 +149,7 @@ async def main():
         max_risk_per_trade=args.max_risk,
         max_drawdown=args.max_drawdown,
         use_full_intelligence=not args.no_intelligence,
+        signal_mode=args.signal_mode,
         output_dir=args.output_dir
     )
     
