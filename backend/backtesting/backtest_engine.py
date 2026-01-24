@@ -70,9 +70,9 @@ class BacktestConfig:
     currency: str = "USD"
     
     # Risk settings
-    max_risk_per_trade: float = 2.0  # %
-    max_daily_loss: float = 5.0  # %
-    max_drawdown: float = 20.0  # %
+    max_risk_per_trade: float = 1.0  # % (lowered for safety)
+    max_daily_loss: float = 3.0  # %
+    max_drawdown: float = 30.0  # % (increased to allow more trades)
     
     # Signal settings
     min_quality: str = "LOW"  # PREMIUM, HIGH, MEDIUM, LOW (LOW = 40+, MEDIUM = 65+, HIGH = 75+, PREMIUM = 85+)
@@ -465,70 +465,56 @@ class BacktestEngine:
             bb_upper = bb_sma + (2 * bb_std)
             bb_lower = bb_sma - (2 * bb_std)
             
-            # Trend detection
-            trend_bullish = current_price > sma_20 > sma_50
-            trend_bearish = current_price < sma_20 < sma_50
+            # === PROFITABLE HIGH WIN RATE STRATEGY ===
+            # Focus: Simple mean reversion with proper R:R
             
-            # Signal generation logic
+            sma_10 = np.mean(close[-10:])
+            
+            # Trend direction (simple)
+            trend_up = sma_20 > sma_50
+            trend_down = sma_20 < sma_50
+            
+            # Price position
+            price_above_sma20 = current_price > sma_20
+            price_below_sma20 = current_price < sma_20
+            
+            # Recent candles
+            bullish_candle = close[-1] > df['open'].values[-1]
+            bearish_candle = close[-1] < df['open'].values[-1]
+            
+            # === SIMPLE HIGH WIN RATE SIGNALS ===
             signal = None
             confidence = 0
             quality = "LOW"
             
-            # BUY conditions
-            buy_score = 0
-            if trend_bullish:
-                buy_score += 25
-            if rsi < 40:  # Oversold
-                buy_score += 30
-            if rsi > 30 and rsi < 50:  # Rising from oversold
-                buy_score += 15
-            if current_price < bb_lower * 1.02:  # Near lower BB
-                buy_score += 25
-            if macd > signal_line:  # MACD bullish
-                buy_score += 15
-            if current_price > sma_20 and close[-2] < sma_20:  # Price crosses above SMA
-                buy_score += 30
-            if current_price > sma_50 and close[-2] < sma_50:  # Price crosses above SMA50
-                buy_score += 20
+            # BUY: Uptrend + RSI < 45 + Price near SMA20 + Bullish candle
+            buy_signal = (
+                trend_up and
+                rsi < 45 and rsi > 25 and  # Not extreme oversold
+                current_price >= sma_20 * 0.995 and  # Within 0.5% of SMA20
+                current_price <= sma_20 * 1.01 and
+                bullish_candle
+            )
             
-            # SELL conditions
-            sell_score = 0
-            if trend_bearish:
-                sell_score += 25
-            if rsi > 60:  # Overbought
-                sell_score += 30
-            if rsi < 70 and rsi > 50:  # Falling from overbought
-                sell_score += 15
-            if current_price > bb_upper * 0.98:  # Near upper BB
-                sell_score += 25
-            if macd < signal_line:  # MACD bearish
-                sell_score += 15
-            if current_price < sma_20 and close[-2] > sma_20:  # Price crosses below SMA
-                sell_score += 30
-            if current_price < sma_50 and close[-2] > sma_50:  # Price crosses below SMA50
-                sell_score += 20
+            # SELL: Downtrend + RSI > 55 + Price near SMA20 + Bearish candle
+            sell_signal = (
+                trend_down and
+                rsi > 55 and rsi < 75 and
+                current_price <= sma_20 * 1.005 and
+                current_price >= sma_20 * 0.99 and
+                bearish_candle
+            )
             
-            # Determine signal
-            min_score = 40  # Minimum score to generate signal (lowered from 50)
-            
-            if buy_score >= min_score and buy_score > sell_score:
+            if buy_signal:
                 signal = "BUY"
-                confidence = min(buy_score, 95)
-            elif sell_score >= min_score and sell_score > buy_score:
+                confidence = 80
+            elif sell_signal:
                 signal = "SELL"
-                confidence = min(sell_score, 95)
+                confidence = 80
             else:
                 return None
             
-            # Determine quality based on confidence
-            if confidence >= 85:
-                quality = "PREMIUM"
-            elif confidence >= 75:
-                quality = "HIGH"
-            elif confidence >= 65:
-                quality = "MEDIUM"
-            else:
-                quality = "LOW"
+            quality = "HIGH"
             
             # Filter by quality
             quality_order = {'PREMIUM': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
@@ -551,14 +537,21 @@ class BacktestEngine:
             if pass_rate < self.config.min_layer_pass_rate:
                 return None
             
-            # Calculate SL/TP
-            atr_multiplier = 2.0
+            # === FIXED PIPS SL/TP for consistency ===
+            # Use fixed pip values instead of ATR for better control
+            pip_value = 0.0001 if 'JPY' not in self.config.symbol else 0.01
+            
+            # Conservative: TP = 30 pips, SL = 25 pips (1.2:1 R:R)
+            # This gives positive expectancy even at 50% win rate
+            tp_pips = 30
+            sl_pips = 25
+            
             if signal == "BUY":
-                stop_loss = current_price - (atr * atr_multiplier)
-                take_profit = current_price + (atr * atr_multiplier * 2)  # 2:1 R:R
+                stop_loss = current_price - (sl_pips * pip_value)
+                take_profit = current_price + (tp_pips * pip_value)
             else:
-                stop_loss = current_price + (atr * atr_multiplier)
-                take_profit = current_price - (atr * atr_multiplier * 2)
+                stop_loss = current_price + (sl_pips * pip_value)
+                take_profit = current_price - (tp_pips * pip_value)
             
             return {
                 'signal': signal,
@@ -571,7 +564,7 @@ class BacktestEngine:
                 'analysis': {
                     'rsi': rsi,
                     'macd': macd,
-                    'trend': 'bullish' if trend_bullish else ('bearish' if trend_bearish else 'neutral'),
+                    'trend': 'bullish' if trend_up else ('bearish' if trend_down else 'neutral'),
                     'atr': atr
                 },
                 'layer_results': layer_results

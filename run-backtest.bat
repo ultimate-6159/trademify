@@ -23,7 +23,7 @@ set YEARS=%3
 set BALANCE=%4
 set QUALITY=%5
 
-if "%SYMBOL%"=="" set SYMBOL=EURUSDm
+if "%SYMBOL%"=="" set SYMBOL=XAUUSDm
 if "%TIMEFRAME%"=="" set TIMEFRAME=H1
 if "%YEARS%"=="" set YEARS=10
 if "%BALANCE%"=="" set BALANCE=10000
