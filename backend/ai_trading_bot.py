@@ -59,6 +59,15 @@ from trading.ultra_intelligence import UltraIntelligence, get_ultra_intelligence
 from trading.supreme_intelligence import SupremeIntelligence, get_supreme_intelligence, SupremeDecision
 from trading.transcendent_intelligence import TranscendentIntelligence, get_transcendent_intelligence, TranscendentDecision
 from trading.omniscient_intelligence import OmniscientIntelligence, get_omniscient_intelligence, OmniscientDecision
+from trading.adaptive_intelligence import (
+    AdaptiveIntelligence, 
+    AdaptiveContext, 
+    AdaptiveDecision,
+    AdaptiveMode,
+    LayerResult,
+    collect_base_layer_results,
+    get_adaptive_intelligence
+)
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
 from services.mt5_service import get_mt5_service, MT5Service
@@ -1198,9 +1207,19 @@ class AITradingBot:
         logger.info("   - Universal Alignment")
         logger.info("   - Prophecy Generation")
         
+        # 21. 🎛️ Adaptive Intelligence System
+        self.adaptive_intelligence = get_adaptive_intelligence()
+        logger.info("✓ Adaptive Intelligence initialized:")
+        logger.info("   === ADAPTIVE SYSTEM ===")
+        logger.info("   - Layer 1-16: STRICT Gate Keepers")
+        logger.info("   - Layer 17-20: ADAPTIVE Thresholds")
+        logger.info("   - Dynamic Mode Selection")
+        logger.info("   - Context-Aware Sizing")
+        
         logger.info("=" * 60)
         logger.info("✓ Bot initialization complete!")
         logger.info(f"🏛️ Total Intelligence Layers: 20")
+        logger.info(f"🎛️ Adaptive System: Layer 17-20 are DYNAMIC")
         logger.info(f"🔮 Total Features: 100+ (OMNISCIENT)")
         logger.info("=" * 60)
     
@@ -1577,20 +1596,35 @@ class AITradingBot:
         logger.info(f"🔍 execute_trade() called for {symbol}")
         logger.info(f"   Signal: {signal}, Quality: {quality}, Price: {current_price}")
         
-        # 🧠 SMART FEATURES CHECK - ตรวจสอบก่อนเทรด (WARNING ONLY in trial mode)
-        can_trade, reason = self._can_trade_today()
-        if not can_trade:
-            logger.warning(f"⚠️ Smart features suggest SKIP but ALLOWING TRADE (trial mode): {reason}")
-            # Don't block - continue with trade
+        # ========================================
+        # 🎛️ ADAPTIVE INTELLIGENCE SYSTEM
+        # Layer 1-16: STRICT (Gate Keepers)
+        # Layer 17-20: ADAPTIVE (Dynamic Thresholds)
+        # ========================================
         
-        # 🔗 Correlation Check (WARNING ONLY in trial mode)
+        # 📊 Initialize layer results collection for Adaptive Intelligence
+        base_layer_can_trade_count = 0  # จำนวน Layer 1-16 ที่ผ่าน
+        base_layer_total = 16
+        base_layer_results = []  # เก็บผลลัพธ์ทุก layer
+        
+        # 🧠 SMART FEATURES CHECK (Layer 1-2)
+        can_trade, reason = self._can_trade_today()
+        base_layer_results.append({"layer": "SmartFeatures", "can_trade": can_trade, "reason": reason})
+        if can_trade:
+            base_layer_can_trade_count += 1
+        else:
+            logger.warning(f"⚠️ Layer 1-2 SmartFeatures: {reason}")
+        
+        # 🔗 Correlation Check (Layer 3)
         side_str = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
         can_trade, reason = self._check_correlation(symbol, side_str)
-        if not can_trade:
-            logger.warning(f"⚠️ Correlation check suggests SKIP but ALLOWING TRADE (trial mode): {reason}")
-            # Don't block - continue with trade
+        base_layer_results.append({"layer": "Correlation", "can_trade": can_trade, "reason": reason})
+        if can_trade:
+            base_layer_can_trade_count += 1
+        else:
+            logger.warning(f"⚠️ Layer 3 Correlation: {reason}")
         
-        # 🧠⚡ ULTRA INTELLIGENCE CHECK - 10x Smarter
+        # 🧠⚡ ULTRA INTELLIGENCE CHECK - 10x Smarter (Layer 17)
         ultra_decision = None
         ultra_multiplier = 1.0
         if self.ultra_intelligence:
@@ -1643,20 +1677,30 @@ class AITradingBot:
                     for warning in ultra_decision.warnings:
                         logger.warning(f"   ⚠️ {warning}")
                     
-                    # 🔥 TRIAL MODE: Ultra Intelligence is WARNING ONLY (no blocking)
+                    # 🎛️ ADAPTIVE MODE for Layer 17 (Ultra Intelligence)
+                    # ใช้ base_layer_can_trade_count ตัดสินใจ
+                    base_pass_rate = base_layer_can_trade_count / max(1, len(base_layer_results))
                     if not ultra_decision.can_trade:
-                        logger.warning(f"⚠️ Ultra Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
-                        ultra_multiplier = 0.5  # Reduce size but still trade
-                    
-                    # Apply Ultra multiplier
-                    ultra_multiplier = ultra_decision.position_size_multiplier
+                        if base_pass_rate >= 0.6:  # 60%+ base layers passed → allow with reduced size
+                            logger.info(f"   🎛️ ADAPTIVE: Ultra blocked but base passed {base_pass_rate:.0%} → ALLOWING with 0.5x")
+                            ultra_multiplier = 0.5
+                        elif base_pass_rate >= 0.4:  # 40-60% → severely reduced
+                            logger.info(f"   🎛️ ADAPTIVE: Ultra blocked, base {base_pass_rate:.0%} → ALLOWING with 0.3x")
+                            ultra_multiplier = 0.3
+                        else:  # <40% → respect Ultra's decision
+                            logger.warning(f"   🎛️ ADAPTIVE: Ultra blocked AND base low ({base_pass_rate:.0%}) → SKIPPING")
+                            ultra_multiplier = 0  # Will be caught later
+                    else:
+                        ultra_multiplier = ultra_decision.position_size_multiplier
                     
                     # Store for later use
                     self._last_ultra_decision = {
                         "symbol": symbol,
                         "can_trade": ultra_decision.can_trade,
+                        "adaptive_can_trade": ultra_multiplier > 0,
+                        "adaptive_mode": f"base_pass_rate={base_pass_rate:.0%}",
                         "confidence": ultra_decision.confidence,
-                        "size_multiplier": ultra_decision.position_size_multiplier,
+                        "size_multiplier": ultra_multiplier,
                         "optimal_rr": ultra_decision.optimal_rr,
                         "session": ultra_decision.session_quality.value,
                         "volatility": ultra_decision.volatility_state.value,
@@ -1671,7 +1715,7 @@ class AITradingBot:
             except Exception as e:
                 logger.warning(f"⚠️ Ultra Intelligence analysis failed: {e}")
         
-        # 🏆👑 SUPREME INTELLIGENCE CHECK - 20x Smarter (Hedge Fund Level)
+        # 🏆👑 SUPREME INTELLIGENCE CHECK - 20x Smarter (Hedge Fund Level) (Layer 18)
         supreme_decision = None
         supreme_multiplier = 1.0
         if self.supreme_intelligence:
@@ -1722,19 +1766,29 @@ class AITradingBot:
                     for warning in supreme_decision.warnings:
                         logger.warning(f"   ⚠️ {warning}")
                     
-                    # 🔥 TRIAL MODE: Supreme Intelligence is WARNING ONLY (no blocking)
+                    # 🎛️ ADAPTIVE MODE for Layer 18 (Supreme Intelligence)
+                    base_pass_rate = base_layer_can_trade_count / max(1, len(base_layer_results))
                     if not supreme_decision.can_trade:
-                        logger.warning(f"⚠️ Supreme Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
-                        supreme_multiplier = 0.5  # Reduce size but still trade
+                        if base_pass_rate >= 0.6:
+                            logger.info(f"   🎛️ ADAPTIVE: Supreme blocked but base passed {base_pass_rate:.0%} → ALLOWING with 0.5x")
+                            supreme_multiplier = 0.5
+                        elif base_pass_rate >= 0.4:
+                            logger.info(f"   🎛️ ADAPTIVE: Supreme blocked, base {base_pass_rate:.0%} → ALLOWING with 0.3x")
+                            supreme_multiplier = 0.3
+                        else:
+                            logger.warning(f"   🎛️ ADAPTIVE: Supreme blocked AND base low ({base_pass_rate:.0%}) → SKIPPING")
+                            supreme_multiplier = 0
                     else:
                         supreme_multiplier = supreme_decision.optimal_size_percent
                     
                     self._last_supreme_decision = {
                         "symbol": symbol,
                         "can_trade": supreme_decision.can_trade,
+                        "adaptive_can_trade": supreme_multiplier > 0,
+                        "adaptive_mode": f"base_pass_rate={base_pass_rate:.0%}",
                         "confidence": supreme_decision.confidence,
                         "signal_strength": supreme_decision.signal_strength,
-                        "size_percent": supreme_decision.optimal_size_percent,
+                        "size_percent": supreme_multiplier,
                         "entropy": supreme_decision.entropy_level.value,
                         "institutional": supreme_decision.institutional_activity.value,
                         "momentum": supreme_decision.momentum_quality.value,
@@ -1807,16 +1861,26 @@ class AITradingBot:
                     for insight in transcendent_decision.insights[:3]:  # Top 3 insights
                         logger.info(f"   💡 {insight}")
                     
-                    # 🔥 TRIAL MODE: Transcendent Intelligence is WARNING ONLY (no blocking)
+                    # 🎛️ ADAPTIVE MODE for Layer 19 (Transcendent Intelligence)
+                    base_pass_rate = base_layer_can_trade_count / max(1, len(base_layer_results))
                     if not transcendent_decision.can_trade:
-                        logger.warning(f"⚠️ Transcendent Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
-                        transcendent_multiplier = 0.5  # Reduce size but still trade
+                        if base_pass_rate >= 0.6:
+                            logger.info(f"   🎛️ ADAPTIVE: Transcendent blocked but base passed {base_pass_rate:.0%} → ALLOWING with 0.5x")
+                            transcendent_multiplier = 0.5
+                        elif base_pass_rate >= 0.4:
+                            logger.info(f"   🎛️ ADAPTIVE: Transcendent blocked, base {base_pass_rate:.0%} → ALLOWING with 0.3x")
+                            transcendent_multiplier = 0.3
+                        else:
+                            logger.warning(f"   🎛️ ADAPTIVE: Transcendent blocked AND base low ({base_pass_rate:.0%}) → SKIPPING")
+                            transcendent_multiplier = 0
                     else:
                         transcendent_multiplier = transcendent_decision.quantum_position_size * 10  # Scale up
                     
                     self._last_transcendent_decision = {
                         "symbol": symbol,
                         "can_trade": transcendent_decision.can_trade,
+                        "adaptive_can_trade": transcendent_multiplier > 0,
+                        "adaptive_mode": f"base_pass_rate={base_pass_rate:.0%}",
                         "confidence": transcendent_decision.confidence,
                         "quantum_state": transcendent_decision.quantum_field.quantum_state.value,
                         "bull_probability": transcendent_decision.quantum_field.bull_probability,
@@ -1903,16 +1967,26 @@ class AITradingBot:
                     for insight in omniscient_decision.insights[:3]:
                         logger.info(f"   💡 {insight}")
                     
-                    # 🔥 TRIAL MODE: Omniscient Intelligence is WARNING ONLY (no blocking)
+                    # 🎛️ ADAPTIVE MODE for Layer 20 (Omniscient Intelligence)
+                    base_pass_rate = base_layer_can_trade_count / max(1, len(base_layer_results))
                     if not omniscient_decision.can_trade:
-                        logger.warning(f"⚠️ Omniscient Intelligence suggests SKIP but ALLOWING TRADE (trial mode)")
-                        omniscient_multiplier = 0.5  # Reduce size but still trade
+                        if base_pass_rate >= 0.6:
+                            logger.info(f"   🎛️ ADAPTIVE: Omniscient blocked but base passed {base_pass_rate:.0%} → ALLOWING with 0.5x")
+                            omniscient_multiplier = 0.5
+                        elif base_pass_rate >= 0.4:
+                            logger.info(f"   🎛️ ADAPTIVE: Omniscient blocked, base {base_pass_rate:.0%} → ALLOWING with 0.3x")
+                            omniscient_multiplier = 0.3
+                        else:
+                            logger.warning(f"   🎛️ ADAPTIVE: Omniscient blocked AND base low ({base_pass_rate:.0%}) → SKIPPING")
+                            omniscient_multiplier = 0
                     else:
                         omniscient_multiplier = omniscient_decision.omniscient_position_size * 10
                     
                     self._last_omniscient_decision = {
                         "symbol": symbol,
                         "can_trade": omniscient_decision.can_trade,
+                        "adaptive_can_trade": omniscient_multiplier > 0,
+                        "adaptive_mode": f"base_pass_rate={base_pass_rate:.0%}",
                         "confidence": omniscient_decision.confidence,
                         "consciousness_level": omniscient_decision.consciousness_level.value,
                         "omniscient_score": omniscient_decision.omniscient_score,
@@ -2004,11 +2078,12 @@ class AITradingBot:
                 if intel_decision.confluence:
                     logger.info(f"   🎯 Confluence: {intel_decision.confluence.agreeing_factors}/{intel_decision.confluence.total_factors}")
                 
+                # 🎛️ Layer 5 - STRICT Gate Keeper
                 if not intel_decision.can_trade:
-                    logger.warning(f"   🧠 ADVANCED INTELLIGENCE WARNING (trial mode - allowing trade):")
+                    logger.warning(f"   🧠 ADVANCED INTELLIGENCE: NOT PASSED (Layer 5 STRICT)")
                     for warning in intel_decision.warnings:
                         logger.warning(f"      {warning}")
-                    intel_multiplier = 0.5  # Reduce size but still trade
+                    intel_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 else:
                     intel_multiplier = intel_decision.position_size_factor
                 
@@ -2028,11 +2103,20 @@ class AITradingBot:
                     "confluence_total": intel_decision.confluence.total_factors if intel_decision.confluence else 0,
                 }
                 self._last_intel_result_by_symbol[symbol] = self._last_intel_result
+                
+                # 📊 Track for Adaptive Intelligence (Layer 5)
+                base_layer_results.append({
+                    "layer": "AdvancedIntelligence",
+                    "can_trade": intel_decision.can_trade,
+                    "score": intel_decision.confidence
+                })
+                if intel_decision.can_trade:
+                    base_layer_can_trade_count += 1
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Intelligence analysis failed: {e}")
         
-        # � NEURAL BRAIN CHECK
+        # 🧬 NEURAL BRAIN CHECK (Layer 7)
         neural_multiplier = 1.0
         if self.neural_brain:
             try:
@@ -2051,13 +2135,20 @@ class AITradingBot:
                     balance=balance,
                 )
                 
-                if not neural_decision.can_trade:
-                    logger.warning(f"   🧬 NEURAL BRAIN WARNING (trial mode - allowing trade):")
+                # 📊 Track for Adaptive Intelligence (Layer 7)
+                base_layer_results.append({
+                    "layer": "NeuralBrain",
+                    "can_trade": neural_decision.can_trade,
+                    "score": neural_decision.confidence
+                })
+                if neural_decision.can_trade:
+                    base_layer_can_trade_count += 1
+                    neural_multiplier = neural_decision.position_size_factor
+                else:
+                    logger.warning(f"   🧬 NEURAL BRAIN: NOT PASSED (strict gate keeper)")
                     for warning in neural_decision.warnings:
                         logger.warning(f"      {warning}")
-                    neural_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    neural_multiplier = neural_decision.position_size_factor
+                    neural_multiplier = 0  # Layer 1-16 เป็น STRICT - ถ้าไม่ผ่านก็ต้องลด
                 
                 logger.info(f"   🧬 Market State: {neural_decision.market_state.value}")
                 logger.info(f"   🧬 Pattern Quality: {neural_decision.pattern_quality}")
@@ -2102,15 +2193,22 @@ class AITradingBot:
                     entry_price=current_price
                 )
                 
-                if not quantum_decision.should_trade:
-                    logger.warning(f"   ⚛️ QUANTUM STRATEGY WARNING (trial mode - allowing trade):")
+                # 🎛️ Layer 9 - STRICT Gate Keeper
+                base_layer_results.append({
+                    "layer": "QuantumStrategy",
+                    "can_trade": quantum_decision.should_trade,
+                    "score": quantum_decision.confidence
+                })
+                if quantum_decision.should_trade:
+                    base_layer_can_trade_count += 1
+                    quantum_multiplier = quantum_decision.position_multiplier
+                else:
+                    logger.warning(f"   ⚛️ QUANTUM STRATEGY: NOT PASSED (Layer 9 STRICT)")
                     logger.warning(f"      Quantum Score: {quantum_decision.quantum_score:.1f}")
                     logger.warning(f"      Confidence: {quantum_decision.confidence:.1f}%")
                     for warning in quantum_decision.warnings:
                         logger.warning(f"      {warning}")
-                    quantum_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    quantum_multiplier = quantum_decision.position_multiplier
+                    quantum_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 
                 # Log quantum analysis
                 logger.info(f"   ⚛️ Quantum Score: {quantum_decision.quantum_score:.1f}")
@@ -2197,15 +2295,22 @@ class AITradingBot:
                     other_symbols_direction=other_dirs if other_dirs else None
                 )
                 
-                if not deep_decision.should_trade:
-                    logger.warning(f"   🔮 DEEP INTELLIGENCE WARNING (trial mode - allowing trade):")
+                # 🎛️ Layer 8 - STRICT Gate Keeper
+                base_layer_results.append({
+                    "layer": "DeepIntelligence",
+                    "can_trade": deep_decision.should_trade,
+                    "score": deep_decision.confidence
+                })
+                if deep_decision.should_trade:
+                    base_layer_can_trade_count += 1
+                    deep_multiplier = deep_decision.position_multiplier
+                else:
+                    logger.warning(f"   🔮 DEEP INTELLIGENCE: NOT PASSED (Layer 8 STRICT)")
                     logger.warning(f"      Confluence: {deep_decision.confluence_level.value}")
                     logger.warning(f"      Confidence: {deep_decision.confidence:.1f}%")
                     for warning in deep_decision.warnings:
                         logger.warning(f"      {warning}")
-                    deep_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    deep_multiplier = deep_decision.position_multiplier
+                    deep_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 
                 logger.info(f"   🔮 Confluence: {deep_decision.confluence_level.value}")
                 logger.info(f"   🔮 Deep Confidence: {deep_decision.confidence:.1f}%")
@@ -2260,15 +2365,22 @@ class AITradingBot:
                     volumes=vols
                 )
                 
-                if not alpha_decision.should_trade:
-                    logger.warning(f"   🎯 ALPHA ENGINE WARNING (trial mode - allowing trade):")
+                # 🎛️ Layer 10 - STRICT Gate Keeper
+                base_layer_results.append({
+                    "layer": "AlphaEngine",
+                    "can_trade": alpha_decision.should_trade,
+                    "score": alpha_decision.confidence
+                })
+                if alpha_decision.should_trade:
+                    base_layer_can_trade_count += 1
+                    alpha_multiplier = alpha_decision.position_multiplier
+                else:
+                    logger.warning(f"   🎯 ALPHA ENGINE: NOT PASSED (Layer 10 STRICT)")
                     logger.warning(f"      Grade: {alpha_decision.grade.value}")
                     logger.warning(f"      Alpha Score: {alpha_decision.alpha_score:.1f}")
                     for risk in alpha_decision.risk_factors[:3]:
                         logger.warning(f"      {risk}")
-                    alpha_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    alpha_multiplier = alpha_decision.position_multiplier
+                    alpha_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 
                 # Log alpha analysis
                 logger.info(f"   🎯 Alpha Grade: {alpha_decision.grade.value}")
@@ -2361,16 +2473,23 @@ class AITradingBot:
                     other_symbols=self.symbols
                 )
                 
-                if not omega_decision.should_trade:
-                    logger.warning(f"   🧠⚡ OMEGA BRAIN WARNING (trial mode - allowing trade):")
+                # 🎛️ Layer 11 - STRICT Gate Keeper
+                base_layer_results.append({
+                    "layer": "OmegaBrain",
+                    "can_trade": omega_decision.should_trade,
+                    "score": omega_decision.confidence
+                })
+                if omega_decision.should_trade:
+                    base_layer_can_trade_count += 1
+                    omega_multiplier = omega_decision.position_multiplier
+                else:
+                    logger.warning(f"   🧠⚡ OMEGA BRAIN: NOT PASSED (Layer 11 STRICT)")
                     logger.warning(f"      Grade: {omega_decision.grade.value}")
                     logger.warning(f"      Omega Score: {omega_decision.omega_score:.1f}")
                     logger.warning(f"      Verdict: {omega_decision.final_verdict}")
                     for risk in omega_decision.risk_factors[:3]:
                         logger.warning(f"      {risk}")
-                    omega_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    omega_multiplier = omega_decision.position_multiplier
+                    omega_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 
                 # Log Omega Brain analysis
                 logger.info(f"   🧠⚡ Omega Grade: {omega_decision.grade.value}")
@@ -2533,15 +2652,22 @@ class AITradingBot:
                     current_price=current_price
                 )
                 
-                if not titan_decision.should_trade:
-                    logger.warning(f"   🏛️ TITAN CORE WARNING (trial mode - allowing trade):")
+                # 🎛️ Layer 12 - STRICT Gate Keeper
+                base_layer_results.append({
+                    "layer": "TitanCore",
+                    "can_trade": titan_decision.should_trade,
+                    "score": titan_decision.confidence
+                })
+                if titan_decision.should_trade:
+                    base_layer_can_trade_count += 1
+                    titan_multiplier = titan_decision.position_multiplier
+                else:
+                    logger.warning(f"   🏛️ TITAN CORE: NOT PASSED (Layer 12 STRICT)")
                     logger.warning(f"      Grade: {titan_decision.grade.value}")
                     logger.warning(f"      Titan Score: {titan_decision.titan_score:.1f}")
                     logger.warning(f"      Consensus: {titan_decision.consensus.level.value}")
                     logger.warning(f"      Verdict: {titan_decision.final_verdict}")
-                    titan_multiplier = 0.5  # Reduce size but still trade
-                else:
-                    titan_multiplier = titan_decision.position_multiplier
+                    titan_multiplier = 0  # STRICT: ไม่ผ่าน = 0
                 
                 # Log Titan Core analysis
                 logger.info(f"   🏛️ Titan Grade: {titan_decision.grade.value}")
@@ -2595,19 +2721,26 @@ class AITradingBot:
             except Exception as e:
                 logger.warning(f"   ⚠️ Titan Core analysis failed: {e}")
         
-        # 🧠 SMART BRAIN CHECK
+        # 🧠 SMART BRAIN CHECK (Layer 6)
         smart_multiplier = 1.0
         if self.smart_brain:
             side_for_check = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
             smart_decision = self.smart_brain.evaluate_entry(symbol, side_for_check)
             
-            if not smart_decision.can_trade:
-                logger.warning(f"   🧠 SMART BRAIN WARNING (trial mode - allowing trade):")
+            # 🎛️ Layer 6 - STRICT Gate Keeper
+            base_layer_results.append({
+                "layer": "SmartBrain",
+                "can_trade": smart_decision.can_trade,
+                "score": smart_decision.risk_multiplier * 100 if smart_decision.can_trade else 0
+            })
+            if smart_decision.can_trade:
+                base_layer_can_trade_count += 1
+                smart_multiplier = smart_decision.risk_multiplier
+            else:
+                logger.warning(f"   🧠 SMART BRAIN: NOT PASSED (Layer 6 STRICT)")
                 for reason in smart_decision.reasons:
                     logger.warning(f"      {reason}")
-                smart_multiplier = 0.5  # Reduce size but still trade
-            else:
-                smart_multiplier = smart_decision.risk_multiplier
+                smart_multiplier = 0  # STRICT: ไม่ผ่าน = 0
             
             if smart_decision.insights:
                 for insight in smart_decision.insights:
@@ -2615,7 +2748,7 @@ class AITradingBot:
             
             logger.info(f"   🧠 Smart Multiplier: {smart_multiplier}x")
         
-        # 🏆 PRO FEATURES CHECK
+        # 🏆 PRO FEATURES CHECK (Layer 14)
         if self.pro_features:
             # Get existing positions for correlation check
             existing_positions = [
@@ -2637,12 +2770,20 @@ class AITradingBot:
                 session = pro_decision.session_info
                 logger.info(f"   🕐 Session: {session.current_session.value} ({session.quality_score}%)")
             
-            if not pro_decision.can_trade:
-                logger.warning(f"   🏆 PRO FEATURES WARNING (trial mode - allowing trade):")
+            # 🎛️ Layer 14 - STRICT Gate Keeper
+            base_layer_results.append({
+                "layer": "ProFeatures",
+                "can_trade": pro_decision.can_trade,
+                "score": pro_decision.position_multiplier * 100 if pro_decision.can_trade else 0
+            })
+            if pro_decision.can_trade:
+                base_layer_can_trade_count += 1
+                position_multiplier_from_pro = pro_decision.position_multiplier
+            else:
+                logger.warning(f"   🏆 PRO FEATURES: NOT PASSED (Layer 14 STRICT)")
                 for reason in pro_decision.reasons:
                     logger.warning(f"      {reason}")
-                position_multiplier_from_pro = 0.5  # Reduce size but still trade
-            else:
+                position_multiplier_from_pro = 0  # STRICT: ไม่ผ่าน = 0
                 position_multiplier_from_pro = pro_decision.position_multiplier
             
             if pro_decision.warnings:
@@ -2666,21 +2807,26 @@ class AITradingBot:
                 proposed_trade={"symbol": symbol, "side": signal}
             )
             
-            if not risk_assessment.can_trade:
-                logger.warning(f"   🛡️ RISK GUARDIAN WARNING (trial mode - allowing trade with reduced size):")
+            # 🎛️ Layer 15 - STRICT Gate Keeper (Risk Management is CRITICAL)
+            base_layer_results.append({
+                "layer": "RiskGuardian",
+                "can_trade": risk_assessment.can_trade,
+                "score": 100 - (risk_assessment.level.value if hasattr(risk_assessment.level, 'value') else 50)
+            })
+            if risk_assessment.can_trade:
+                base_layer_can_trade_count += 1
+                position_multiplier_from_risk = risk_assessment.max_position_size
+            else:
+                logger.warning(f"   🛡️ RISK GUARDIAN: NOT PASSED (Layer 15 CRITICAL STRICT)")
                 for reason in risk_assessment.reasons:
                     logger.warning(f"      {reason}")
-                position_multiplier_from_risk = 0.25  # Severely reduced size but still trade
-            else:
-                position_multiplier_from_risk = risk_assessment.max_position_size
+                position_multiplier_from_risk = 0  # STRICT: Risk ไม่ผ่าน = ต้องไม่เทรด
             
             if risk_assessment.warnings:
                 for warning in risk_assessment.warnings:
                     logger.warning(f"   ⚠️ {warning}")
             
-            # Adjust position size based on risk assessment
-            position_multiplier_from_risk = risk_assessment.max_position_size
-            logger.info(f"   🛡️ Risk Level: {risk_assessment.level.value}, Max Position: {position_multiplier_from_risk}x")
+            logger.info(f"   🛡️ Risk Level: {risk_assessment.level.value if hasattr(risk_assessment.level, 'value') else 'N/A'}, Max Position: {position_multiplier_from_risk}x")
         else:
             position_multiplier_from_risk = 1.0
         
@@ -2770,19 +2916,36 @@ class AITradingBot:
         # 🏛️⚔️ Titan Core position size factor (Final)
         position_multiplier = min(position_multiplier, titan_multiplier)
         
-        # 🧠⚡ Ultra Intelligence position size factor (Ultimate)
+        # 🧠⚡ Ultra Intelligence position size factor (Ultimate) - ADAPTIVE
         position_multiplier = min(position_multiplier, ultra_multiplier)
         
-        # 🏆👑 Supreme Intelligence position size factor (Hedge Fund Level)
+        # 🏆👑 Supreme Intelligence position size factor (Hedge Fund Level) - ADAPTIVE
         position_multiplier = min(position_multiplier, supreme_multiplier)
         
-        # 🌌✨ Transcendent Intelligence position size factor (Beyond Human)
+        # 🌌✨ Transcendent Intelligence position size factor (Beyond Human) - ADAPTIVE
         position_multiplier = min(position_multiplier, transcendent_multiplier)
         
-        # 🔮 Omniscient Intelligence position size factor (All-Knowing)
+        # 🔮 Omniscient Intelligence position size factor (All-Knowing) - ADAPTIVE
         position_multiplier = min(position_multiplier, omniscient_multiplier)
         
+        # ========================================
+        # 🎛️ ADAPTIVE INTELLIGENCE SUMMARY
+        # ========================================
+        base_pass_rate = base_layer_can_trade_count / max(1, len(base_layer_results))
+        logger.info(f"")
+        logger.info(f"   🎛️ ═══════════════════════════════════════")
+        logger.info(f"   🎛️ ADAPTIVE INTELLIGENCE SUMMARY")
+        logger.info(f"   🎛️ ═══════════════════════════════════════")
+        logger.info(f"   📊 Base Layers (1-16): {base_layer_can_trade_count}/{len(base_layer_results)} passed ({base_pass_rate:.0%})")
+        logger.info(f"   🎛️ Adaptive Mode: {'FLEXIBLE' if base_pass_rate >= 0.6 else 'NORMAL' if base_pass_rate >= 0.4 else 'STRICT'}")
+        logger.info(f"   🧠 Layer 17 (Ultra): {ultra_multiplier:.2f}x")
+        logger.info(f"   🏆 Layer 18 (Supreme): {supreme_multiplier:.2f}x")
+        logger.info(f"   🌌 Layer 19 (Transcendent): {transcendent_multiplier:.2f}x")
+        logger.info(f"   🔮 Layer 20 (Omniscient): {omniscient_multiplier:.2f}x")
         logger.info(f"   📊 Final Position Multiplier: {position_multiplier:.2f}x")
+        logger.info(f"   🎛️ ═══════════════════════════════════════")
+        logger.info(f"")
+        logger.info(f"   📊 Detail Breakdown:")
         logger.info(f"      Neural: {neural_multiplier}x | Deep: {deep_multiplier:.2f}x | Quantum: {quantum_multiplier:.2f}x")
         logger.info(f"      Alpha: {alpha_multiplier:.2f}x | Omega: {omega_multiplier:.2f}x | Titan: {titan_multiplier:.2f}x")
         logger.info(f"      Ultra: {ultra_multiplier:.2f}x | Supreme: {supreme_multiplier:.2f}x | Transcendent: {transcendent_multiplier:.2f}x")
