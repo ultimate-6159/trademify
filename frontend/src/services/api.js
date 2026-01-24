@@ -318,9 +318,9 @@ class CircuitBreaker {
     this.state = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
     this.failureCount = 0;
     this.successCount = 0;
-    this.failureThreshold = 10;   // Increased from 5 (allow more failures before opening)
-    this.successThreshold = 2;    // Decreased from 3 (recover faster)
-    this.timeout = 15000;         // Decreased from 30000 (try again sooner)
+    this.failureThreshold = 10; // Increased from 5 (allow more failures before opening)
+    this.successThreshold = 2; // Decreased from 3 (recover faster)
+    this.timeout = 15000; // Decreased from 30000 (try again sooner)
     this.lastFailureTime = null;
     this.listeners = new Set();
   }
