@@ -390,56 +390,80 @@ class RiskGuardian:
         entry_price: float,
         stop_loss: Optional[float],
         atr: Optional[float] = None,
+        balance: Optional[float] = None,  # 🆕 For dynamic SL
+        symbol: Optional[str] = None,  # 🆕 For instrument-specific settings
     ) -> Tuple[float, str]:
         """
         Validate และ fix Stop Loss
+        🚀 20-Layer EXTREME: Dynamic SL based on balance for small accounts
         
         Returns:
             (validated_stop_loss, message)
         """
         side = side.upper()
         
+        # 🚀 Dynamic min/max SL based on balance
+        if balance and balance > 0:
+            # SL range: 0.5% - 2% of balance (in dollars)
+            min_sl_dollars = max(0.5, balance * 0.005)  # 0.5% of balance, min $0.5
+            max_sl_dollars = max(2.0, balance * 0.02)   # 2% of balance, min $2
+            
+            # Convert to price distance
+            if symbol and ('XAU' in symbol.upper() or 'GOLD' in symbol.upper()):
+                # Gold: price around 2000-3000
+                min_sl_distance = min_sl_dollars
+                max_sl_distance = max_sl_dollars
+            else:
+                # Forex: use percentage
+                min_sl_distance = entry_price * 0.002  # 0.2%
+                max_sl_distance = entry_price * 0.02   # 2%
+        else:
+            min_sl_distance = entry_price * 0.002
+            max_sl_distance = entry_price * 0.02
+        
         # If no SL provided, calculate from ATR or default %
         if not stop_loss or stop_loss <= 0:
             if atr and atr > 0:
                 # ATR-based SL (2x ATR)
-                sl_distance = atr * 2
+                sl_distance = atr * 2.0
+                # Clamp to balance-based limits
+                sl_distance = max(min_sl_distance, min(sl_distance, max_sl_distance))
             else:
-                # Default 2%
-                sl_distance = entry_price * 0.02
+                # Default: middle of range
+                sl_distance = (min_sl_distance + max_sl_distance) / 2
             
             if side == "BUY":
                 stop_loss = entry_price - sl_distance
             else:
                 stop_loss = entry_price + sl_distance
             
-            return stop_loss, f"Auto-calculated SL: {stop_loss:.5f} (2x ATR or 2%)"
+            return stop_loss, f"Auto-calculated SL: {stop_loss:.5f} (ATR-based, clamped to ${min_sl_distance:.2f}-${max_sl_distance:.2f})"
         
         # Validate direction
         if side == "BUY" and stop_loss >= entry_price:
-            new_sl = entry_price - (entry_price * 0.02)
+            new_sl = entry_price - min_sl_distance
             return new_sl, f"Invalid SL for BUY. Fixed: {new_sl:.5f}"
         
         if side == "SELL" and stop_loss <= entry_price:
-            new_sl = entry_price + (entry_price * 0.02)
+            new_sl = entry_price + min_sl_distance
             return new_sl, f"Invalid SL for SELL. Fixed: {new_sl:.5f}"
         
         # Validate distance
-        distance_pct = abs(entry_price - stop_loss) / entry_price * 100
+        current_sl_distance = abs(entry_price - stop_loss)
         
-        if distance_pct < self.min_stop_loss_percent:
+        if current_sl_distance < min_sl_distance:
             if side == "BUY":
-                stop_loss = entry_price * (1 - self.min_stop_loss_percent / 100)
+                stop_loss = entry_price - min_sl_distance
             else:
-                stop_loss = entry_price * (1 + self.min_stop_loss_percent / 100)
-            return stop_loss, f"SL too tight. Adjusted to {self.min_stop_loss_percent}%"
+                stop_loss = entry_price + min_sl_distance
+            return stop_loss, f"SL too tight. Adjusted to ${min_sl_distance:.2f}"
         
-        if distance_pct > self.max_stop_loss_percent:
+        if current_sl_distance > max_sl_distance:
             if side == "BUY":
-                stop_loss = entry_price * (1 - self.max_stop_loss_percent / 100)
+                stop_loss = entry_price - max_sl_distance
             else:
-                stop_loss = entry_price * (1 + self.max_stop_loss_percent / 100)
-            return stop_loss, f"SL too wide. Capped at {self.max_stop_loss_percent}%"
+                stop_loss = entry_price + max_sl_distance
+            return stop_loss, f"SL too wide. Capped at ${max_sl_distance:.2f}"
         
         return stop_loss, "SL validated OK"
     

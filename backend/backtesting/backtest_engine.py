@@ -790,8 +790,11 @@ class BacktestEngine:
                     sl_distance = atr * 2.0  # Optimal SL (PROVEN)
                     tp_distance = atr * 0.6  # Optimal TP (PROVEN)
                     
-                    min_sl = 3.0   # $3 min SL
-                    max_sl = 10.0  # $10 max SL
+                    # Dynamic SL based on balance (0.5% - 2% of balance)
+                    min_sl_pct = 0.005  # 0.5% of balance
+                    max_sl_pct = 0.02   # 2% of balance
+                    min_sl = max(0.5, self.balance * min_sl_pct)  # At least $0.5
+                    max_sl = max(2.0, self.balance * max_sl_pct)  # At least $2
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     
                     # TP = 0.6x SL (PROVEN OPTIMAL)
@@ -801,8 +804,9 @@ class BacktestEngine:
                     sl_distance = atr * 1.8
                     tp_distance = atr * 0.7
                     
-                    min_sl = 5.0
-                    max_sl = 15.0
+                    # Dynamic SL for H1
+                    min_sl = max(1.0, self.balance * 0.01)
+                    max_sl = max(5.0, self.balance * 0.03)
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     tp_distance = sl_distance * 0.7
                 

@@ -3120,12 +3120,17 @@ class AITradingBot:
         logger.info(f"      🔮 Omniscient: {omniscient_multiplier:.2f}x | 🎯 Final Factor: {final_position_factor:.2f}x")
         
         # 🔒 MANDATORY STOP LOSS - Use Risk Guardian to validate/fix
+        # 🚀 20-Layer EXTREME: Get balance for dynamic SL
+        balance_for_sl = await self.trading_engine.broker.get_balance() if self.trading_engine else 1000
+        
         if self.risk_guardian:
             stop_loss, sl_msg = self.risk_guardian.validate_stop_loss(
                 side=side.value,
                 entry_price=current_price,
                 stop_loss=stop_loss,
                 atr=risk_mgmt.get("atr"),  # ATR from analysis if available
+                balance=balance_for_sl,  # 🆕 For dynamic SL
+                symbol=symbol,  # 🆕 For instrument-specific settings
             )
             logger.info(f"   🛡️ SL Validation: {sl_msg}")
         elif not stop_loss or stop_loss <= 0:
