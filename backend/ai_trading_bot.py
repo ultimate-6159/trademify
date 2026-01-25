@@ -379,6 +379,7 @@ class AITradingBot:
         self._position_original_tp: Dict[str, float] = {}  # เก็บ TP เดิมเพื่ออ้างอิง
         
         # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
+        # 🚀 UPDATED: Optimized for 10-15 trades/day while maintaining efficiency
         self._smart_features = {
             # Break-Even: ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
             "break_even": {
@@ -387,15 +388,17 @@ class AITradingBot:
                 "offset_pct": 0.05,     # SL = entry + 0.05% (เผื่อ spread)
             },
             # Max Daily Trades: จำกัดจำนวนเทรดต่อวัน
+            # 🚀 CHANGED: 5 → 15 trades/day for high-frequency trading
             "max_daily_trades": {
                 "enabled": True,
-                "limit": 5,  # เทรดได้ไม่เกิน 5 ครั้งต่อวัน
+                "limit": int(os.getenv("MAX_DAILY_TRADES", "15")),  # เทรดได้ไม่เกิน 15 ครั้งต่อวัน
             },
             # Consecutive Loss Protection: หยุดเทรดหลังขาดทุนติดต่อกัน
+            # 🚀 CHANGED: ลด cooldown จาก 60 → 30 นาที
             "loss_protection": {
                 "enabled": True,
-                "max_consecutive_losses": 3,  # หยุดหลังขาดทุน 3 ครั้งติด
-                "cooldown_minutes": 60,       # พักเทรด 60 นาที
+                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "4")),  # หยุดหลังขาดทุน 4 ครั้งติด
+                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "30")),  # พักเทรด 30 นาที
             },
             # Time-based Exit: ปิดออเดอร์ที่ค้างนานเกินไป
             "time_exit": {
@@ -403,9 +406,10 @@ class AITradingBot:
                 "max_hours": 24,  # ปิดออเดอร์ที่ค้าง > 24 ชม.
             },
             # Correlation Protection: ไม่เปิดหลาย position ที่ correlated
+            # 🚀 CHANGED: 2 → 3 positions same direction
             "correlation_protection": {
                 "enabled": True,
-                "max_same_direction": 2,  # เปิดทิศเดียวกันได้ไม่เกิน 2 position
+                "max_same_direction": int(os.getenv("MAX_SAME_DIRECTION", "3")),  # เปิดทิศเดียวกันได้ไม่เกิน 3 position
             },
         }
         self._consecutive_losses = 0
@@ -995,12 +999,19 @@ class AITradingBot:
         logger.info(f"✓ Enhanced analyzer initialized (Min Quality: {self.min_quality.value})")
         
         # 5. 🛡️ Risk Guardian - ป้องกันการล้างพอร์ต
+        # 🚀 20-LAYER EXTREME: Load from ENV
+        max_daily_loss = float(os.getenv("MAX_DAILY_LOSS", "20.0"))
+        max_drawdown = float(os.getenv("MAX_DRAWDOWN", "30.0"))
+        max_positions = int(os.getenv("MAX_POSITIONS", "10"))
+        
         self.risk_guardian = create_risk_guardian(
             max_risk_per_trade=self.max_risk_percent,
-            max_daily_loss=5.0,    # หยุดเทรดเมื่อขาดทุน 5% ต่อวัน
-            max_drawdown=10.0,     # หยุดเทรดเมื่อ drawdown 10%
+            max_daily_loss=max_daily_loss,
+            max_drawdown=max_drawdown,
+            max_positions=max_positions,
         )
-        logger.info(f"✓ Risk Guardian initialized (Max Daily Loss: 5%, Max Drawdown: 10%)")
+        logger.info(f"✓ Risk Guardian initialized (Max Daily Loss: {max_daily_loss}%, Max Drawdown: {max_drawdown}%, Max Positions: {max_positions})")
+        logger.info(f"   🚀 20-LAYER EXTREME MODE ACTIVE!")
         
         # 6. 🏆 Pro Trading Features - สิ่งที่ Pro Trader ทำ
         self.pro_features = ProTradingFeatures(
@@ -1343,19 +1354,26 @@ class AITradingBot:
                 testnet=False
             ))
         
+        # 🚀 20-LAYER EXTREME: Load risk settings from ENV
+        max_daily_loss_rm = float(os.getenv("MAX_DAILY_LOSS", "20.0"))
+        max_positions_rm = int(os.getenv("MAX_POSITIONS", "10"))
+        max_drawdown_rm = float(os.getenv("MAX_DRAWDOWN", "30.0"))
+        min_confidence_rm = float(os.getenv("MIN_CONFIDENCE", "55.0"))
+        
         risk_manager = RiskManager(
             max_risk_per_trade=self.max_risk_percent,
-            max_daily_loss=5.0,
-            max_positions=5,
-            min_confidence=self._min_confidence,  # Use quality-based threshold
-            max_drawdown=10.0
+            max_daily_loss=max_daily_loss_rm,
+            max_positions=max_positions_rm,
+            min_confidence=min_confidence_rm,  # Use ENV value
+            max_drawdown=max_drawdown_rm
         )
-        logger.info(f"✓ Risk manager: min_confidence={self._min_confidence}% (based on {self.min_quality.value} quality)")
+        logger.info(f"✓ Risk manager: min_confidence={min_confidence_rm}%, max_daily_loss={max_daily_loss_rm}%, max_positions={max_positions_rm}")
+        logger.info(f"   🚀 20-LAYER EXTREME MODE!")
         
         self.trading_engine = TradingEngine(
             broker=broker,
             risk_manager=risk_manager,
-            max_positions=5,
+            max_positions=max_positions_rm,
             enabled=True
         )
         
@@ -3010,9 +3028,10 @@ class AITradingBot:
         logger.info("")
         
         # 🎯 FINAL DECISION THRESHOLD
-        # - If >= 40% layers pass → TRADE (with adjusted position size)
-        # - If < 40% layers pass → SKIP
-        MIN_PASS_RATE = 0.40
+        # 🚀 20-LAYER EXTREME CONFIG FOR MAXIMUM PROFIT
+        # - If >= 30% layers pass → TRADE (very relaxed)
+        # - If < 30% layers pass → SKIP
+        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.30"))  # 30% default for EXTREME
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -3024,13 +3043,13 @@ class AITradingBot:
         
         # ═══════════════════════════════════════════════════════════════
         # 🎯 ENHANCED FILTER #1: HIGH QUALITY PASSES
-        # ต้องมี 2+ layers ที่ score >= 70 ถึงจะเทรด (ผ่อนคลายจาก 3)
+        # 🚀 EXTREME: ต้องมี 1+ layers ที่ score >= 70 ถึงจะเทรด
         # ═══════════════════════════════════════════════════════════════
         high_quality_passes = sum(1 for r in base_layer_results if r.get('can_trade') and r.get('score', 0) >= 70)
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = 2 if is_gold else 2  # ผ่อนคลายลง
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "1"))  # 1 for EXTREME
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -3043,13 +3062,13 @@ class AITradingBot:
         # ═══════════════════════════════════════════════════════════════
         # 🎯 ENHANCED FILTER #2: KEY LAYER AGREEMENT
         # Layer 5 (Advanced), 6 (SmartBrain), 7 (Neural), 9 (Quantum), 10 (Alpha)
-        # ต้อง agree >= 40% (ผ่อนคลายจาก 60%)
+        # 🚀 EXTREME: ต้อง agree >= 20% (very relaxed)
         # ═══════════════════════════════════════════════════════════════
         KEY_LAYER_NUMS = [5, 6, 7, 9, 10]
         key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
         key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = 0.40  # ผ่อนคลายจาก 0.60
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.20"))  # 20% for EXTREME
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")

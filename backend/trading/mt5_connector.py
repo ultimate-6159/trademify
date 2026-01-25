@@ -15,6 +15,7 @@ MetaTrader 5 Connector
 import asyncio
 import logging
 import math
+import os
 import time
 import threading
 from datetime import datetime
@@ -578,7 +579,7 @@ class MT5Broker(BaseBroker):
                         "price": price,
                         "sl": sl,
                         "tp": tp,
-                        "deviation": 20,
+                        "deviation": int(os.getenv("MT5_DEVIATION", "50")),  # 🚀 CHANGED: 20 → 50 for faster execution
                         "magic": 234000,
                         "comment": "Trademify Auto",
                         "type_time": self._mt5.ORDER_TIME_GTC,

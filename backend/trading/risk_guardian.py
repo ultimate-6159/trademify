@@ -491,15 +491,19 @@ def get_risk_guardian() -> RiskGuardian:
 
 
 def create_risk_guardian(
-    max_risk_per_trade: float = 2.0,
-    max_daily_loss: float = 5.0,
-    max_drawdown: float = 10.0,
+    max_risk_per_trade: float = 3.0,
+    max_daily_loss: float = 20.0,
+    max_drawdown: float = 30.0,
+    max_positions: int = 10,
 ) -> RiskGuardian:
-    """Create new Risk Guardian with custom settings"""
+    """Create new Risk Guardian with custom settings
+    🚀 20-LAYER EXTREME: Default values updated for maximum profit
+    """
     global _risk_guardian
     _risk_guardian = RiskGuardian(
         max_risk_per_trade=max_risk_per_trade,
         max_daily_loss=max_daily_loss,
         max_drawdown=max_drawdown,
+        max_positions=max_positions,
     )
     return _risk_guardian

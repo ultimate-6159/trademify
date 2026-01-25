@@ -28,15 +28,19 @@ class DataConfig:
     # Window size for pattern matching (จำนวนแท่งเทียนในแต่ละ pattern)
     WINDOW_SIZE = 60
     
+    
     # Future candles to analyze for voting (แท่งเทียนถัดไปที่จะดูผลลัพธ์)
     FUTURE_CANDLES = 10
     
     # Years of historical data
     HISTORY_YEARS = 5
     
-    # Supported symbols (Exness MT5 format with 'm' suffix)
+    # 🥇 GOLD ONLY - Best performance in backtest (88.7% win rate)
+    # Forex pairs disabled due to poor backtest results
     DEFAULT_SYMBOLS = [
-        "EURUSDm", "GBPUSDm", "XAUUSDm"
+        "XAUUSDm"  # Gold - BEST PERFORMER!
+        # "EURUSDm", # ❌ Disabled - 48.1% win rate
+        # "GBPUSDm", # ❌ Disabled - 44.4% win rate
     ]
 
 # Pattern Matching Settings

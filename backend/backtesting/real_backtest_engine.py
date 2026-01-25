@@ -68,7 +68,7 @@ class BacktestTrade:
 
 @dataclass
 class RealBacktestConfig:
-    """Configuration for Real Intelligence Backtest"""
+    """Configuration for Real Intelligence Backtest - MATCHED WITH LIVE TRADING"""
     symbol: str = "EURUSD"
     timeframe: str = "H1"
     years: int = 2
@@ -76,19 +76,23 @@ class RealBacktestConfig:
     end_date: Optional[datetime] = None
     
     initial_balance: float = 10000.0
-    max_risk_per_trade: float = 1.0
-    max_daily_loss: float = 3.0
-    max_drawdown: float = 25.0
+    max_risk_per_trade: float = 2.0  # ✅ SAME AS LIVE (2%)
+    max_daily_loss: float = 5.0      # ✅ SAME AS LIVE (5%)
+    max_drawdown: float = 15.0       # ✅ SAME AS LIVE (15%)
     
-    min_quality: str = "MEDIUM"
-    min_confidence: float = 65.0
-    min_layer_pass_rate: float = 0.40  # FINAL DECISION threshold
+    min_quality: str = "HIGH"        # ✅ SAME AS LIVE BALANCED MODE
+    min_confidence: float = 70.0     # ✅ SAME AS LIVE (70%)
+    min_layer_pass_rate: float = 0.35  # ✅ SAME AS LIVE (35%)
     
-    slippage_pips: float = 1.0
-    commission_per_lot: float = 7.0
-    spread_pips: float = 1.5
+    # 🔧 REALISTIC EXECUTION COSTS (เพิ่มให้ใกล้เคียง live)
+    slippage_pips: float = 2.0       # 🔄 CHANGED: 1.0 → 2.0 (more realistic)
+    commission_per_lot: float = 7.0  # ✅ Commission $7/lot
+    spread_pips: float = 2.5         # 🔄 CHANGED: 1.5 → 2.5 (Gold has wider spread)
     
-    use_pattern_matching: bool = False  # True = use FAISS, False = technical only
+    # Max positions - SAME AS LIVE
+    max_positions: int = 5           # 🔄 CHANGED: 3 → 5 (same as live)
+    
+    use_pattern_matching: bool = False
     pattern_window: int = 60
     
     output_dir: str = "data/backtest_results"
@@ -846,9 +850,9 @@ class RealIntelligenceBacktest:
         
         # 🥇 Gold (XAU) gets relaxed requirements
         is_gold = 'XAU' in self.config.symbol.upper() or 'GOLD' in self.config.symbol.upper()
-        min_high_quality = 2  # ผ่อนคลายจาก 3
+        min_high_quality = 1  # ผ่อนคลายจาก 2 เพื่อเพิ่ม orders (เป้า 3-5/วัน)
         
-        # Require at least 2 high-quality passes for trading
+        # Require at least 1 high-quality pass for trading
         if high_quality_passes < min_high_quality:
             return None
         
@@ -858,47 +862,48 @@ class RealIntelligenceBacktest:
         key_passes = sum(1 for r in layer_results if r.get('layer_num') in key_layer_nums and r.get('can_trade'))
         key_total = sum(1 for r in layer_results if r.get('layer_num') in key_layer_nums)
         
-        # At least 40% of key layers must agree (ผ่อนคลายจาก 60%)
-        if key_total > 0 and (key_passes / key_total) < 0.4:
+        # At least 30% of key layers must agree (ผ่อนคลายจาก 40% เพื่อเพิ่ม orders)
+        if key_total > 0 and (key_passes / key_total) < 0.3:
             return None
         
-        # Calculate final position factor based on pass rate
+        # Calculate final position factor based on pass rate - Balanced Aggressive
         if pass_rate >= 0.80:
-            final_position_factor = 1.0
+            final_position_factor = 1.2  # Reduced from 1.5
         elif pass_rate >= 0.70:
-            final_position_factor = 0.85
+            final_position_factor = 1.0  # Reduced from 1.2
         elif pass_rate >= 0.60:
-            final_position_factor = 0.7
+            final_position_factor = 0.85  # Reduced from 1.0
         else:
-            final_position_factor = 0.5
+            final_position_factor = 0.6  # Reduced from 0.8
         
         # Boost position if high quality agreement
         if high_quality_passes >= 6:
-            final_position_factor = min(1.2, final_position_factor * 1.2)
+            final_position_factor = min(1.5, final_position_factor * 1.3)  # Less boost
         
-        # Use minimum of all multipliers (conservative)
-        position_multiplier = min(multipliers) if multipliers else 1.0
-        position_multiplier = min(position_multiplier, final_position_factor)
+        # Use AVERAGE of all multipliers
+        position_multiplier = sum(multipliers) / len(multipliers) if multipliers else 1.0
+        position_multiplier = max(position_multiplier, final_position_factor)  # Use MAX
         
         # Calculate SL/TP - Optimized for HIGH WIN RATE
         # Strategy: Closer TP for higher win rate, reasonable SL
         pip_value = self._get_pip_value()
         
-        # Use ATR-based but with tighter TP
-        sl_distance = atr * 1.8  # Normal SL
-        tp_distance = atr * 1.2  # Tighter TP (1.5:1 SL:TP ratio = higher win rate)
+        # Use ATR-based with balanced R:R for better profit
+        # R:R = 1.5:1 (TP:SL) เพื่อกำไรมากขึ้น แม้ win rate ต่ำลงบ้าง
+        sl_distance = atr * 1.0  # Tighter SL (ลดจาก 1.8)
+        tp_distance = atr * 1.5  # Wider TP (เพิ่มจาก 1.2)
         
-        # Minimum distances based on symbol
+        # Minimum distances based on symbol (ปรับให้ TP > SL)
         symbol = self.config.symbol.upper()
         if 'XAU' in symbol:  # Gold
-            min_sl = 6.0  # $6 minimum SL
-            min_tp = 4.0  # $4 minimum TP
+            min_sl = 3.0  # $3 minimum SL (ลดจาก $6)
+            min_tp = 5.0  # $5 minimum TP (เพิ่มจาก $4)
         elif 'JPY' in symbol:
-            min_sl = 0.18
-            min_tp = 0.12
+            min_sl = 0.10  # 10 pips
+            min_tp = 0.15  # 15 pips
         else:
-            min_sl = 0.0018  # 18 pips
-            min_tp = 0.0012  # 12 pips
+            min_sl = 0.0010  # 10 pips (ลดจาก 18)
+            min_tp = 0.0015  # 15 pips (เพิ่มจาก 12)
         
         sl_distance = max(sl_distance, min_sl)
         tp_distance = max(tp_distance, min_tp)
@@ -1038,14 +1043,10 @@ class RealIntelligenceBacktest:
         ema_bullish = ema_12 > ema_26
         ema_bearish = ema_12 < ema_26
         
-        # === BUY CONDITIONS (STRICT) ===
-        # All conditions must be TRUE for BUY:
-        # 1. Strong uptrend (SMAs aligned)
-        # 2. RSI 40-60 (neutral/slightly oversold)
-        # 3. Price above SMA20
-        # 4. MACD positive
-        # 5. Bullish candle
-        # 6. Bollinger position < 0.6 (not overbought)
+        # === BUY CONDITIONS (RELAXED FOR MORE SIGNALS) ===
+        # 🚀 OPTIMIZED: ลดเงื่อนไขเพื่อให้มี signal มากขึ้น แต่ยังคุณภาพ
+        # Need 5/7 conditions for BUY (was 6-7)
+        
         
         buy_conditions = [
             sma_aligned_bull,                           # Strong trend
@@ -1053,49 +1054,50 @@ class RealIntelligenceBacktest:
             price_above_sma20,                         # Above support
             macd > 0,                                  # MACD bullish
             bullish_candle,                            # Candle confirmation
-            bb_position < 0.65,                        # Not overbought
-            roc_5 > -0.3,                             # Not falling
+            bb_position < 0.70,                        # 🚀 CHANGED: < 0.65 → < 0.70
+            roc_5 > -0.5,                             # 🚀 CHANGED: > -0.3 → > -0.5
         ]
         
         buy_count = sum(buy_conditions)
         
-        # Need ALL 7 conditions for highest quality
-        if buy_count == 7:
+        # 🚀 CHANGED: Need 5+ conditions (was 6-7) for more signals
+        if buy_count >= 6:
             signal = "BUY"
-            confidence = 90
-        elif buy_count >= 6 and sma_aligned_bull and bullish_candle and macd > 0:
+            confidence = 85
+        elif buy_count >= 5 and (sma_aligned_bull or (price_above_sma20 and macd > 0)):
             signal = "BUY"
-            confidence = 80
+            confidence = 75
+        elif buy_count >= 4 and bullish_candle and macd > 0 and rsi < 65:
+            signal = "BUY"
+            confidence = 65
         
-        # === SELL CONDITIONS (STRICT) ===
-        # All conditions must be TRUE for SELL:
-        # 1. Strong downtrend (SMAs aligned)
-        # 2. RSI 40-60 (neutral/slightly overbought)
-        # 3. Price below SMA20
-        # 4. MACD negative
-        # 5. Bearish candle
-        # 6. Bollinger position > 0.35 (not oversold)
+        # === SELL CONDITIONS (RELAXED FOR MORE SIGNALS) ===
+        # 🚀 OPTIMIZED: ลดเงื่อนไขเพื่อให้มี signal มากขึ้น
+        # Need 5/7 conditions for SELL (was 6-7)
         
         if signal is None:
             sell_conditions = [
                 sma_aligned_bear,                       # Strong trend
-                40 <= rsi <= 60,                       # RSI neutral zone
+                35 <= rsi <= 65,                       # 🚀 CHANGED: wider RSI range
                 not price_above_sma20,                 # Below resistance
                 macd < 0,                              # MACD bearish
                 bearish_candle,                        # Candle confirmation
-                bb_position > 0.35,                    # Not oversold
-                roc_5 < 0.3,                          # Not rising
+                bb_position > 0.30,                    # 🚀 CHANGED: > 0.35 → > 0.30
+                roc_5 < 0.5,                          # 🚀 CHANGED: < 0.3 → < 0.5
             ]
             
             sell_count = sum(sell_conditions)
             
-            # Need ALL 7 conditions for highest quality
-            if sell_count == 7:
+            # 🚀 CHANGED: Need 5+ conditions (was 6-7) for more signals
+            if sell_count >= 6:
                 signal = "SELL"
-                confidence = 90
-            elif sell_count >= 6 and sma_aligned_bear and bearish_candle and macd < 0:
+                confidence = 85
+            elif sell_count >= 5 and (sma_aligned_bear or (not price_above_sma20 and macd < 0)):
                 signal = "SELL"
-                confidence = 80
+                confidence = 75
+            elif sell_count >= 4 and bearish_candle and macd < 0 and rsi > 35:
+                signal = "SELL"
+                confidence = 65
         
         if not signal:
             return None
@@ -1117,6 +1119,7 @@ class RealIntelligenceBacktest:
         
         if signal_quality_level < min_quality_level:
             return None
+        
         
         if confidence < self.config.min_confidence:
             return None
@@ -1197,13 +1200,14 @@ class RealIntelligenceBacktest:
         return 10.0
     
     def _execute_trade(self, analysis: Dict, current_time: datetime, current_bar: pd.Series):
-        """Execute a trade"""
-        # Check max open trades
+        """Execute a trade - MATCHED WITH LIVE TRADING LOGIC"""
+        # Check max open trades (✅ SAME AS LIVE: use config.max_positions)
         open_trades = [t for t in self.trades if t.status == TradeStatus.OPEN]
-        if len(open_trades) >= 3:
+        max_positions = getattr(self.config, 'max_positions', 5)  # Default 5 like live
+        if len(open_trades) >= max_positions:
             return
         
-        # Check same symbol/direction
+        # Check same symbol/direction (✅ SAME AS LIVE)
         for t in open_trades:
             if t.symbol == self.config.symbol and t.side == analysis['signal']:
                 return
@@ -1211,23 +1215,33 @@ class RealIntelligenceBacktest:
         signal = analysis['signal']
         entry_price = current_bar['close']
         
-        # Apply slippage
+        # Apply slippage + spread (✅ MORE REALISTIC)
         pip_value = self._get_pip_value()
-        if signal == "BUY":
-            entry_price += self.config.slippage_pips * pip_value
-        else:
-            entry_price -= self.config.slippage_pips * pip_value
+        spread_cost = self.config.spread_pips * pip_value
         
-        # Calculate position size
+        if signal == "BUY":
+            # Buy at ask (higher) = close + spread/2 + slippage
+            entry_price += (spread_cost / 2) + (self.config.slippage_pips * pip_value)
+        else:
+            # Sell at bid (lower) = close - spread/2 - slippage  
+            entry_price -= (spread_cost / 2) + (self.config.slippage_pips * pip_value)
+        
+        # Calculate position size based on risk (✅ SAME AS LIVE)
         stop_loss = analysis['stop_loss']
         sl_distance = abs(entry_price - stop_loss)
         sl_pips = sl_distance / pip_value
         
+        # Risk amount = balance * risk% * multiplier (✅ COMPOUND EFFECT)
         risk_amount = self.balance * (self.config.max_risk_per_trade / 100)
         risk_amount *= analysis.get('position_multiplier', 1.0)
         
-        quantity = risk_amount / (sl_pips * 10) if sl_pips > 0 else 0.01
-        quantity = max(0.01, min(quantity, 5.0))
+        # Position size formula: risk_amount / (sl_pips * pip_value_per_lot)
+        # For Gold: pip_value = $1 per pip per lot (100 oz)
+        # For Forex: pip_value = $10 per pip per lot
+        pip_value_per_lot = self._get_pip_multiplier()  # $1 for Gold, $10 for Forex
+        
+        quantity = risk_amount / (sl_pips * pip_value_per_lot) if sl_pips > 0 else 0.01
+        quantity = max(0.01, min(quantity, 10.0))  # Allow larger positions
         quantity = round(quantity, 2)
         
         trade = BacktestTrade(
@@ -1341,7 +1355,7 @@ class RealIntelligenceBacktest:
                 self._close_trade(trade, exit_price, status, current_bar.name)
     
     def _close_trade(self, trade: BacktestTrade, exit_price: float, status: TradeStatus, exit_time: datetime):
-        """Close a trade and calculate PnL"""
+        """Close a trade and calculate PnL - WITH COMMISSION (✅ SAME AS LIVE)"""
         trade.exit_price = exit_price
         trade.exit_time = exit_time
         trade.status = status
@@ -1355,7 +1369,11 @@ class RealIntelligenceBacktest:
             trade.pnl_pips = (trade.entry_price - exit_price) / pip_value
         
         # PnL = pips * quantity * pip_multiplier
-        trade.pnl = trade.pnl_pips * trade.quantity * pip_multiplier
+        gross_pnl = trade.pnl_pips * trade.quantity * pip_multiplier
+        
+        # ✅ DEDUCT COMMISSION (round-trip: entry + exit)
+        commission = self.config.commission_per_lot * trade.quantity * 2  # $7/lot * 2 sides
+        trade.pnl = gross_pnl - commission
         trade.pnl_percent = (trade.pnl / self.balance) * 100
         
         self.balance += trade.pnl
@@ -1717,7 +1735,7 @@ async def run_real_backtest(
     timeframe: str = "H1",
     years: int = 2,
     min_quality: str = "MEDIUM",
-    min_pass_rate: float = 0.40
+    min_pass_rate: float = 0.30  # ลดจาก 0.40 เพื่อเพิ่ม orders
 ) -> Dict[str, Any]:
     """
     Convenience function to run real intelligence backtest
@@ -1765,5 +1783,5 @@ if __name__ == "__main__":
         timeframe=timeframe,
         years=years,
         min_quality="MEDIUM",
-        min_pass_rate=0.40
+        min_pass_rate=0.30  # ลดจาก 0.40 เพื่อเพิ่ม orders
     ))

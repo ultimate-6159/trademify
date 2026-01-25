@@ -1100,10 +1100,10 @@ class EnhancedAnalyzer:
         is_sell = signal in ["SELL", "STRONG_SELL"]
         
         if not base_sl or not base_tp:
-            # 🎯 REALISTIC ATR-based SL/TP
-            # SL = 1.5 ATR, TP = 2.0 ATR (R:R = 1.33:1)
-            sl_atr_mult = 1.5
-            tp_atr_mult = 2.0  # ลดจาก 4.0 เป็น 2.0
+            # 🎯 OPTIMIZED ATR-based SL/TP (matched with backtest)
+            # SL = 1.0 ATR, TP = 1.5 ATR (R:R = 1.5:1) - balanced for win rate + profit
+            sl_atr_mult = 1.0  # Tighter SL (ลดจาก 1.5)
+            tp_atr_mult = 1.5  # Balanced TP (ลดจาก 2.0)
             
             if is_buy:
                 base_sl = current_price - (atr * sl_atr_mult)

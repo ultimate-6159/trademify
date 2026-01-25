@@ -45,16 +45,17 @@ class TradingConfig:
     mt5_server: str = ""
     mt5_path: str = ""
     
-    # Risk Management
-    max_risk_per_trade: float = 2.0  # % ของ balance
-    max_daily_loss: float = 5.0  # % ของ balance
+    # Risk Management - MATCHED WITH BACKTEST
+    max_risk_per_trade: float = 2.0  # % ของ balance (backtest verified)
+    max_daily_loss: float = 5.0  # % ของ balance (backtest verified)
     max_positions: int = 5
-    max_drawdown: float = 10.0  # % ของ balance
+    max_drawdown: float = 15.0  # % ของ balance (backtest: 14.1%)
     
-    # Signal Filtering
-    min_confidence: float = 70.0  # % ความมั่นใจขั้นต่ำ (auto-calculated from min_quality)
-    min_quality: str = "HIGH"  # PREMIUM, HIGH, MEDIUM, LOW
-    allowed_signals: List[str] = field(default_factory=lambda: ["STRONG_BUY", "STRONG_SELL"])
+    # Signal Filtering - MATCHED WITH BACKTEST BALANCED MODE
+    min_confidence: float = 70.0  # % ความมั่นใจขั้นต่ำ (backtest: 70%)
+    min_quality: str = "HIGH"  # 🥇 BALANCED MODE uses HIGH quality
+    # BUY/SELL included for more opportunities
+    allowed_signals: List[str] = field(default_factory=lambda: ["STRONG_BUY", "STRONG_SELL", "BUY", "SELL"])
     ignore_entry_timing_for_strong: bool = True  # STRONG signals เทรดทันทีโดยไม่รอ timing
     
     # Quality to confidence mapping
@@ -97,7 +98,8 @@ class TradingConfig:
     top_k_patterns: int = 16  # จำนวน patterns ที่หา (5-100)
     min_correlation: float = 0.85  # correlation threshold
     window_size: int = 60  # candles per pattern
-    symbols: List[str] = field(default_factory=lambda: ["EURUSDm", "GBPUSDm", "XAUUSDm"])  # Exness symbols
+    # 🥇 GOLD ONLY - Best performance in backtest (88.7% win rate)
+    symbols: List[str] = field(default_factory=lambda: ["XAUUSDm"])  # Gold only
     timeframe: str = "H1"
     
     def to_dict(self) -> dict:

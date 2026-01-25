@@ -2,14 +2,14 @@
   "enabled": true,
   "broker_type": "MT5",
   "risk": {
-    "max_risk_per_trade": 2.0,
-    "max_daily_loss": 5.0,
-    "max_positions": 3,
-    "max_drawdown": 10.0
+    "max_risk_per_trade": 3.0,
+    "max_daily_loss": 20.0,
+    "max_positions": 10,
+    "max_drawdown": 30.0
   },
   "signals": {
-    "min_confidence": 65.0,
-    "min_quality": "MEDIUM",
+    "min_confidence": 55.0,
+    "min_quality": "LOW",
     "allowed_signals": [
       "STRONG_BUY",
       "BUY",
@@ -18,18 +18,18 @@
     ]
   },
   "position": {
-    "default_stop_loss_percent": 1.5,
-    "default_take_profit_percent": 3.0,
-    "max_holding_hours": 48
+    "default_stop_loss_percent": 2.0,
+    "default_take_profit_percent": 1.2,
+    "max_holding_hours": 24
   },
   "trailing_stop": {
     "enabled": true,
-    "percent": 1.0,
-    "activation": 1.5
+    "percent": 0.30,
+    "activation": 0.15
   },
   "break_even": {
     "enabled": true,
-    "at_percent": 1.0
+    "at_percent": 0.5
   },
   "trading_hours": {
     "enabled": false,
@@ -42,13 +42,18 @@
   },
   "pattern": {
     "top_k": 20,
-    "min_correlation": 0.85,
+    "min_correlation": 0.80,
     "window_size": 60
   },
   "trading_symbols": [
-    "EURUSDm",
-    "GBPUSDm",
     "XAUUSDm"
   ],
-  "timeframe": "H1"
+  "timeframe": "M15",
+  
+  "_comment_20_layer_extreme": "🚀 20-LAYER EXTREME CONFIG - MAX PROFIT!",
+  "layer_filters": {
+    "min_pass_rate": 0.30,
+    "min_high_quality": 1,
+    "min_key_agreement": 0.20
+  }
 }
