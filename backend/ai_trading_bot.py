@@ -3578,14 +3578,16 @@ class AITradingBot:
         
         # Calculate position size
         if self.risk_guardian:
-            open_positions = list(self.trading_engine.positions.values()) if self.trading_engine else []
-            lot_size = self.risk_guardian.calculate_position_size(
-                symbol=symbol,
+            lot_size, calc_details = self.risk_guardian.calculate_position_size(
+                balance=balance,
                 entry_price=current_price,
                 stop_loss=stop_loss,
-                balance=balance,
-                risk_multiplier=position_multiplier
+                risk_multiplier=position_multiplier,
+                symbol=symbol,
             )
+            if lot_size <= 0:
+                logger.error(f"❌ Position size rejected: {calc_details.get('error', 'Unknown')}")
+                return {"action": "SKIP", "reason": calc_details.get('error', 'Position size rejected')}
         else:
             lot_size = 0.01
         
