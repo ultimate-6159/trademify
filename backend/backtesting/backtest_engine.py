@@ -791,10 +791,22 @@ class BacktestEngine:
                     tp_distance = atr * 0.6  # Optimal TP (PROVEN)
                     
                     # Dynamic SL based on balance (0.5% - 2% of balance)
+                    # BUT capped for large accounts to maintain scalping edge
                     min_sl_pct = 0.005  # 0.5% of balance
                     max_sl_pct = 0.02   # 2% of balance
-                    min_sl = max(0.5, self.balance * min_sl_pct)  # At least $0.5
-                    max_sl = max(2.0, self.balance * max_sl_pct)  # At least $2
+                    
+                    # Calculate raw SL from balance
+                    raw_min_sl = self.balance * min_sl_pct
+                    raw_max_sl = self.balance * max_sl_pct
+                    
+                    # CAP SL for large accounts (max $50 SL for scalping)
+                    # This keeps the scalping edge regardless of account size
+                    ABSOLUTE_MIN_SL = 0.5   # $0.5 minimum
+                    ABSOLUTE_MAX_SL = 50.0  # $50 maximum (scalping cap)
+                    
+                    min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))  # Cap at $15
+                    max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))  # Cap at $50
+                    
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     
                     # TP = 0.6x SL (PROVEN OPTIMAL)
@@ -804,9 +816,16 @@ class BacktestEngine:
                     sl_distance = atr * 1.8
                     tp_distance = atr * 0.7
                     
-                    # Dynamic SL for H1
-                    min_sl = max(1.0, self.balance * 0.01)
-                    max_sl = max(5.0, self.balance * 0.03)
+                    # Dynamic SL for H1 (also capped)
+                    raw_min_sl = self.balance * 0.01
+                    raw_max_sl = self.balance * 0.03
+                    
+                    ABSOLUTE_MIN_SL_H1 = 1.0
+                    ABSOLUTE_MAX_SL_H1 = 100.0  # $100 max for H1
+                    
+                    min_sl = max(ABSOLUTE_MIN_SL_H1, min(raw_min_sl, ABSOLUTE_MAX_SL_H1 * 0.2))
+                    max_sl = max(5.0, min(raw_max_sl, ABSOLUTE_MAX_SL_H1))
+                    
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     tp_distance = sl_distance * 0.7
                 
