@@ -103,10 +103,10 @@ _bot_status = {
     "started_at": None
 }
 
-# ?? DUPLICATE TRADE PREVENTION
+# 🔓 DUPLICATE TRADE PREVENTION - RELAXED FOR MORE TRADES
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 60  # ?? CHANGED: 1 minute cooldown (was 5 minutes)
+_trade_cooldown_seconds = 30  # 🔥 CHANGED: 30 seconds cooldown (was 60) - allows more trades
 
 
 # =====================
@@ -223,16 +223,23 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             _bot_status["error"] = str(e)
             await asyncio.sleep(5)  # Brief pause on error
     
+    
     logger.info("?? Unified bot loop stopped")
 
 
 def _extract_layer_status(symbol: str) -> Dict:
-    """Extract 20-layer status from bot"""
-    global _bot
+    """Extract 20-layer status from bot - now includes results from _run_20_layer_analysis"""
+    global _bot, _bot_status
     
     if not _bot:
-        return {}
+        return {"layers": [], "passed": 0, "total": 20, "pass_rate": 0}
     
+    # 🔥 First, check if analysis has layer_results (from TECHNICAL mode with 20-layer)
+    analysis = _bot_status.get("last_analysis", {}).get(symbol, {})
+    if "layer_results" in analysis:
+        return analysis["layer_results"]
+    
+    # Fallback: Build layer status from bot attributes
     layers = []
     passed = 0
     total = 20
@@ -284,19 +291,15 @@ def _extract_layer_status(symbol: str) -> Dict:
     
     # Layer 17-20: Adaptive layers
     adaptive_configs = [
-        ("_last_ultra_decision", "Ultra Intelligence", 17),
-        ("_last_supreme_decision", "Supreme Intelligence", 18),
-        ("_last_transcendent_decision", "Transcendent", 19),
-        ("_last_omniscient_decision", "Omniscient", 20),
+        ("_last_ultra_decision_by_symbol", "Ultra Intelligence", 17),
+        ("_last_supreme_decision_by_symbol", "Supreme Intelligence", 18),
+        ("_last_transcendent_decision_by_symbol", "Transcendent", 19),
+        ("_last_omniscient_decision_by_symbol", "Omniscient", 20),
     ]
     
     for attr, name, num in adaptive_configs:
         if hasattr(_bot, attr):
-            by_symbol_attr = f"{attr}_by_symbol"
-            if hasattr(_bot, by_symbol_attr):
-                result = getattr(_bot, by_symbol_attr, {}).get(symbol, {})
-            else:
-                result = getattr(_bot, attr, {})
+            result = getattr(_bot, attr, {}).get(symbol, {})
             score = result.get("confidence", 0) if result else 0
             can_trade = result.get("can_trade", True) if result else True
             status = "PASS" if can_trade and score > 50 else "FAIL" if not can_trade else "N/A"
