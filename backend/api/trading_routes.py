@@ -570,16 +570,62 @@ async def get_trade_history(limit: int = 50):
 @router.get("/account")
 async def get_account_info():
     """ดึงข้อมูลบัญชี"""
-    if not trading_engine:
-        raise HTTPException(status_code=400, detail="Trading system not initialized")
+    # Try to get account info even if trading_engine is not initialized
+    account = None
+    balance = 0
     
-    account = await trading_engine.broker.get_account_info()
-    balance = await trading_engine.broker.get_balance()
+    if trading_engine and trading_engine.broker:
+        try:
+            account = await trading_engine.broker.get_account_info()
+            balance = await trading_engine.broker.get_balance()
+        except Exception as e:
+            logger.warning(f"Failed to get account from trading_engine: {e}")
+    
+    # Fallback: Try direct MT5 connection
+    if not account:
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                info = mt5.account_info()
+                if info:
+                    account = {
+                        "login": info.login,
+                        "balance": info.balance,
+                        "equity": info.equity,
+                        "margin": info.margin,
+                        "free_margin": info.margin_free,
+                        "leverage": info.leverage,
+                        "profit": info.profit,
+                        "currency": info.currency,
+                    }
+                    balance = info.balance
+        except Exception as e:
+            logger.warning(f"Failed to get account from MT5: {e}")
+    
+    if not account:
+        # Return empty/default response instead of 400 error
+        return {
+            "account": {
+                "login": 0,
+                "balance": 0,
+                "equity": 0,
+                "margin": 0,
+                "free_margin": 0,
+                "leverage": 0,
+                "profit": 0,
+                "currency": "USD",
+            },
+            "balance": 0,
+            "broker_type": trading_config.broker_type.value if trading_config else "MT5",
+            "status": "not_connected",
+            "message": "Trading system not initialized or MT5 not connected"
+        }
     
     return {
         "account": account,
         "balance": balance,
         "broker_type": trading_config.broker_type.value,
+        "status": "connected"
     }
 
 

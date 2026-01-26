@@ -2186,6 +2186,18 @@ async def stop_auto_bot(
     return {"status": "stopped", "auto_start_disabled": disable_auto_start}
 
 
+@app.get("/api/v1/bot/pipeline/{symbol}")
+async def get_bot_pipeline_status(symbol: str):
+    """
+    🔄 Get 20-Layer pipeline status for a specific symbol
+    
+    This endpoint is used by LayerStatusPanel to display layer status
+    Alias for /api/v1/intelligence/pipeline with symbol as path parameter
+    """
+    # Reuse the intelligence pipeline endpoint logic
+    return await get_pipeline_data(symbol=symbol)
+
+
 @app.get("/api/v1/bot/status")
 async def get_bot_status():
     """📊 Get auto trading bot status"""
