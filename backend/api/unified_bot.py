@@ -80,7 +80,7 @@ _bot_status = {
 # ?? DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 300  # 5 minutes cooldown after each trade
+_trade_cooldown_seconds = 60  # ?? CHANGED: 1 minute cooldown (was 5 minutes)
 
 
 # =====================
@@ -291,13 +291,15 @@ def _extract_layer_status(symbol: str) -> Dict:
 
 
 def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
-    """Generate unique signal ID to prevent duplicate trades"""
-    import hashlib
-    # Signal ID based on: symbol + signal direction + confidence band + hour
-    confidence_band = int(confidence // 10) * 10  # Round to 10s (70, 80, 90, etc.)
-    hour = datetime.now().strftime("%Y%m%d%H")  # Change every hour
-    raw = f"{symbol}_{signal}_{confidence_band}_{hour}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
+"""Generate unique signal ID to prevent duplicate trades"""
+import hashlib
+# Signal ID based on: symbol + signal direction + confidence band + 15-min window
+confidence_band = int(confidence // 10) * 10  # Round to 10s (70, 80, 90, etc.)
+# ?? CHANGED: Use 15-minute windows instead of 1 hour
+now = datetime.now()
+time_window = f"{now.strftime('%Y%m%d%H')}{now.minute // 15}"  # Changes every 15 mins
+raw = f"{symbol}_{signal}_{confidence_band}_{time_window}"
+return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
 async def _check_open_positions(symbol: str) -> bool:
@@ -486,6 +488,17 @@ async def get_unified_status():
         "layers": _bot_status["layer_status"],
         "daily_stats": _bot_status["daily_stats"],
         "account": account,
+        "trade_protection": {
+            "cooldown_seconds": _trade_cooldown_seconds,
+            "last_trades": {
+                symbol: {
+                    "signal_id": data.get("signal_id"),
+                    "elapsed": int((datetime.now() - data.get("timestamp")).total_seconds()) if data.get("timestamp") else 0,
+                    "can_trade": (datetime.now() - data.get("timestamp")).total_seconds() >= _trade_cooldown_seconds if data.get("timestamp") else True
+                }
+                for symbol, data in _last_traded_signal.items()
+            }
+        },
         "timestamp": datetime.now().isoformat()
     }
 
