@@ -369,7 +369,12 @@ async def _check_open_positions(symbol: str) -> bool:
         positions = await _bot.trading_engine.broker.get_positions()
         if positions:
             for pos in positions:
-                if pos.get("symbol", "").upper() == symbol.upper():
+                # Handle both dict and Position objects
+                if isinstance(pos, dict):
+                    pos_symbol = pos.get("symbol", "")
+                else:
+                    pos_symbol = getattr(pos, "symbol", "")
+                if pos_symbol.upper() == symbol.upper():
                     return True
         return False
     except Exception as e:
@@ -441,18 +446,18 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict):
             side = "BUY" if "BUY" in signal_data["signal"] else "SELL"
             signal_id = _generate_signal_id(symbol, signal_data["signal"], signal_data.get("confidence", 0))
             
-            logger.info(f"?? Attempting trade: {symbol} {side} (Signal ID: {signal_id})")
+            logger.info(f"🎯 Attempting trade: {symbol} {side} (Signal ID: {signal_id})")
             
-            result = await _bot.execute_trade(
-                symbol=symbol,
-                side=side,
-                stop_loss=signal_data.get("stop_loss"),
-                take_profit=signal_data.get("take_profit"),
-                confidence=signal_data.get("confidence", 70)
-            )
+            # 🔧 Use full analysis dict (execute_trade expects analysis object)
+            analysis = _bot_status["last_analysis"].get(symbol)
+            if not analysis:
+                logger.warning(f"⚠️ No analysis found for {symbol}")
+                return
+            
+            result = await _bot.execute_trade(analysis)
             
             if result and result.get("success"):
-                # ? Record successful trade to prevent duplicates
+                # ✅ Record successful trade to prevent duplicates
                 _last_traded_signal[symbol] = {
                     "signal": signal_data["signal"],
                     "signal_id": signal_id,
@@ -461,13 +466,14 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict):
                     "side": side
                 }
                 
-                logger.info(f"? Trade executed: {symbol} {side} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
+                logger.info(f"✅ Trade executed: {symbol} {side} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
                 _bot_status["daily_stats"]["trades"] += 1
             else:
-                logger.warning(f"?? Trade not executed: {result.get('reason', 'Unknown')}")
+                reason = result.get("reason", "Unknown") if result else "No result"
+                logger.warning(f"⚠️ Trade not executed: {reason}")
                 
     except Exception as e:
-        logger.error(f"? Trade execution error: {e}")
+        logger.error(f"❌ Trade execution error: {e}")
 
 
 async def _stop_bot_internal():
