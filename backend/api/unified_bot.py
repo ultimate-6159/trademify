@@ -214,6 +214,13 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                             _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED"
                             logger.info(f"   🔄 {symbol}: Opposite position closed due to reverse signal")
                     
+                    # 🚨 WAIT SIGNAL = CLOSE PROFITABLE - ถ้าสัญญาณเป็น WAIT และมีกำไร → ปิดทันที
+                    elif signal_data["signal"] in ["WAIT", "SKIP"]:
+                        closed = await _close_profitable_on_wait_signal(symbol)
+                        if closed:
+                            _bot_status["last_signal"][symbol]["trade_status"] = "CLOSED_ON_WAIT"
+                            logger.info(f"   🚨 {symbol}: Profitable position closed due to WAIT signal")
+                    
                     # Auto trade ONLY if mode is AUTO
                     if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
                         if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
@@ -431,6 +438,7 @@ async def _check_profit_protection() -> List[Dict]:
                             _bot_status["daily_stats"]["pnl"] += pos_pnl
                             _bot_status["daily_stats"]["wins"] += 1
                             
+                            
                             # Clean up peak tracking
                             if pos_id in _peak_profit_by_position:
                                 del _peak_profit_by_position[pos_id]
@@ -456,16 +464,84 @@ async def _check_profit_protection() -> List[Dict]:
         return []
 
 
-
-
-
-
-
-
-
-
-
-
+async def _close_profitable_on_wait_signal(symbol: str) -> bool:
+    """
+    🚨 WAIT SIGNAL = CLOSE PROFITABLE
+    
+    เมื่อสัญญาณเปลี่ยนเป็น WAIT (ไม่แน่ใจทิศทาง) → ปิด position ที่มีกำไรทันที
+    
+    Logic:
+    - สัญญาณ WAIT = ตลาดไม่มีทิศทางชัดเจน
+    - ถ้ามี position ที่กำไร → ปิดทันที เพื่อ lock กำไร
+    - ถ้าขาดทุน → ไม่ปิด รอ SL/TP
+    
+    Returns: True if position was closed, False otherwise
+    """
+    global _bot, _bot_status, _peak_profit_by_position
+    
+    if not _bot or not _bot.trading_engine:
+        return False
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return False
+        
+        closed_any = False
+        
+        for pos in positions:
+            # Extract position info
+            if isinstance(pos, dict):
+                pos_id = pos.get("ticket") or pos.get("id") or pos.get("position_id")
+                pos_symbol = pos.get("symbol", "")
+                pos_pnl = float(pos.get("profit", 0) or pos.get("pnl", 0))
+                pos_side = pos.get("side", "").upper()
+            else:
+                pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_pnl = float(getattr(pos, "profit", 0) or getattr(pos, "pnl", 0))
+                pos_side = getattr(pos, "side", "")
+                if hasattr(pos_side, "value"):
+                    pos_side = pos_side.value.upper()
+            
+            # Check if this position is for the target symbol
+            if pos_symbol.upper() != symbol.upper():
+                continue
+            
+            # Only close if profitable
+            if pos_pnl <= 0:
+                logger.info(f"🚨 WAIT SIGNAL: {symbol} has {pos_side} position but PnL=${pos_pnl:.2f} (loss) → NOT closing, wait for SL/TP")
+                continue
+            
+            # Close profitable position
+            logger.warning(f"🚨 WAIT SIGNAL CLOSE: {symbol} #{pos_id} | {pos_side} | Profit: ${pos_pnl:.2f}")
+            logger.warning(f"   Signal changed to WAIT → Closing to lock profit!")
+            
+            try:
+                result = await _bot.trading_engine.broker.close_position(pos_id)
+                if result:
+                    logger.info(f"✅ Position #{pos_id} closed! Locked profit: ${pos_pnl:.2f}")
+                    
+                    # Update daily stats
+                    _bot_status["daily_stats"]["trades"] += 1
+                    _bot_status["daily_stats"]["pnl"] += pos_pnl
+                    _bot_status["daily_stats"]["wins"] += 1
+                    
+                    # Clean up peak tracking
+                    if pos_id in _peak_profit_by_position:
+                        del _peak_profit_by_position[pos_id]
+                    
+                    closed_any = True
+                else:
+                    logger.error(f"❌ Failed to close position #{pos_id}")
+            except Exception as e:
+                logger.error(f"❌ Error closing position #{pos_id}: {e}")
+        
+        return closed_any
+        
+    except Exception as e:
+        logger.error(f"Error in WAIT signal close: {e}")
+        return False
 
 
 async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> bool:
