@@ -2427,32 +2427,120 @@ class AITradingBot:
             if corr_ok: passed += 1
             
             # ════════════════════════════════════════════════════════════════
-            # LAYER 17-20: ADAPTIVE INTELLIGENCE (check availability)
+            # LAYER 17-20: ADAPTIVE INTELLIGENCE (REAL ANALYSIS)
             # ════════════════════════════════════════════════════════════════
             
             # Layer 17: Ultra Intelligence
-            is_ready = self.ultra_intelligence is not None
-            score = 70 if is_ready else 0
-            layers.append({"layer": 17, "name": "Ultra Intelligence", "status": "READY" if is_ready else "N/A", "score": score, "can_trade": True})
-            if is_ready: passed += 1
+            if self.ultra_intelligence and len(prices) >= 50:
+                try:
+                    ultra_result = self.ultra_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=70,
+                        current_balance=balance,
+                        account_equity=balance
+                    )
+                    can_trade = ultra_result.can_trade if ultra_result else True
+                    score = float(ultra_result.confidence) if ultra_result and hasattr(ultra_result, 'confidence') else 60
+                    self._last_ultra_decision_by_symbol = getattr(self, '_last_ultra_decision_by_symbol', {})
+                    self._last_ultra_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
+                except Exception as e:
+                    logger.debug(f"Layer 17 error: {e}")
+                    can_trade, score = True, 50
+                layers.append({"layer": 17, "name": "Ultra Intelligence", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
+                if can_trade and score > 50: passed += 1
+            else:
+                layers.append({"layer": 17, "name": "Ultra Intelligence", "status": "N/A", "score": 0, "can_trade": True})
             
             # Layer 18: Supreme Intelligence
-            is_ready = self.supreme_intelligence is not None
-            score = 70 if is_ready else 0
-            layers.append({"layer": 18, "name": "Supreme Intelligence", "status": "READY" if is_ready else "N/A", "score": score, "can_trade": True})
-            if is_ready: passed += 1
+            if self.supreme_intelligence and len(prices) >= 50:
+                try:
+                    supreme_result = self.supreme_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=70,
+                        balance=balance,
+                        equity=balance
+                    )
+                    can_trade = supreme_result.can_trade if supreme_result else True
+                    score = float(supreme_result.confidence) if supreme_result and hasattr(supreme_result, 'confidence') else 60
+                    self._last_supreme_decision_by_symbol = getattr(self, '_last_supreme_decision_by_symbol', {})
+                    self._last_supreme_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
+                except Exception as e:
+                    logger.debug(f"Layer 18 error: {e}")
+                    can_trade, score = True, 50
+                layers.append({"layer": 18, "name": "Supreme Intelligence", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
+                if can_trade and score > 50: passed += 1
+            else:
+                layers.append({"layer": 18, "name": "Supreme Intelligence", "status": "N/A", "score": 0, "can_trade": True})
             
             # Layer 19: Transcendent Intelligence
-            is_ready = self.transcendent_intelligence is not None
-            score = 70 if is_ready else 0
-            layers.append({"layer": 19, "name": "Transcendent", "status": "READY" if is_ready else "N/A", "score": score, "can_trade": True})
-            if is_ready: passed += 1
+            if self.transcendent_intelligence and len(prices) >= 50:
+                try:
+                    trans_result = self.transcendent_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=70,
+                        balance=balance,
+                        equity=balance
+                    )
+                    can_trade = trans_result.can_trade if trans_result else True
+                    score = float(trans_result.confidence) if trans_result and hasattr(trans_result, 'confidence') else 60
+                    self._last_transcendent_decision_by_symbol = getattr(self, '_last_transcendent_decision_by_symbol', {})
+                    self._last_transcendent_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
+                except Exception as e:
+                    logger.debug(f"Layer 19 error: {e}")
+                    can_trade, score = True, 50
+                layers.append({"layer": 19, "name": "Transcendent", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
+                if can_trade and score > 50: passed += 1
+            else:
+                layers.append({"layer": 19, "name": "Transcendent", "status": "N/A", "score": 0, "can_trade": True})
             
             # Layer 20: Omniscient Intelligence
-            is_ready = self.omniscient_intelligence is not None
-            score = 70 if is_ready else 0
-            layers.append({"layer": 20, "name": "Omniscient", "status": "READY" if is_ready else "N/A", "score": score, "can_trade": True})
-            if is_ready: passed += 1
+            if self.omniscient_intelligence and len(prices) >= 50:
+                try:
+                    omni_result = self.omniscient_intelligence.analyze(
+                        symbol=symbol,
+                        signal_side=side_str,
+                        current_price=current_price,
+                        prices=prices,
+                        highs=highs,
+                        lows=lows,
+                        volumes=volumes,
+                        atr=atr,
+                        base_confidence=70,
+                        balance=balance,
+                        equity=balance
+                    )
+                    can_trade = omni_result.can_trade if omni_result else True
+                    score = float(omni_result.confidence) if omni_result and hasattr(omni_result, 'confidence') else 60
+                    self._last_omniscient_decision_by_symbol = getattr(self, '_last_omniscient_decision_by_symbol', {})
+                    self._last_omniscient_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
+                except Exception as e:
+                    logger.debug(f"Layer 20 error: {e}")
+                    can_trade, score = True, 50
+                layers.append({"layer": 20, "name": "Omniscient", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
+                if can_trade and score > 50: passed += 1
+            else:
+                layers.append({"layer": 20, "name": "Omniscient", "status": "N/A", "score": 0, "can_trade": True})
             
         except Exception as e:
             logger.error(f"Error running 20-layer analysis: {e}")
