@@ -48,6 +48,7 @@ class BotMode(str, Enum):
     MANUAL = "manual"           # Auto analysis only, manual trade
 
 
+
 # =====================
 # SINGLE BOT INSTANCE
 # =====================
@@ -75,6 +76,11 @@ _bot_status = {
     "error": None,
     "started_at": None
 }
+
+# ?? DUPLICATE TRADE PREVENTION
+_last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
+_open_positions = {}          # {symbol: True/False}
+_trade_cooldown_seconds = 300  # 5 minutes cooldown after each trade
 
 
 # =====================
@@ -165,9 +171,20 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                     # Auto trade ONLY if mode is AUTO
                     if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
                         if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
-                            await _execute_signal_trade(symbol, signal_data)
+                            # Check if can trade before attempting
+                            can_trade, reason = await _can_trade_signal(symbol, signal_data)
+                            if can_trade:
+                                await _execute_signal_trade(symbol, signal_data)
+                                # Update signal status
+                                _bot_status["last_signal"][symbol]["trade_status"] = "EXECUTED"
+                            else:
+                                logger.info(f"   ??? {symbol}: Trade blocked - {reason}")
+                                _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
+                        else:
+                            _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
                     elif signal_data["signal"] not in ["WAIT", "SKIP"]:
                         logger.info(f"   ?? Signal available but mode is MANUAL - not auto-trading")
+                        _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
             
             # Wait for next cycle
             await asyncio.sleep(interval)
@@ -273,18 +290,100 @@ def _extract_layer_status(symbol: str) -> Dict:
     }
 
 
+def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
+    """Generate unique signal ID to prevent duplicate trades"""
+    import hashlib
+    # Signal ID based on: symbol + signal direction + confidence band + hour
+    confidence_band = int(confidence // 10) * 10  # Round to 10s (70, 80, 90, etc.)
+    hour = datetime.now().strftime("%Y%m%d%H")  # Change every hour
+    raw = f"{symbol}_{signal}_{confidence_band}_{hour}"
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+async def _check_open_positions(symbol: str) -> bool:
+    """Check if there's already an open position for this symbol"""
+    global _bot
+    
+    if not _bot or not _bot.trading_engine:
+        return False
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if positions:
+            for pos in positions:
+                if pos.get("symbol", "").upper() == symbol.upper():
+                    return True
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to check positions: {e}")
+        return False  # Assume no position if check fails
+
+
+async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
+    """
+    ?? DUPLICATE TRADE PREVENTION
+    Check if we should trade this signal
+    
+    Returns: (can_trade: bool, reason: str)
+    """
+    global _last_traded_signal, _open_positions, _trade_cooldown_seconds
+    
+    signal = signal_data.get("signal", "WAIT")
+    confidence = signal_data.get("confidence", 0)
+    
+    # 1. Check if signal is tradeable
+    if signal in ["WAIT", "SKIP"]:
+        return False, "Signal is WAIT/SKIP"
+    
+    # 2. Check for open positions
+    has_position = await _check_open_positions(symbol)
+    if has_position:
+        return False, f"Already have open position for {symbol}"
+    
+    # 3. Generate signal ID
+    signal_id = _generate_signal_id(symbol, signal, confidence)
+    
+    # 4. Check if we already traded this signal
+    last_trade = _last_traded_signal.get(symbol)
+    if last_trade:
+        last_signal_id = last_trade.get("signal_id")
+        last_time = last_trade.get("timestamp")
+        
+        # Same signal ID = duplicate
+        if last_signal_id == signal_id:
+            return False, f"Already traded this signal (ID: {signal_id})"
+        
+        # Check cooldown
+        if last_time:
+            elapsed = (datetime.now() - last_time).total_seconds()
+            if elapsed < _trade_cooldown_seconds:
+                remaining = int(_trade_cooldown_seconds - elapsed)
+                return False, f"Cooldown active ({remaining}s remaining)"
+    
+    return True, "OK"
+
+
 async def _execute_signal_trade(symbol: str, signal_data: Dict):
-    """Execute trade based on signal"""
-    global _bot, _bot_status
+    """Execute trade based on signal with duplicate prevention"""
+    global _bot, _bot_status, _last_traded_signal
     
     # Double check - only execute in AUTO mode
     if _bot_status["mode"] != BotMode.AUTO.value:
         logger.warning(f"?? Trade blocked - not in AUTO mode")
         return
     
+    # ?? DUPLICATE PREVENTION CHECK
+    can_trade, reason = await _can_trade_signal(symbol, signal_data)
+    if not can_trade:
+        logger.info(f"??? Trade blocked for {symbol}: {reason}")
+        return
+    
     try:
         if _bot and _bot.trading_engine:
             side = "BUY" if "BUY" in signal_data["signal"] else "SELL"
+            signal_id = _generate_signal_id(symbol, signal_data["signal"], signal_data.get("confidence", 0))
+            
+            logger.info(f"?? Attempting trade: {symbol} {side} (Signal ID: {signal_id})")
             
             result = await _bot.execute_trade(
                 symbol=symbol,
@@ -295,7 +394,16 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict):
             )
             
             if result and result.get("success"):
-                logger.info(f"? Trade executed: {symbol} {side}")
+                # ? Record successful trade to prevent duplicates
+                _last_traded_signal[symbol] = {
+                    "signal": signal_data["signal"],
+                    "signal_id": signal_id,
+                    "timestamp": datetime.now(),
+                    "confidence": signal_data.get("confidence", 0),
+                    "side": side
+                }
+                
+                logger.info(f"? Trade executed: {symbol} {side} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
                 _bot_status["daily_stats"]["trades"] += 1
             else:
                 logger.warning(f"?? Trade not executed: {result.get('reason', 'Unknown')}")
@@ -816,3 +924,64 @@ async def get_available_modes():
         "running": _bot_status["running"],
         "note": "Only ONE mode can be active at a time. Use /switch-mode to change."
     }
+
+
+# =====================
+# TRADE PROTECTION STATUS
+# =====================
+
+@router.get("/protection")
+async def get_trade_protection_status():
+    """
+    ??? Get trade protection status (cooldowns, last trades, etc.)
+    """
+    global _last_traded_signal, _trade_cooldown_seconds
+    
+    protection_status = {}
+    
+    for symbol, last_trade in _last_traded_signal.items():
+        if last_trade:
+            last_time = last_trade.get("timestamp")
+            if last_time:
+                elapsed = (datetime.now() - last_time).total_seconds()
+                cooldown_remaining = max(0, _trade_cooldown_seconds - elapsed)
+                can_trade = cooldown_remaining == 0
+            else:
+                elapsed = 0
+                cooldown_remaining = 0
+                can_trade = True
+            
+            protection_status[symbol] = {
+                "last_signal": last_trade.get("signal"),
+                "last_signal_id": last_trade.get("signal_id"),
+                "last_trade_time": last_time.isoformat() if last_time else None,
+                "elapsed_seconds": int(elapsed),
+                "cooldown_remaining": int(cooldown_remaining),
+                "can_trade_now": can_trade,
+                "last_side": last_trade.get("side"),
+                "last_confidence": last_trade.get("confidence", 0)
+            }
+    
+    return {
+        "cooldown_seconds": _trade_cooldown_seconds,
+        "symbols": protection_status,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/protection/reset")
+async def reset_trade_protection(symbol: str = None):
+    """
+    ?? Reset trade protection (cooldown) for a symbol or all symbols
+    """
+    global _last_traded_signal
+    
+    if symbol:
+        if symbol in _last_traded_signal:
+            del _last_traded_signal[symbol]
+            return {"status": "reset", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        _last_traded_signal.clear()
+        return {"status": "reset_all"}
