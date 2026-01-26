@@ -111,6 +111,16 @@ _trade_cooldown_seconds = 30  # 🔥 CHANGED: 30 seconds cooldown (was 60) - all
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม
 _enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
 
+# 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
+_profit_protection_config = {
+    "enabled": True,                    # เปิด/ปิด feature
+    "profit_drawdown_percent": 30,      # ปิดเมื่อกำไรลดลง 30% จาก peak (เช่น peak $1000 → ปิดเมื่อเหลือ $700)
+    "min_profit_to_protect": 100,       # เริ่ม protect เมื่อกำไร >= $100
+    "trailing_stop_trigger": 500,       # เริ่ม trailing เมื่อกำไร >= $500
+    "trailing_stop_distance": 200,      # trailing stop ห่าง $200 จาก current profit
+}
+_peak_profit_by_position = {}           # {ticket: peak_profit} - เก็บกำไรสูงสุดของแต่ละ position
+
 
 # =====================
 # REQUEST MODELS
@@ -222,6 +232,12 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                         logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
                         _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
             
+            # 💰 SMART PROFIT PROTECTION - ตรวจสอบทุก cycle
+            closed = await _check_profit_protection()
+            if closed:
+                for pos in closed:
+                    logger.info(f"🛡️ Profit protected: {pos['symbol']} locked ${pos['locked_profit']:.2f}")
+            
             # Wait for next cycle
             await asyncio.sleep(interval)
             
@@ -327,6 +343,120 @@ def _extract_layer_status(symbol: str) -> Dict:
         "total": total,
         "pass_rate": (passed / total * 100) if total > 0 else 0
     }
+
+
+async def _check_profit_protection() -> List[Dict]:
+    """
+    💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
+    
+    Logic:
+    1. Monitor ทุก position ที่มีกำไร >= min_profit_to_protect
+    2. เก็บ peak profit ของแต่ละ position
+    3. ถ้ากำไรลดลง >= profit_drawdown_percent จาก peak → ปิดทันที
+    
+    Example:
+    - min_profit_to_protect = $100
+    - profit_drawdown_percent = 30%
+    - Position กำไรขึ้นไป $1000 (peak)
+    - กำไรลดลงมาเหลือ $700 (drawdown 30%) → ปิด! Lock กำไร $700
+    
+    Returns: List of closed positions
+    """
+    global _bot, _profit_protection_config, _peak_profit_by_position, _bot_status
+    
+    if not _profit_protection_config.get("enabled", False):
+        return []
+    
+    if not _bot or not _bot.trading_engine:
+        return []
+    
+    closed_positions = []
+    min_profit = _profit_protection_config.get("min_profit_to_protect", 100)
+    drawdown_pct = _profit_protection_config.get("profit_drawdown_percent", 30)
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return []
+        
+        for pos in positions:
+            # Extract position info
+            if isinstance(pos, dict):
+                pos_id = pos.get("ticket") or pos.get("id") or pos.get("position_id")
+                pos_symbol = pos.get("symbol", "")
+                pos_pnl = float(pos.get("profit", 0) or pos.get("pnl", 0))
+                pos_side = pos.get("side", "").upper()
+            else:
+                pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_pnl = float(getattr(pos, "profit", 0) or getattr(pos, "pnl", 0))
+                pos_side = getattr(pos, "side", "")
+                if hasattr(pos_side, "value"):
+                    pos_side = pos_side.value.upper()
+            
+            if not pos_id:
+                continue
+            
+            # Skip if profit < minimum
+            if pos_pnl < min_profit:
+                # Clear peak if profit dropped below minimum
+                if pos_id in _peak_profit_by_position:
+                    del _peak_profit_by_position[pos_id]
+                continue
+            
+            # Update peak profit
+            current_peak = _peak_profit_by_position.get(pos_id, pos_pnl)
+            if pos_pnl > current_peak:
+                _peak_profit_by_position[pos_id] = pos_pnl
+                current_peak = pos_pnl
+                logger.info(f"📈 {pos_symbol} #{pos_id}: New peak profit ${current_peak:.2f}")
+            
+            # Check drawdown from peak
+            if current_peak > 0:
+                drawdown = ((current_peak - pos_pnl) / current_peak) * 100
+                
+                if drawdown >= drawdown_pct:
+                    # PROFIT PROTECTION TRIGGERED!
+                    logger.warning(f"🛡️ PROFIT PROTECTION: {pos_symbol} #{pos_id}")
+                    logger.warning(f"   Peak: ${current_peak:.2f} → Current: ${pos_pnl:.2f} (Drawdown: {drawdown:.1f}%)")
+                    logger.warning(f"   Closing to lock profit ${pos_pnl:.2f}!")
+                    
+                    try:
+                        result = await _bot.trading_engine.broker.close_position(pos_id)
+                        if result:
+                            logger.info(f"✅ Position #{pos_id} closed! Locked profit: ${pos_pnl:.2f}")
+                            
+                            # Update stats
+                            _bot_status["daily_stats"]["trades"] += 1
+                            _bot_status["daily_stats"]["pnl"] += pos_pnl
+                            _bot_status["daily_stats"]["wins"] += 1
+                            
+                            # Clean up peak tracking
+                            if pos_id in _peak_profit_by_position:
+                                del _peak_profit_by_position[pos_id]
+                            
+                            closed_positions.append({
+                                "ticket": pos_id,
+                                "symbol": pos_symbol,
+                                "side": pos_side,
+                                "peak_profit": current_peak,
+                                "locked_profit": pos_pnl,
+                                "drawdown_percent": drawdown,
+                                "reason": "profit_protection"
+                            })
+                        else:
+                            logger.error(f"❌ Failed to close position #{pos_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Error closing position #{pos_id}: {e}")
+        
+        return closed_positions
+        
+    except Exception as e:
+        logger.error(f"Error in profit protection check: {e}")
+        return []
+
+
+
 
 
 
@@ -1272,4 +1402,141 @@ async def toggle_reverse_signal_close(enabled: bool = True):
         "status": "success",
         "reverse_signal_close": enabled,
         "message": f"Reverse signal close {status}"
+    }
+
+
+# =====================
+# 💰 SMART PROFIT PROTECTION
+# =====================
+
+@router.get("/profit-protection")
+async def get_profit_protection_status():
+    """
+    💰 Get Smart Profit Protection status and configuration
+    """
+    global _profit_protection_config, _peak_profit_by_position, _bot
+    
+    # Get current positions with peaks
+    positions_info = []
+    try:
+        if _bot and _bot.trading_engine:
+            positions = await _bot.trading_engine.broker.get_positions()
+            if positions:
+                for pos in positions:
+                    if isinstance(pos, dict):
+                        pos_id = pos.get("ticket") or pos.get("id")
+                        pos_symbol = pos.get("symbol", "")
+                        pos_pnl = float(pos.get("profit", 0) or 0)
+                        pos_side = pos.get("side", "")
+                    else:
+                        pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                        pos_symbol = getattr(pos, "symbol", "")
+                        pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                        pos_side = getattr(pos, "side", "")
+                    
+                    peak = _peak_profit_by_position.get(pos_id, pos_pnl)
+                    drawdown_pct = ((peak - pos_pnl) / peak * 100) if peak > 0 else 0
+                    trigger_pct = _profit_protection_config.get("profit_drawdown_percent", 30)
+                    
+                    positions_info.append({
+                        "ticket": pos_id,
+                        "symbol": pos_symbol,
+                        "side": pos_side,
+                        "current_profit": pos_pnl,
+                        "peak_profit": peak,
+                        "drawdown_percent": round(drawdown_pct, 1),
+                        "trigger_at_percent": trigger_pct,
+                        "will_close_at": round(peak * (1 - trigger_pct/100), 2) if peak > 0 else 0,
+                        "protected": pos_pnl >= _profit_protection_config.get("min_profit_to_protect", 100)
+                    })
+    except Exception as e:
+        logger.warning(f"Error getting positions for profit protection: {e}")
+    
+    return {
+        "config": _profit_protection_config,
+        "positions": positions_info,
+        "description": {
+            "profit_drawdown_percent": "ปิดเมื่อกำไรลดลง X% จาก peak",
+            "min_profit_to_protect": "เริ่ม protect เมื่อกำไร >= $X",
+            "trailing_stop_trigger": "เริ่ม trailing เมื่อกำไร >= $X",
+            "trailing_stop_distance": "trailing stop ห่าง $X จาก current profit"
+        }
+    }
+
+
+@router.post("/profit-protection/toggle")
+async def toggle_profit_protection(enabled: bool = True):
+    """
+    💰 Enable/Disable Smart Profit Protection
+    """
+    global _profit_protection_config
+    
+    _profit_protection_config["enabled"] = enabled
+    
+    status = "ENABLED" if enabled else "DISABLED"
+    logger.info(f"💰 Smart Profit Protection: {status}")
+    
+    return {
+        "status": "success",
+        "profit_protection_enabled": enabled,
+        "message": f"Smart Profit Protection {status}"
+    }
+
+
+@router.post("/profit-protection/configure")
+async def configure_profit_protection(
+    profit_drawdown_percent: float = None,
+    min_profit_to_protect: float = None,
+    trailing_stop_trigger: float = None,
+    trailing_stop_distance: float = None
+):
+    """
+    💰 Configure Smart Profit Protection settings
+    
+    - profit_drawdown_percent: ปิดเมื่อกำไรลดลง X% จาก peak (default: 30)
+    - min_profit_to_protect: เริ่ม protect เมื่อกำไร >= $X (default: 100)
+    - trailing_stop_trigger: เริ่ม trailing เมื่อกำไร >= $X (default: 500)
+    - trailing_stop_distance: trailing stop ห่าง $X (default: 200)
+    """
+    global _profit_protection_config
+    
+    if profit_drawdown_percent is not None:
+        _profit_protection_config["profit_drawdown_percent"] = max(5, min(80, profit_drawdown_percent))
+    
+    if min_profit_to_protect is not None:
+        _profit_protection_config["min_profit_to_protect"] = max(10, min_profit_to_protect)
+    
+    if trailing_stop_trigger is not None:
+        _profit_protection_config["trailing_stop_trigger"] = max(50, trailing_stop_trigger)
+    
+    if trailing_stop_distance is not None:
+        _profit_protection_config["trailing_stop_distance"] = max(20, trailing_stop_distance)
+    
+    logger.info(f"💰 Profit Protection configured: {_profit_protection_config}")
+    
+    return {
+        "status": "success",
+        "config": _profit_protection_config,
+        "message": "Configuration updated"
+    }
+
+
+@router.post("/profit-protection/reset-peaks")
+async def reset_peak_profits():
+    """
+    💰 Reset all peak profit tracking
+    
+    Use this when you want to start fresh tracking
+    """
+    global _peak_profit_by_position
+    
+    count = len(_peak_profit_by_position)
+    _peak_profit_by_position.clear()
+    
+    logger.info(f"💰 Reset {count} peak profit records")
+    
+    return {
+        "status": "success",
+        "cleared_count": count,
+        "message": f"Cleared {count} peak profit records"
     }
