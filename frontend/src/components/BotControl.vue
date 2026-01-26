@@ -1,6 +1,6 @@
 <template>
   <div class="bg-gray-800 rounded-lg p-3 sm:p-6">
-    <!-- Header -->
+    <!-- Header with Mode Badge -->
     <div class="flex items-center justify-between mb-4 sm:mb-6">
       <h2
         class="text-lg sm:text-xl font-bold text-white flex items-center gap-2"
@@ -9,9 +9,14 @@
         <span class="hidden xs:inline">AI Trading</span> Bot
       </h2>
 
-      <!-- Status Badge -->
-      <div :class="statusBadgeClass" class="text-xs sm:text-sm">
-        {{ botStatus.running ? "🟢 RUNNING" : "⏹️ STOPPED" }}
+      <!-- Status + Mode Badge -->
+      <div class="flex items-center gap-2">
+        <div v-if="botStatus.running" :class="modeBadgeClass" class="text-xs sm:text-sm px-3 py-1 rounded-full">
+          {{ botStatus.mode === 'auto' ? '🤖 AUTO' : '📊 MANUAL' }}
+        </div>
+        <div :class="statusBadgeClass" class="text-xs sm:text-sm">
+          {{ botStatus.running ? "🟢 RUNNING" : "⏹️ STOPPED" }}
+        </div>
       </div>
     </div>
 
@@ -30,6 +35,68 @@
             Make sure backend is running on port 8000
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Mode Selector (Only when stopped) -->
+    <div v-if="!botStatus.running" class="bg-gray-700 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+      <div class="text-gray-400 text-xs sm:text-sm mb-3">
+        🎛️ Select Trading Mode
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <button
+          @click="selectedMode = 'manual'"
+          :class="[
+            'p-4 rounded-lg border-2 transition-all text-left',
+            selectedMode === 'manual'
+              ? 'border-blue-500 bg-blue-900/30'
+              : 'border-gray-600 bg-gray-800 hover:border-gray-500'
+          ]"
+        >
+          <div class="text-2xl mb-2">📊</div>
+          <div class="text-white font-semibold">MANUAL Mode</div>
+          <div class="text-gray-400 text-xs mt-1">
+            Bot analyzes only. You execute trades manually.
+          </div>
+        </button>
+        <button
+          @click="selectedMode = 'auto'"
+          :class="[
+            'p-4 rounded-lg border-2 transition-all text-left',
+            selectedMode === 'auto'
+              ? 'border-green-500 bg-green-900/30'
+              : 'border-gray-600 bg-gray-800 hover:border-gray-500'
+          ]"
+        >
+          <div class="text-2xl mb-2">🤖</div>
+          <div class="text-white font-semibold">AUTO Mode</div>
+          <div class="text-gray-400 text-xs mt-1">
+            Bot analyzes AND trades automatically.
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mode Switch (When running) -->
+    <div v-if="botStatus.running" class="bg-gray-700 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-gray-400 text-xs mb-1">Current Mode</div>
+          <div :class="botStatus.mode === 'auto' ? 'text-green-400' : 'text-blue-400'" class="text-lg font-bold">
+            {{ botStatus.mode === 'auto' ? '🤖 AUTO TRADING' : '📊 MANUAL ANALYSIS' }}
+          </div>
+          <div class="text-gray-500 text-xs mt-1">
+            {{ botStatus.mode === 'auto' ? 'Bot will execute trades automatically' : 'Bot analyzes only - you trade manually' }}
+          </div>
+        </div>
+        <button
+          @click="switchMode"
+          :disabled="isSwitching"
+          class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg text-sm flex items-center gap-2"
+        >
+          <span v-if="isSwitching" class="animate-spin">⏳</span>
+          <span>🔄 Switch to {{ botStatus.mode === 'auto' ? 'MANUAL' : 'AUTO' }}</span>
+        </button>
       </div>
     </div>
 
@@ -126,7 +193,7 @@
               {{ signalEmoji(signal.signal) }} {{ signal.signal }}
             </span>
             <span class="text-gray-400"
-              >{{ signal.enhanced_confidence?.toFixed(1) || 0 }}%</span
+              >{{ signal.confidence?.toFixed(1) || 0 }}%</span
             >
             <span :class="qualityBadgeClass(signal.quality)">{{
               signal.quality
@@ -142,11 +209,16 @@
         v-if="!botStatus.running"
         @click="startBot"
         :disabled="isLoading"
-        class="flex-1 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+        :class="[
+          'flex-1 py-2.5 sm:py-3 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 text-sm sm:text-base',
+          selectedMode === 'auto' 
+            ? 'bg-green-600 hover:bg-green-700 disabled:bg-gray-600'
+            : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600'
+        ]"
       >
         <span v-if="isLoading" class="animate-spin">⏳</span>
         <span v-else>🚀</span>
-        Start Bot
+        Start Bot ({{ selectedMode === 'auto' ? 'AUTO' : 'MANUAL' }} Mode)
       </button>
 
       <button
@@ -253,6 +325,18 @@
               </select>
             </div>
 
+            <!-- Signal Mode -->
+            <div>
+              <label class="text-white block mb-2">Signal Mode</label>
+              <select
+                v-model="editSettings.signal_mode"
+                class="w-full bg-gray-700 text-white rounded-lg px-4 py-2"
+              >
+                <option value="technical">Technical (EMA + RSI - High Win Rate)</option>
+                <option value="pattern">Pattern (FAISS Matching)</option>
+              </select>
+            </div>
+
             <!-- Quality -->
             <div>
               <label class="text-white block mb-2">Minimum Quality</label>
@@ -285,19 +369,6 @@
                 max="3600"
                 class="w-full bg-gray-700 text-white rounded-lg px-4 py-2"
               />
-            </div>
-
-            <!-- Auto-start -->
-            <div class="flex items-center gap-3">
-              <input
-                type="checkbox"
-                v-model="editSettings.auto_start"
-                id="auto_start"
-                class="w-5 h-5"
-              />
-              <label for="auto_start" class="text-white"
-                >Auto-start on server restart</label
-              >
             </div>
           </div>
 
@@ -340,27 +411,29 @@ const API_BASE = getApiBase();
 // State
 const botStatus = ref({
   running: false,
+  mode: "stopped",  // stopped, auto, manual
   broker_type: "MT5",
   symbols: [],
   min_quality: "HIGH",
   daily_stats: null,
-  last_signals: {},
+  auto_trade: false,
 });
 
 const botSettings = ref({
   symbols: "EURUSDm,GBPUSDm,XAUUSDm",
   timeframe: "H1",
-  htf_timeframe: "H4",
+  signal_mode: "technical",
   min_quality: "HIGH",
   interval: 60,
-  auto_start: false,
 });
 
 const editSettings = ref({ ...botSettings.value });
 const showSettings = ref(false);
 const isLoading = ref(false);
+const isSwitching = ref(false);
 const isConnected = ref(true);
 const lastSignals = ref({});
+const selectedMode = ref("manual");  // Default to manual mode
 
 // Polling interval
 let pollInterval = null;
@@ -399,6 +472,13 @@ const statusBadgeClass = computed(() => [
   botStatus.value.running
     ? "bg-green-600 text-white"
     : "bg-gray-600 text-gray-300",
+]);
+
+const modeBadgeClass = computed(() => [
+  "px-3 py-1 rounded-full font-semibold",
+  botStatus.value.mode === "auto"
+    ? "bg-green-900 text-green-400 border border-green-600"
+    : "bg-blue-900 text-blue-400 border border-blue-600",
 ]);
 
 const qualityClass = computed(() => {
@@ -452,28 +532,40 @@ function qualityBadgeClass(quality) {
   };
 }
 
+// 🆕 Using Unified API
 async function fetchStatus() {
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/status`);
+    const response = await fetch(`${API_BASE}/api/v1/unified/status`);
     if (!response.ok) throw new Error("API Error");
 
     const data = await response.json();
     isConnected.value = true;
-    botStatus.value = data;
+    
+    // Map unified status to local state
+    botStatus.value = {
+      running: data.bot?.running || false,
+      mode: data.bot?.mode || "stopped",
+      broker_type: "MT5",
+      symbols: data.bot?.symbols || [],
+      min_quality: data.bot?.quality || "HIGH",
+      daily_stats: data.daily_stats || null,
+      auto_trade: data.bot?.auto_trade || false,
+    };
 
     // Update last signals
-    if (data.last_signals) {
-      lastSignals.value = data.last_signals;
+    if (data.signals) {
+      lastSignals.value = data.signals;
     }
 
     // Update settings from status
-    if (data.min_quality) {
-      botSettings.value.min_quality = data.min_quality;
-    }
-    if (data.symbols) {
-      botSettings.value.symbols = Array.isArray(data.symbols)
-        ? data.symbols.join(",")
-        : data.symbols;
+    if (data.bot) {
+      botSettings.value.min_quality = data.bot.quality || "HIGH";
+      botSettings.value.symbols = Array.isArray(data.bot.symbols)
+        ? data.bot.symbols.join(",")
+        : data.bot.symbols || "";
+      botSettings.value.timeframe = data.bot.timeframe || "H1";
+      botSettings.value.interval = data.bot.interval || 60;
+      botSettings.value.signal_mode = data.bot.signal_mode || "technical";
     }
   } catch (error) {
     console.error("[BotControl] Failed to fetch status:", error);
@@ -481,37 +573,23 @@ async function fetchStatus() {
   }
 }
 
-async function fetchSettings() {
-  try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/settings`);
-    if (!response.ok) return;
-
-    const data = await response.json();
-    botSettings.value = { ...botSettings.value, ...data };
-    editSettings.value = { ...botSettings.value };
-  } catch (error) {
-    console.error("[BotControl] Failed to fetch settings:", error);
-  }
-}
-
+// 🆕 Start using Unified API
 async function startBot() {
   isLoading.value = true;
   try {
     const symbols = editSettings.value.symbols || botSettings.value.symbols;
-    const response = await fetch(`${API_BASE}/api/v1/bot/start`, {
+    const response = await fetch(`${API_BASE}/api/v1/unified/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        mode: selectedMode.value,  // 'auto' or 'manual'
         symbols: Array.isArray(symbols)
-          ? symbols
-          : symbols.split(",").map((s) => s.trim()),
+          ? symbols.join(",")
+          : symbols,
         timeframe: editSettings.value.timeframe || "H1",
-        htf_timeframe: editSettings.value.htf_timeframe || "H4",
-        min_quality: editSettings.value.min_quality || "HIGH",
+        signal_mode: editSettings.value.signal_mode || "technical",
+        quality: editSettings.value.min_quality || "HIGH",
         interval: editSettings.value.interval || 60,
-        auto_start: editSettings.value.auto_start || false,
-        broker_type: "MT5",
-        allowed_signals: ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"],
       }),
     });
 
@@ -521,6 +599,8 @@ async function startBot() {
       return;
     }
 
+    const result = await response.json();
+    console.log("[BotControl] Bot started:", result);
     await fetchStatus();
   } catch (error) {
     console.error("[BotControl] Failed to start bot:", error);
@@ -530,13 +610,13 @@ async function startBot() {
   }
 }
 
+// 🆕 Stop using Unified API
 async function stopBot() {
   isLoading.value = true;
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/stop`, {
+    const response = await fetch(`${API_BASE}/api/v1/unified/stop`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ disable_auto_start: true }),
     });
 
     if (!response.ok) {
@@ -553,48 +633,51 @@ async function stopBot() {
   }
 }
 
-async function setQuality(quality) {
-  if (!botStatus.value.running) return;
-
+// 🆕 Switch mode using Unified API
+async function switchMode() {
+  isSwitching.value = true;
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/settings`, {
-      method: "PUT",
+    const newMode = botStatus.value.mode === "auto" ? "manual" : "auto";
+    const response = await fetch(`${API_BASE}/api/v1/unified/switch-mode`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ min_quality: quality }),
+      body: JSON.stringify({ mode: newMode }),
     });
 
-    if (response.ok) {
-      botSettings.value.min_quality = quality;
-      console.log(`[BotControl] Quality updated to ${quality}`);
+    if (!response.ok) {
+      const error = await response.json();
+      alert(error.message || "Failed to switch mode");
+      return;
     }
+
+    const result = await response.json();
+    console.log("[BotControl] Mode switched:", result);
+    await fetchStatus();
   } catch (error) {
-    console.error("[BotControl] Failed to update quality:", error);
+    console.error("[BotControl] Failed to switch mode:", error);
+    alert("Failed to switch mode: " + error.message);
+  } finally {
+    isSwitching.value = false;
   }
 }
 
-async function saveSettings() {
-  try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/settings`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editSettings.value),
-    });
+async function setQuality(quality) {
+  if (!botStatus.value.running) return;
+  // Note: Quality change requires restart - just update local for now
+  botSettings.value.min_quality = quality;
+  editSettings.value.min_quality = quality;
+  console.log(`[BotControl] Quality updated to ${quality} (will apply on restart)`);
+}
 
-    if (response.ok) {
-      botSettings.value = { ...editSettings.value };
-      showSettings.value = false;
-      alert("Settings saved!");
-    }
-  } catch (error) {
-    console.error("[BotControl] Failed to save settings:", error);
-    alert("Failed to save settings");
-  }
+async function saveSettings() {
+  botSettings.value = { ...editSettings.value };
+  showSettings.value = false;
+  alert("Settings saved! Changes will apply when you restart the bot.");
 }
 
 // Lifecycle
 onMounted(() => {
   fetchStatus();
-  fetchSettings();
 
   // Poll every 5 seconds
   pollInterval = setInterval(fetchStatus, 5000);

@@ -125,62 +125,62 @@ def _get_bot_instance():
 
 
 async def _run_bot_loop(interval: int, auto_trade: bool):
-"""Main bot analysis loop"""
-global _bot, _bot_status
+    """Main bot analysis loop"""
+    global _bot, _bot_status
     
-mode_str = "AUTO" if auto_trade else "MANUAL"
-logger.info(f"?? Unified bot loop starting (mode={mode_str}, interval={interval}s)")
+    mode_str = "AUTO" if auto_trade else "MANUAL"
+    logger.info(f"?? Unified bot loop starting (mode={mode_str}, interval={interval}s)")
     
-while _bot_status["running"]:
-    try:
-        for symbol in _bot_status["symbols"]:
-            # Run analysis
-            analysis = await _bot.analyze_symbol(symbol)
+    while _bot_status["running"]:
+        try:
+            for symbol in _bot_status["symbols"]:
+                # Run analysis
+                analysis = await _bot.analyze_symbol(symbol)
                 
-            if analysis:
-                # Store analysis
-                _bot_status["last_analysis"][symbol] = analysis
+                if analysis:
+                    # Store analysis
+                    _bot_status["last_analysis"][symbol] = analysis
                     
-                # Extract signal
-                signal_data = {
-                    "symbol": symbol,
-                    "signal": analysis.get("signal", "WAIT"),
-                    "confidence": analysis.get("enhanced_confidence", 0),
-                    "quality": analysis.get("quality", "SKIP"),
-                    "current_price": analysis.get("current_price", 0),
-                    "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
-                    "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
-                    "scores": analysis.get("scores", {}),
-                    "indicators": analysis.get("indicators", {}),
-                    "market_regime": analysis.get("market_regime", "UNKNOWN"),
-                    "timestamp": datetime.now().isoformat()
-                }
-                _bot_status["last_signal"][symbol] = signal_data
+                    # Extract signal
+                    signal_data = {
+                        "symbol": symbol,
+                        "signal": analysis.get("signal", "WAIT"),
+                        "confidence": analysis.get("enhanced_confidence", 0),
+                        "quality": analysis.get("quality", "SKIP"),
+                        "current_price": analysis.get("current_price", 0),
+                        "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
+                        "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
+                        "scores": analysis.get("scores", {}),
+                        "indicators": analysis.get("indicators", {}),
+                        "market_regime": analysis.get("market_regime", "UNKNOWN"),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    _bot_status["last_signal"][symbol] = signal_data
                     
-                # Extract layer status
-                _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
+                    # Extract layer status
+                    _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
                     
-                logger.info(f"?? {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
+                    logger.info(f"?? {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
                     
-                # Auto trade ONLY if mode is AUTO
-                if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
-                    if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
-                        await _execute_signal_trade(symbol, signal_data)
-                elif signal_data["signal"] not in ["WAIT", "SKIP"]:
-                    logger.info(f"   ?? Signal available but mode is MANUAL - not auto-trading")
+                    # Auto trade ONLY if mode is AUTO
+                    if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
+                        if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+                            await _execute_signal_trade(symbol, signal_data)
+                    elif signal_data["signal"] not in ["WAIT", "SKIP"]:
+                        logger.info(f"   ?? Signal available but mode is MANUAL - not auto-trading")
             
-        # Wait for next cycle
-        await asyncio.sleep(interval)
+            # Wait for next cycle
+            await asyncio.sleep(interval)
             
-    except asyncio.CancelledError:
-        logger.info("?? Bot loop cancelled")
-        break
-    except Exception as e:
-        logger.error(f"? Bot loop error: {e}")
-        _bot_status["error"] = str(e)
-        await asyncio.sleep(5)  # Brief pause on error
+        except asyncio.CancelledError:
+            logger.info("?? Bot loop cancelled")
+            break
+        except Exception as e:
+            logger.error(f"? Bot loop error: {e}")
+            _bot_status["error"] = str(e)
+            await asyncio.sleep(5)  # Brief pause on error
     
-logger.info("?? Unified bot loop stopped")
+    logger.info("?? Unified bot loop stopped")
 
 
 def _extract_layer_status(symbol: str) -> Dict:
@@ -816,69 +816,3 @@ async def get_available_modes():
         "running": _bot_status["running"],
         "note": "Only ONE mode can be active at a time. Use /switch-mode to change."
     }
-
-
-@router.post("/execute")
-async def execute_manual_trade(request: ManualTradeRequest):
-    """
-    ?? Execute a manual trade
-    """
-    global _bot
-    
-    if not _bot or not _bot.trading_engine:
-        raise HTTPException(status_code=400, detail="Bot not initialized or no trading engine")
-    
-    try:
-        # Get current price
-        current_price = await _bot.trading_engine.broker.get_current_price(request.symbol)
-        
-        if not current_price:
-            raise HTTPException(status_code=400, detail="Cannot get current price")
-        
-        # Calculate SL/TP if not provided
-        stop_loss = request.stop_loss
-        take_profit = request.take_profit
-        
-        if not stop_loss or not take_profit:
-            # Default SL/TP based on ATR (simplified)
-            atr_pct = 0.005  # 0.5% default
-            if "XAU" in request.symbol:
-                atr_pct = 0.003  # 0.3% for gold
-            
-            if request.side.upper() == "BUY":
-                stop_loss = stop_loss or current_price * (1 - atr_pct)
-                take_profit = take_profit or current_price * (1 + atr_pct * 1.5)
-            else:
-                stop_loss = stop_loss or current_price * (1 + atr_pct)
-                take_profit = take_profit or current_price * (1 - atr_pct * 1.5)
-        
-        # Execute trade
-        result = await _bot.trading_engine.broker.place_order(
-            symbol=request.symbol,
-            side=request.side.upper(),
-            quantity=request.lot_size,
-            stop_loss=stop_loss,
-            take_profit=take_profit
-        )
-        
-        if result and result.success:
-            _bot_status["daily_stats"]["trades"] += 1
-            return {
-                "status": "executed",
-                "symbol": request.symbol,
-                "side": request.side,
-                "lot_size": request.lot_size,
-                "entry_price": current_price,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "order_id": result.order_id if hasattr(result, 'order_id') else None
-            }
-        else:
-            return {
-                "status": "failed",
-                "error": result.error if result else "Unknown error"
-            }
-            
-    except Exception as e:
-        logger.error(f"Manual trade error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))

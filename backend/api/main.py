@@ -43,6 +43,9 @@ from api.security import (
 # Import trading routes
 from api.trading_routes import router as trading_router, init_trading_system
 
+# Import unified bot router
+from api.unified_bot import router as unified_router
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -223,6 +226,9 @@ async def global_exception_handler(request: StarletteRequest, exc: Exception):
 
 # Include trading routes
 app.include_router(trading_router)
+
+# Include unified bot router (NEW - Single source of truth)
+app.include_router(unified_router)
 
 # Global state
 pattern_matchers: Dict[str, PatternMatcher] = {}
