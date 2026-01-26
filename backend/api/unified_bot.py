@@ -290,6 +290,36 @@ def _extract_layer_status(symbol: str) -> Dict:
     }
 
 
+def _get_trade_protection_info() -> Dict:
+    """Get trade protection info safely"""
+    global _last_traded_signal, _trade_cooldown_seconds
+    
+    last_trades = {}
+    for symbol, data in _last_traded_signal.items():
+        try:
+            ts = data.get("timestamp")
+            if ts and isinstance(ts, datetime):
+                elapsed = int((datetime.now() - ts).total_seconds())
+                can_trade = elapsed >= _trade_cooldown_seconds
+            else:
+                elapsed = 0
+                can_trade = True
+            
+            last_trades[symbol] = {
+                "signal_id": data.get("signal_id", ""),
+                "elapsed": elapsed,
+                "can_trade": can_trade
+            }
+        except Exception as e:
+            logger.warning(f"Error getting trade protection for {symbol}: {e}")
+            last_trades[symbol] = {"signal_id": "", "elapsed": 0, "can_trade": True}
+    
+    return {
+        "cooldown_seconds": _trade_cooldown_seconds,
+        "last_trades": last_trades
+    }
+
+
 def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
     """Generate unique signal ID to prevent duplicate trades"""
     import hashlib
@@ -488,17 +518,7 @@ async def get_unified_status():
         "layers": _bot_status["layer_status"],
         "daily_stats": _bot_status["daily_stats"],
         "account": account,
-        "trade_protection": {
-            "cooldown_seconds": _trade_cooldown_seconds,
-            "last_trades": {
-                symbol: {
-                    "signal_id": data.get("signal_id"),
-                    "elapsed": int((datetime.now() - data.get("timestamp")).total_seconds()) if data.get("timestamp") else 0,
-                    "can_trade": (datetime.now() - data.get("timestamp")).total_seconds() >= _trade_cooldown_seconds if data.get("timestamp") else True
-                }
-                for symbol, data in _last_traded_signal.items()
-            }
-        },
+        "trade_protection": _get_trade_protection_info(),
         "timestamp": datetime.now().isoformat()
     }
 
