@@ -433,7 +433,7 @@ const isLoading = ref(false);
 const isSwitching = ref(false);
 const isConnected = ref(true);
 const lastSignals = ref({});
-const selectedMode = ref("manual");  // Default to manual mode
+const selectedMode = ref("auto");  // Default to AUTO mode (synced from backend on load)
 
 // Polling interval
 let pollInterval = null;
@@ -551,6 +551,11 @@ async function fetchStatus() {
       daily_stats: data.daily_stats || null,
       auto_trade: data.bot?.auto_trade || false,
     };
+
+    // 🔄 Sync selectedMode with backend (so refresh keeps the mode)
+    if (data.bot?.mode && data.bot.mode !== "stopped") {
+      selectedMode.value = data.bot.mode;  // 'auto' or 'manual'
+    }
 
     // Update last signals
     if (data.signals) {
