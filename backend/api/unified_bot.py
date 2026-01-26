@@ -31,10 +31,34 @@ from typing import Optional, Dict, Any, List
 from enum import Enum
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/unified", tags=["unified"])
+
+
+# =====================
+# JSON SERIALIZATION HELPER
+# =====================
+
+def _convert_to_json_serializable(obj):
+    """Convert numpy types and other non-serializable objects to JSON-friendly types"""
+    if isinstance(obj, dict):
+        return {k: _convert_to_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_to_json_serializable(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif hasattr(obj, 'isoformat'):  # datetime objects
+        return obj.isoformat()
+    return obj
 
 
 # =====================
@@ -46,6 +70,8 @@ class BotMode(str, Enum):
     STOPPED = "stopped"         # Bot not running
     AUTO = "auto"               # Auto analysis + auto trade
     MANUAL = "manual"           # Auto analysis only, manual trade
+
+
 
 
 
@@ -500,7 +526,8 @@ async def get_unified_status():
     except Exception as e:
         logger.warning(f"Failed to get account: {e}")
     
-    return {
+    # ?? Convert all numpy types to JSON-serializable
+    return _convert_to_json_serializable({
         "bot": {
             "mode": _bot_status["mode"],          # ?? Current mode: stopped/auto/manual
             "running": _bot_status["running"],
@@ -520,7 +547,7 @@ async def get_unified_status():
         "account": account,
         "trade_protection": _get_trade_protection_info(),
         "timestamp": datetime.now().isoformat()
-    }
+    })
 
 
 @router.post("/start")
