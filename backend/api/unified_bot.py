@@ -108,6 +108,9 @@ _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime
 _open_positions = {}          # {symbol: True/False}
 _trade_cooldown_seconds = 30  # 🔥 CHANGED: 30 seconds cooldown (was 60) - allows more trades
 
+# 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม
+_enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
+
 
 # =====================
 # REQUEST MODELS
@@ -192,7 +195,14 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                     # Extract layer status
                     _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
                     
-                    logger.info(f"?? {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
+                    logger.info(f"📊 {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
+                    
+                    # 🔄 REVERSE SIGNAL CLOSE - ปิด position ถ้าสัญญาณตรงข้าม
+                    if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+                        closed = await _check_and_close_opposite_positions(symbol, signal_data["signal"])
+                        if closed:
+                            _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED"
+                            logger.info(f"   🔄 {symbol}: Opposite position closed due to reverse signal")
                     
                     # Auto trade ONLY if mode is AUTO
                     if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
@@ -204,27 +214,27 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                                 # Update signal status
                                 _bot_status["last_signal"][symbol]["trade_status"] = "EXECUTED"
                             else:
-                                logger.info(f"   ??? {symbol}: Trade blocked - {reason}")
+                                logger.info(f"   ❌ {symbol}: Trade blocked - {reason}")
                                 _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
                         else:
                             _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
                     elif signal_data["signal"] not in ["WAIT", "SKIP"]:
-                        logger.info(f"   ?? Signal available but mode is MANUAL - not auto-trading")
+                        logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
                         _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
             
             # Wait for next cycle
             await asyncio.sleep(interval)
             
         except asyncio.CancelledError:
-            logger.info("?? Bot loop cancelled")
+            logger.info("🛑 Bot loop cancelled")
             break
         except Exception as e:
-            logger.error(f"? Bot loop error: {e}")
+            logger.error(f"❌ Bot loop error: {e}")
             _bot_status["error"] = str(e)
             await asyncio.sleep(5)  # Brief pause on error
     
     
-    logger.info("?? Unified bot loop stopped")
+    logger.info("🔴 Unified bot loop stopped")
 
 
 def _extract_layer_status(symbol: str) -> Dict:
@@ -317,6 +327,98 @@ def _extract_layer_status(symbol: str) -> Dict:
         "total": total,
         "pass_rate": (passed / total * 100) if total > 0 else 0
     }
+
+
+async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> bool:
+    """
+    🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณมาตรงข้าม
+    
+    Logic:
+    - มี SELL position อยู่ + สัญญาณ BUY มา → ปิด SELL ทันที
+    - มี BUY position อยู่ + สัญญาณ SELL มา → ปิด BUY ทันที
+    
+    Returns: True if position was closed, False otherwise
+    """
+    global _bot, _enable_reverse_signal_close
+    
+    if not _enable_reverse_signal_close:
+        return False
+    
+    if not _bot or not _bot.trading_engine:
+        return False
+    
+    # Determine signal direction
+    is_buy_signal = new_signal in ["BUY", "STRONG_BUY"]
+    is_sell_signal = new_signal in ["SELL", "STRONG_SELL"]
+    
+    if not is_buy_signal and not is_sell_signal:
+        return False
+    
+    try:
+        # Get current positions
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return False
+        
+        for pos in positions:
+            # Handle both dict and Position objects
+            if isinstance(pos, dict):
+                pos_symbol = pos.get("symbol", "")
+                pos_side = pos.get("side", "").upper()
+                pos_id = pos.get("ticket") or pos.get("id") or pos.get("position_id")
+                pos_pnl = pos.get("profit", 0) or pos.get("pnl", 0)
+            else:
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_side = getattr(pos, "side", "")
+                if hasattr(pos_side, "value"):
+                    pos_side = pos_side.value.upper()
+                else:
+                    pos_side = str(pos_side).upper()
+                pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                pos_pnl = getattr(pos, "profit", 0) or getattr(pos, "pnl", 0)
+            
+            # Check if this position is for the same symbol
+            if pos_symbol.upper() != symbol.upper():
+                continue
+            
+            # Check if signal is opposite to position
+            should_close = False
+            
+            if pos_side == "BUY" and is_sell_signal:
+                should_close = True
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has BUY position, got SELL signal")
+            elif pos_side == "SELL" and is_buy_signal:
+                should_close = True
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has SELL position, got BUY signal")
+            
+            if should_close and pos_id:
+                logger.info(f"🔄 Closing opposite position #{pos_id} | PnL: ${pos_pnl:.2f}")
+                
+                # Close the position
+                try:
+                    result = await _bot.trading_engine.broker.close_position(pos_id)
+                    if result:
+                        logger.info(f"✅ Position #{pos_id} closed successfully! Realized PnL: ${pos_pnl:.2f}")
+                        
+                        # Update daily stats
+                        _bot_status["daily_stats"]["trades"] += 1
+                        _bot_status["daily_stats"]["pnl"] += float(pos_pnl)
+                        if pos_pnl > 0:
+                            _bot_status["daily_stats"]["wins"] += 1
+                        else:
+                            _bot_status["daily_stats"]["losses"] += 1
+                        
+                        return True
+                    else:
+                        logger.warning(f"⚠️ Failed to close position #{pos_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error closing position #{pos_id}: {e}")
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error checking opposite positions: {e}")
+        return False
 
 
 def _get_trade_protection_info() -> Dict:
@@ -1119,3 +1221,43 @@ async def reset_trade_protection(symbol: str = None):
     else:
         _last_traded_signal.clear()
         return {"status": "reset_all"}
+
+
+# =====================
+# REVERSE SIGNAL CLOSE
+# =====================
+
+@router.get("/reverse-signal")
+async def get_reverse_signal_status():
+    """
+    🔄 Get reverse signal close status
+    """
+    global _enable_reverse_signal_close
+    
+    return {
+        "enabled": _enable_reverse_signal_close,
+        "description": "ปิด position อัตโนมัติเมื่อสัญญาณมาตรงข้าม",
+        "example": "มี SELL อยู่ + สัญญาณ BUY มา → ปิด SELL ทันที"
+    }
+
+
+@router.post("/reverse-signal/toggle")
+async def toggle_reverse_signal_close(enabled: bool = True):
+    """
+    🔄 Enable/Disable reverse signal close feature
+    
+    - enabled=true: ปิด position เมื่อสัญญาณตรงข้าม (แนะนำ)
+    - enabled=false: ไม่ปิดอัตโนมัติ
+    """
+    global _enable_reverse_signal_close
+    
+    _enable_reverse_signal_close = enabled
+    
+    status = "enabled" if enabled else "disabled"
+    logger.info(f"🔄 Reverse Signal Close: {status}")
+    
+    return {
+        "status": "success",
+        "reverse_signal_close": enabled,
+        "message": f"Reverse signal close {status}"
+    }
