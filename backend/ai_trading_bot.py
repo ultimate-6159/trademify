@@ -3028,10 +3028,10 @@ class AITradingBot:
         logger.info("")
         
         # 🎯 FINAL DECISION THRESHOLD
-        # 🚀 20-LAYER EXTREME CONFIG FOR MAXIMUM PROFIT
-        # - If >= 30% layers pass → TRADE (very relaxed)
-        # - If < 30% layers pass → SKIP
-        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.30"))  # 30% default for EXTREME
+        # 🔥 20-LAYER ULTRA EXTREME CONFIG FOR MAXIMUM PROFIT
+        # - If >= 15% layers pass → TRADE (ultra relaxed)
+        # - If < 15% layers pass → SKIP
+        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.15"))  # 🔥 ULTRA EXTREME: 15% default
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -3043,13 +3043,13 @@ class AITradingBot:
         
         # ═══════════════════════════════════════════════════════════════
         # 🎯 ENHANCED FILTER #1: HIGH QUALITY PASSES
-        # 🚀 EXTREME: ต้องมี 1+ layers ที่ score >= 70 ถึงจะเทรด
+        # 🔥 ULTRA EXTREME: ไม่ต้องการ high quality passes
         # ═══════════════════════════════════════════════════════════════
         high_quality_passes = sum(1 for r in base_layer_results if r.get('can_trade') and r.get('score', 0) >= 70)
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "1"))  # 1 for EXTREME
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "0"))  # 🔥 ULTRA EXTREME: No minimum
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -3062,13 +3062,13 @@ class AITradingBot:
         # ═══════════════════════════════════════════════════════════════
         # 🎯 ENHANCED FILTER #2: KEY LAYER AGREEMENT
         # Layer 5 (Advanced), 6 (SmartBrain), 7 (Neural), 9 (Quantum), 10 (Alpha)
-        # 🚀 EXTREME: ต้อง agree >= 20% (very relaxed)
+        # 🔥 ULTRA EXTREME: ไม่ต้องการ key layer agreement
         # ═══════════════════════════════════════════════════════════════
         KEY_LAYER_NUMS = [5, 6, 7, 9, 10]
         key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
         key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.20"))  # 20% for EXTREME
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.0"))  # 🔥 ULTRA EXTREME: No agreement required
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")

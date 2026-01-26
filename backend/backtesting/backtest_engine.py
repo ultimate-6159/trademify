@@ -75,15 +75,15 @@ class BacktestConfig:
     leverage: int = 100
     currency: str = "USD"
     
-    # Risk settings
-    max_risk_per_trade: float = 1.0  # % (lowered for safety)
-    max_daily_loss: float = 3.0  # %
-    max_drawdown: float = 30.0  # % (increased to allow more trades)
+    # Risk settings - 🔥 ULTRA EXTREME!
+    max_risk_per_trade: float = 5.0  # % (ULTRA EXTREME - 5%)
+    max_daily_loss: float = 50.0  # % (ULTRA EXTREME - 50%)
+    max_drawdown: float = 30.0  # % (ULTRA EXTREME - 30%)
     
-    # Signal settings
+    # Signal settings - 🔥 ULTRA EXTREME!
     min_quality: str = "LOW"  # PREMIUM, HIGH, MEDIUM, LOW (LOW = 40+, MEDIUM = 65+, HIGH = 75+, PREMIUM = 85+)
-    min_confidence: float = 40.0  # Minimum confidence score (40-100)
-    min_layer_pass_rate: float = 0.40  # 🔧 UPDATED: Same as Live Trading (40%)
+    min_confidence: float = 50.0  # Minimum confidence score (ULTRA EXTREME - 50)
+    min_layer_pass_rate: float = 0.15  # 🔥 ULTRA EXTREME: Only 15% layers need to pass (3/20)
     
     # Execution settings
     slippage_pips: float = 1.0
@@ -99,16 +99,16 @@ class BacktestConfig:
     # "technical" = Use technical indicators only (no pattern database needed)
     signal_mode: str = "technical"
     
-    # 🔧 NEW: Live Trading Realism Settings
+    # 🔥 ULTRA EXTREME: Live Trading Realism Settings
     use_live_trading_logic: bool = True  # Use exact same logic as Live Trading
-    min_high_quality_passes: int = 1  # Enhanced Filter #1: Need N layers with score >= 70
-    min_key_agreement: float = 0.30  # Enhanced Filter #2: Key layers must agree 30%+
+    min_high_quality_passes: int = 0  # 🔥 ULTRA EXTREME: No minimum required
+    min_key_agreement: float = 0.0  # 🔥 ULTRA EXTREME: No agreement required
     realistic_execution: bool = True  # Apply realistic slippage/spread model
     
-    # 🥇 TRAILING STOP SETTINGS (for locking profits)
+    # 🥇 TRAILING STOP SETTINGS - TIGHT FOR MAX PROFIT!
     use_trailing_stop: bool = True  # Enable trailing stop
-    trailing_activation_pct: float = 0.3  # Activate after 30% of TP reached
-    trailing_distance_pct: float = 0.5  # Trail at 50% of profit
+    trailing_activation_pct: float = 0.10  # 🔥 ULTRA EXTREME: Activate after 10% of TP reached
+    trailing_distance_pct: float = 0.20  # 🔥 ULTRA EXTREME: Trail at 20% of profit
     
     # Output settings
     save_trades: bool = True
