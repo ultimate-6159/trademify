@@ -425,7 +425,8 @@ function formatTimestamp(ts) {
 async function refreshSignal() {
   isLoading.value = true
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/signal/${selectedSymbol.value}`)
+    // ?? Use Unified API
+    const response = await fetch(`${API_BASE}/api/v1/unified/signal/${selectedSymbol.value}`)
     if (response.ok) {
       const data = await response.json()
       signal.value = data
@@ -441,14 +442,15 @@ async function refreshSignal() {
 
 async function fetchBotStatus() {
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/status`)
+    // ?? Use Unified API
+    const response = await fetch(`${API_BASE}/api/v1/unified/status`)
     if (response.ok) {
       const data = await response.json()
-      signalMode.value = data.signal_mode || data.config?.signal_mode || 'technical'
+      signalMode.value = data.bot?.signal_mode || 'technical'
       
-      // Get last signal for selected symbol
-      if (data.last_signals && data.last_signals[selectedSymbol.value]) {
-        signal.value = data.last_signals[selectedSymbol.value]
+      // Get last signal for selected symbol from unified status
+      if (data.signals && data.signals[selectedSymbol.value]) {
+        signal.value = data.signals[selectedSymbol.value]
       }
     }
   } catch (error) {

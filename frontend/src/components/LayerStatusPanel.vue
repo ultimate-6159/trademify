@@ -254,19 +254,36 @@ function formatTimestamp(ts) {
 async function refreshStatus() {
   isLoading.value = true
   try {
-    // Fetch from multiple endpoints to get layer data
-    const [statusRes, pipelineRes] = await Promise.all([
-      fetch(`${API_BASE}/api/v1/bot/status`).catch(() => null),
+    // ?? Use Unified API for layer data
+    const [unifiedRes, pipelineRes] = await Promise.all([
+      fetch(`${API_BASE}/api/v1/unified/layers/${props.symbol}`).catch(() => null),
       fetch(`${API_BASE}/api/v1/bot/pipeline/${props.symbol}`).catch(() => null)
     ])
     
     let data = null
     
+    // Prefer unified layers API
+    if (unifiedRes?.ok) {
+      const unifiedData = await unifiedRes.json()
+      if (unifiedData.layers && unifiedData.layers.length > 0) {
+        // Convert unified format to expected format
+        const layers = unifiedData.layers.map(l => ({
+          layer_num: l.layer,
+          name: l.name,
+          can_trade: l.status === 'PASS' || l.status === 'READY',
+          score: l.score || 0,
+          status: l.status
+        }))
+        layerResults.value = layers
+        finalDecision.value = unifiedData.pass_rate >= 15 ? 'APPROVE' : 'WAITING'
+        finalPositionFactor.value = unifiedData.pass_rate / 100
+        lastUpdated.value = new Date().toISOString()
+        return
+      }
+    }
+    
     if (pipelineRes?.ok) {
       data = await pipelineRes.json()
-    } else if (statusRes?.ok) {
-      const statusData = await statusRes.json()
-      data = statusData.last_signals?.[props.symbol] || statusData
     }
     
     if (data) {
