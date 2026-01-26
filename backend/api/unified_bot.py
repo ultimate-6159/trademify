@@ -507,53 +507,69 @@ async def _stop_bot_internal():
 @router.get("/status")
 async def get_unified_status():
     """
-    ?? Get complete unified status
+    📊 Get complete unified status
     
     Returns bot status, current signals, account info all in one call
     """
     global _bot, _bot_status
     
-    # Get account info
-    account = {"balance": 0, "equity": 0, "profit": 0, "free_margin": 0, "margin_level": 0}
     try:
-        if _bot and _bot.trading_engine:
-            balance = await _bot.trading_engine.broker.get_balance()
-            account_info = await _bot.trading_engine.broker.get_account_info()
-            if account_info:
-                equity = account_info.get("equity", balance)
-                margin = account_info.get("margin", 0)
-                account = {
-                    "balance": balance,
-                    "equity": equity,
-                    "profit": account_info.get("profit", 0),
-                    "free_margin": account_info.get("free_margin", balance),
-                    "margin_level": (equity / margin * 100) if margin > 0 else 0
-                }
+        # Get account info
+        account = {"balance": 0, "equity": 0, "profit": 0, "free_margin": 0, "margin_level": 0}
+        try:
+            if _bot and _bot.trading_engine:
+                balance = await _bot.trading_engine.broker.get_balance()
+                account_info = await _bot.trading_engine.broker.get_account_info()
+                if account_info:
+                    equity = account_info.get("equity", balance)
+                    margin = account_info.get("margin", 0)
+                    account = {
+                        "balance": float(balance) if balance else 0,
+                        "equity": float(equity) if equity else 0,
+                        "profit": float(account_info.get("profit", 0)),
+                        "free_margin": float(account_info.get("free_margin", balance or 0)),
+                        "margin_level": float((equity / margin * 100) if margin and margin > 0 else 0)
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to get account: {e}")
+        
+        # 🔧 Convert all numpy types to JSON-serializable
+        return _convert_to_json_serializable({
+            "bot": {
+                "mode": _bot_status.get("mode", "stopped"),
+                "running": _bot_status.get("running", False),
+                "initialized": _bot_status.get("initialized", False),
+                "symbols": _bot_status.get("symbols", []),
+                "timeframe": _bot_status.get("timeframe", "H1"),
+                "signal_mode": _bot_status.get("signal_mode", "technical"),
+                "quality": _bot_status.get("quality", "MEDIUM"),
+                "interval": _bot_status.get("interval", 60),
+                "auto_trade": _bot_status.get("auto_trade", False),
+                "started_at": _bot_status.get("started_at"),
+                "error": _bot_status.get("error")
+            },
+            "signals": _bot_status.get("last_signal", {}),
+            "layers": _bot_status.get("layer_status", {}),
+            "daily_stats": _bot_status.get("daily_stats", {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0}),
+            "account": account,
+            "trade_protection": _get_trade_protection_info(),
+            "timestamp": datetime.now().isoformat()
+        })
+        
     except Exception as e:
-        logger.warning(f"Failed to get account: {e}")
-    
-    # ?? Convert all numpy types to JSON-serializable
-    return _convert_to_json_serializable({
-        "bot": {
-            "mode": _bot_status["mode"],          # ?? Current mode: stopped/auto/manual
-            "running": _bot_status["running"],
-            "initialized": _bot_status["initialized"],
-            "symbols": _bot_status["symbols"],
-            "timeframe": _bot_status["timeframe"],
-            "signal_mode": _bot_status["signal_mode"],  # technical or pattern
-            "quality": _bot_status["quality"],
-            "interval": _bot_status["interval"],
-            "auto_trade": _bot_status["auto_trade"],    # ?? Whether auto-trading is enabled
-            "started_at": _bot_status["started_at"],
-            "error": _bot_status["error"]
-        },
-        "signals": _bot_status["last_signal"],
-        "layers": _bot_status["layer_status"],
-        "daily_stats": _bot_status["daily_stats"],
-        "account": account,
-        "trade_protection": _get_trade_protection_info(),
-        "timestamp": datetime.now().isoformat()
-    })
+        logger.error(f"Error getting unified status: {e}")
+        return {
+            "bot": {
+                "mode": "stopped",
+                "running": False,
+                "error": str(e)
+            },
+            "signals": {},
+            "layers": {},
+            "daily_stats": {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0},
+            "account": {"balance": 0, "equity": 0, "profit": 0, "free_margin": 0, "margin_level": 0},
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 @router.post("/start")
@@ -782,57 +798,106 @@ async def switch_bot_mode(request: SwitchModeRequest):
 @router.get("/signal/{symbol}")
 async def get_signal_for_symbol(symbol: str):
     """
-    ?? Get current signal for a specific symbol
+    📊 Get current signal for a specific symbol
     """
     global _bot_status
     
-    signal = _bot_status["last_signal"].get(symbol)
-    
-    if not signal:
+    try:
+        signal = _bot_status["last_signal"].get(symbol)
+        
+        if not signal:
+            return {
+                "status": "no_signal",
+                "symbol": symbol,
+                "signal": "WAIT",
+                "confidence": 0,
+                "quality": "SKIP",
+                "bot_mode": _bot_status["mode"],
+                "message": "No analysis available for this symbol. Start the bot first."
+            }
+        
+        # Build response safely
+        response = {
+            "status": "ok",
+            "bot_mode": _bot_status["mode"],
+            "symbol": signal.get("symbol", symbol),
+            "signal": signal.get("signal", "WAIT"),
+            "confidence": float(signal.get("confidence", 0)),
+            "quality": signal.get("quality", "SKIP"),
+            "current_price": float(signal.get("current_price", 0)),
+            "stop_loss": float(signal.get("stop_loss", 0)),
+            "take_profit": float(signal.get("take_profit", 0)),
+            "trade_status": signal.get("trade_status", "N/A"),
+            "market_regime": signal.get("market_regime", "UNKNOWN"),
+            "timestamp": signal.get("timestamp", datetime.now().isoformat())
+        }
+        
+        # Add optional fields if present
+        if "scores" in signal:
+            response["scores"] = _convert_to_json_serializable(signal["scores"])
+        if "indicators" in signal:
+            response["indicators"] = _convert_to_json_serializable(signal["indicators"])
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting signal for {symbol}: {e}")
         return {
-            "status": "no_signal",
+            "status": "error",
             "symbol": symbol,
             "signal": "WAIT",
             "confidence": 0,
             "quality": "SKIP",
-            "bot_mode": _bot_status["mode"],
-            "message": "No analysis available for this symbol"
+            "bot_mode": _bot_status.get("mode", "stopped"),
+            "error": str(e),
+            "message": f"Error fetching signal: {str(e)}"
         }
-    
-    return {
-        "status": "ok",
-        "bot_mode": _bot_status["mode"],
-        **signal
-    }
 
 
 @router.get("/layers/{symbol}")
 async def get_layers_for_symbol(symbol: str):
     """
-    ??? Get 20-layer status for a specific symbol
+    🏗️ Get 20-layer status for a specific symbol
     """
     global _bot_status
     
-    layers = _bot_status["layer_status"].get(symbol)
-    
-    if not layers:
+    try:
+        layers = _bot_status["layer_status"].get(symbol)
+        
+        if not layers:
+            return {
+                "status": "no_data",
+                "symbol": symbol,
+                "layers": [],
+                "passed": 0,
+                "total": 20,
+                "pass_rate": 0,
+                "bot_mode": _bot_status["mode"],
+                "message": "No layer data available. Start the bot first."
+            }
+        
+        return _convert_to_json_serializable({
+            "status": "ok",
+            "symbol": symbol,
+            "bot_mode": _bot_status["mode"],
+            "layers": layers.get("layers", []),
+            "passed": layers.get("passed", 0),
+            "total": layers.get("total", 20),
+            "pass_rate": layers.get("pass_rate", 0)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting layers for {symbol}: {e}")
         return {
-            "status": "no_data",
+            "status": "error",
             "symbol": symbol,
             "layers": [],
             "passed": 0,
             "total": 20,
             "pass_rate": 0,
-            "bot_mode": _bot_status["mode"],
-            "message": "No layer data available"
+            "bot_mode": _bot_status.get("mode", "stopped"),
+            "error": str(e)
         }
-    
-    return {
-        "status": "ok",
-        "symbol": symbol,
-        "bot_mode": _bot_status["mode"],
-        **layers
-    }
 
 
 @router.get("/analysis/{symbol}")
