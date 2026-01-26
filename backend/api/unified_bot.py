@@ -329,13 +329,23 @@ def _extract_layer_status(symbol: str) -> Dict:
     }
 
 
+
+
+
+
+
+
+
+
+
 async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> bool:
     """
-    🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณมาตรงข้าม
+    🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณมาตรงข้าม (เฉพาะกำไร)
     
     Logic:
-    - มี SELL position อยู่ + สัญญาณ BUY มา → ปิด SELL ทันที
-    - มี BUY position อยู่ + สัญญาณ SELL มา → ปิด BUY ทันที
+    - มี SELL position อยู่ + สัญญาณ BUY มา + กำไร > 0 → ปิด SELL ทันที
+    - มี BUY position อยู่ + สัญญาณ SELL มา + กำไร > 0 → ปิด BUY ทันที
+    - ถ้าขาดทุน → ไม่ปิด รอ SL/TP
     
     Returns: True if position was closed, False otherwise
     """
@@ -381,32 +391,34 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
             if pos_symbol.upper() != symbol.upper():
                 continue
             
+            # 💰 CHECK PROFIT - ต้องมีกำไรถึงจะปิด
+            if pos_pnl <= 0:
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has {pos_side} position but PnL=${pos_pnl:.2f} (loss) → NOT closing, wait for SL/TP")
+                continue
+            
             # Check if signal is opposite to position
             should_close = False
             
             if pos_side == "BUY" and is_sell_signal:
                 should_close = True
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has BUY position, got SELL signal")
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has BUY position with PROFIT ${pos_pnl:.2f}, got SELL signal")
             elif pos_side == "SELL" and is_buy_signal:
                 should_close = True
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has SELL position, got BUY signal")
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has SELL position with PROFIT ${pos_pnl:.2f}, got BUY signal")
             
             if should_close and pos_id:
-                logger.info(f"🔄 Closing opposite position #{pos_id} | PnL: ${pos_pnl:.2f}")
+                logger.info(f"💰 Closing profitable position #{pos_id} | PnL: +${pos_pnl:.2f}")
                 
                 # Close the position
                 try:
                     result = await _bot.trading_engine.broker.close_position(pos_id)
                     if result:
-                        logger.info(f"✅ Position #{pos_id} closed successfully! Realized PnL: ${pos_pnl:.2f}")
+                        logger.info(f"✅ Position #{pos_id} closed successfully! Realized PROFIT: +${pos_pnl:.2f}")
                         
                         # Update daily stats
                         _bot_status["daily_stats"]["trades"] += 1
                         _bot_status["daily_stats"]["pnl"] += float(pos_pnl)
-                        if pos_pnl > 0:
-                            _bot_status["daily_stats"]["wins"] += 1
-                        else:
-                            _bot_status["daily_stats"]["losses"] += 1
+                        _bot_status["daily_stats"]["wins"] += 1  # Always win because we only close profitable
                         
                         return True
                     else:
