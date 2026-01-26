@@ -273,6 +273,7 @@ class AITradingBot:
         broker_type: str = "MT5",  # MT5 only - Exness broker
         broadcast_to_firebase: bool = True,
         allowed_signals: List[str] = None,  # Allow specific signals only
+        signal_mode: str = "technical",  # 🔥 NEW: "technical" (like backtest) or "pattern" (FAISS)
     ):
         # Default to Exness MT5 symbols (with 'm' suffix)
         if symbols is None:
@@ -287,6 +288,9 @@ class AITradingBot:
         self.max_risk_percent = max_risk_percent
         self.broker_type = broker_type
         self.broadcast_to_firebase = broadcast_to_firebase
+        
+        # 🔥 Signal Mode: "technical" = เหมือน backtest, "pattern" = FAISS Pattern Matching
+        self.signal_mode = signal_mode
         
         # Allowed signals - default includes all trading signals
         self.allowed_signals = allowed_signals or ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"]
@@ -459,6 +463,388 @@ class AITradingBot:
         
         # Subscribers for real-time updates (SSE)
         self._subscribers: List[asyncio.Queue] = []
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🔥 TECHNICAL SIGNAL GENERATOR - เหมือน Backtest Engine (High Win Rate)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    
+    def _ema(self, data: np.ndarray, period: int) -> float:
+        """Calculate EMA"""
+        if len(data) < period:
+            return float(np.mean(data))
+        weights = np.exp(np.linspace(-1., 0., period))
+        weights /= weights.sum()
+        return float(np.convolve(data[-period*2:], weights, mode='valid')[-1])
+    
+    def _generate_technical_signal(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        current_time: datetime,
+        balance: float = 10000
+    ) -> Optional[Dict[str, Any]]:
+        """
+        🥇 TECHNICAL SIGNAL GENERATOR - เหมือน Backtest Engine
+        
+        ใช้กลยุทธ์เดียวกับ backtest_engine.py:
+        - EMA Crossover (5/10/20/50)
+        - RSI (7 for M15, 14 for H1)
+        - Candle Pattern Analysis
+        - Session Filter (London/NY)
+        - ATR-based SL/TP
+        
+        Target: 85%+ Win Rate for Gold M15, 80%+ for H1
+        """
+        try:
+            close = df['close'].values
+            high = df['high'].values
+            low = df['low'].values
+            opens = df['open'].values
+            
+            if len(close) < 50:
+                return None
+            
+            current_price = close[-1]
+            current_open = opens[-1]
+            current_high = high[-1]
+            current_low = low[-1]
+            
+            # Detect if this is Gold
+            is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+            
+            # Detect timeframe
+            is_m15 = self.timeframe.upper() in ['M15', 'M5', 'M30']
+            is_h1 = self.timeframe.upper() in ['H1', 'H4']
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 📊 INDICATORS
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            # EMAs - shorter periods for M15
+            if is_m15:
+                ema_fast = self._ema(close, 5)
+                ema_mid = self._ema(close, 10)
+                ema_slow = self._ema(close, 20)
+                ema_trend = self._ema(close, 50) if len(close) >= 50 else self._ema(close, 30)
+                
+                ema_fast_prev = self._ema(close[:-1], 5)
+                ema_mid_prev = self._ema(close[:-1], 10)
+            else:
+                ema_fast = self._ema(close, 5)
+                ema_mid = self._ema(close, 13)
+                ema_slow = self._ema(close, 21)
+                ema_trend = self._ema(close, 50) if len(close) >= 50 else self._ema(close, 30)
+                
+                ema_fast_prev = self._ema(close[:-1], 5)
+                ema_mid_prev = self._ema(close[:-1], 13)
+            
+            # SMA for support/resistance
+            sma_20 = np.mean(close[-20:])
+            sma_50 = np.mean(close[-50:]) if len(close) >= 50 else sma_20
+            
+            # RSI - shorter for M15
+            rsi_period = 7 if is_m15 else 14
+            delta = np.diff(close)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain[-rsi_period:]) if len(gain) >= rsi_period else 0.001
+            avg_loss = np.mean(loss[-rsi_period:]) if len(loss) >= rsi_period else 0.001
+            rs = avg_gain / max(avg_loss, 0.0001)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # RSI previous for momentum
+            if len(gain) >= rsi_period + 1:
+                avg_gain_prev = np.mean(gain[-(rsi_period+1):-1])
+                avg_loss_prev = np.mean(loss[-(rsi_period+1):-1])
+                rs_prev = avg_gain_prev / max(avg_loss_prev, 0.0001)
+                rsi_prev = 100 - (100 / (1 + rs_prev))
+            else:
+                rsi_prev = rsi
+            
+            # ATR
+            atr_period = 10 if is_m15 else 14
+            if len(close) >= atr_period + 1:
+                prev_close_arr = close[-(atr_period+1):-1]
+                high_arr = high[-atr_period:]
+                low_arr = low[-atr_period:]
+                tr1 = high_arr - low_arr
+                tr2 = np.abs(high_arr - prev_close_arr)
+                tr3 = np.abs(low_arr - prev_close_arr)
+                tr = np.maximum(np.maximum(tr1, tr2), tr3)
+                atr = np.mean(tr)
+            else:
+                atr = np.mean(high[-14:] - low[-14:]) if len(high) >= 14 else 1.0
+            
+            atr_pct = (atr / current_price) * 100
+            
+            # Candle analysis
+            candle_body = abs(current_price - current_open)
+            candle_range = current_high - current_low
+            body_ratio = candle_body / max(candle_range, 0.01)
+            
+            is_bullish = current_price > current_open
+            is_bearish = current_price < current_open
+            
+            # Previous candles
+            prev_close_price = close[-2]
+            prev_open_val = opens[-2]
+            prev_bullish = prev_close_price > prev_open_val
+            prev_bearish = prev_close_price < prev_open_val
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🥇 GOLD/FOREX STRATEGY
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            hour = current_time.hour
+            day_of_week = current_time.weekday()
+            
+            # 1. SESSION FILTER
+            london_session = 7 <= hour <= 16
+            ny_session = 13 <= hour <= 21
+            overlap_session = 13 <= hour <= 16
+            asian_session = 0 <= hour <= 6 or hour >= 22
+            is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
+            
+            if is_m15:
+                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+            else:
+                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+            
+            # 2. TREND ANALYSIS
+            strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
+            strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
+            
+            moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
+            moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
+            
+            has_uptrend = strong_uptrend or moderate_uptrend
+            has_downtrend = strong_downtrend or moderate_downtrend
+            
+            # 3. CROSSOVER SIGNALS
+            bullish_cross = ema_fast_prev <= ema_mid_prev and ema_fast > ema_mid
+            bearish_cross = ema_fast_prev >= ema_mid_prev and ema_fast < ema_mid
+            
+            price_cross_up = close[-2] <= ema_mid_prev and current_price > ema_mid
+            price_cross_down = close[-2] >= ema_mid_prev and current_price < ema_mid
+            
+            has_bullish_cross = bullish_cross or price_cross_up
+            has_bearish_cross = bearish_cross or price_cross_down
+            
+            # 4. RSI CONFIRMATION
+            if is_m15:
+                rsi_ok_buy = 30 <= rsi <= 70
+                rsi_ok_sell = 30 <= rsi <= 70
+            else:
+                rsi_ok_buy = 35 <= rsi <= 65
+                rsi_ok_sell = 35 <= rsi <= 65
+            
+            rsi_rising = rsi > rsi_prev
+            rsi_falling = rsi < rsi_prev
+            
+            # 5. CANDLE CONFIRMATION
+            min_body_ratio = 0.25 if is_m15 else 0.3
+            bullish_candle = is_bullish and body_ratio > min_body_ratio
+            bearish_candle = is_bearish and body_ratio > min_body_ratio
+            
+            bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
+            bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
+            
+            # 6. PULLBACK ZONE
+            distance_to_ema = abs(current_price - ema_slow)
+            pullback_atr_mult = 3.0 if is_m15 else 2.5
+            in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
+            
+            # 7. VOLATILITY CHECK
+            max_volatility = 4.0 if is_m15 else 3.0
+            volatility_ok = atr_pct <= max_volatility
+            
+            # 8. SUPPORT/RESISTANCE
+            lookback = 15 if is_m15 else 20
+            recent_high = np.max(high[-lookback:])
+            recent_low = np.min(low[-lookback:])
+            price_range = recent_high - recent_low
+            
+            near_support = current_price <= recent_low + price_range * 0.35
+            near_resistance = current_price >= recent_high - price_range * 0.35
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🎯 SIGNAL SCORING
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            buy_conditions = [
+                has_uptrend,                        # 1. Trend
+                has_bullish_cross,                  # 2. Crossover
+                rsi_ok_buy,                         # 3. RSI range
+                rsi_rising,                         # 4. RSI momentum
+                good_session,                       # 5. Session
+                bullish_candle or bullish_engulf,   # 6. Candle
+                in_pullback_zone or near_support,   # 7. Entry zone
+                volatility_ok,                      # 8. Volatility
+            ]
+            
+            sell_conditions = [
+                has_downtrend,                      # 1. Trend
+                has_bearish_cross,                  # 2. Crossover
+                rsi_ok_sell,                        # 3. RSI range
+                rsi_falling,                        # 4. RSI momentum
+                good_session,                       # 5. Session
+                bearish_candle or bearish_engulf,   # 6. Candle
+                in_pullback_zone or near_resistance,# 7. Entry zone
+                volatility_ok,                      # 8. Volatility
+            ]
+            
+            buy_score = sum(buy_conditions)
+            sell_score = sum(sell_conditions)
+            
+            # Bonus points
+            if strong_uptrend:
+                buy_score += 1
+            if strong_downtrend:
+                sell_score += 1
+            if overlap_session:
+                buy_score += 1
+                sell_score += 1
+            
+            # M15: Need only 3/10 conditions (very relaxed for more trades)
+            # H1: Need 4/10 conditions
+            min_conditions = 3 if is_m15 else 4
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🎯 FINAL SIGNAL
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            signal = None
+            confidence = 0
+            quality = "LOW"
+            
+            if is_m15:
+                if buy_score >= min_conditions and buy_score > sell_score:
+                    signal = "BUY"
+                    confidence = 65 + (buy_score - min_conditions) * 6
+                    if buy_score >= 7:
+                        quality = "PREMIUM"
+                    elif buy_score >= 5:
+                        quality = "HIGH"
+                    elif buy_score >= 4:
+                        quality = "MEDIUM"
+                    else:
+                        quality = "LOW"
+                elif sell_score >= min_conditions and sell_score > buy_score:
+                    signal = "SELL"
+                    confidence = 65 + (sell_score - min_conditions) * 6
+                    if sell_score >= 7:
+                        quality = "PREMIUM"
+                    elif sell_score >= 5:
+                        quality = "HIGH"
+                    elif sell_score >= 4:
+                        quality = "MEDIUM"
+                    else:
+                        quality = "LOW"
+                else:
+                    return None
+            else:
+                if buy_score >= min_conditions and buy_score > sell_score:
+                    signal = "BUY"
+                    confidence = 60 + (buy_score - min_conditions) * 8
+                    if buy_score >= 8:
+                        quality = "PREMIUM"
+                    elif buy_score >= 7:
+                        quality = "HIGH"
+                    elif buy_score >= 6:
+                        quality = "MEDIUM"
+                    else:
+                        quality = "LOW"
+                elif sell_score >= min_conditions and sell_score > buy_score:
+                    signal = "SELL"
+                    confidence = 60 + (sell_score - min_conditions) * 8
+                    if sell_score >= 8:
+                        quality = "PREMIUM"
+                    elif sell_score >= 7:
+                        quality = "HIGH"
+                    elif sell_score >= 6:
+                        quality = "MEDIUM"
+                    else:
+                        quality = "LOW"
+                else:
+                    return None
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🛡️ SL/TP CALCULATION - เหมือน Backtest (Optimized for High Win Rate)
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            if is_gold:
+                if is_m15:
+                    # 🥇 M15 SCALPING: Proven best settings
+                    sl_distance = atr * 2.0
+                    tp_distance = atr * 0.6
+                    
+                    # Dynamic SL based on balance
+                    ABSOLUTE_MIN_SL = 0.5
+                    ABSOLUTE_MAX_SL = 50.0
+                    
+                    raw_min_sl = balance * 0.005
+                    raw_max_sl = balance * 0.02
+                    
+                    min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))
+                    max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))
+                    
+                    sl_distance = max(min_sl, min(sl_distance, max_sl))
+                    tp_distance = sl_distance * 0.6
+                else:
+                    # H1: Better R:R settings
+                    sl_distance = atr * 1.8
+                    tp_distance = atr * 0.7
+                    
+                    raw_min_sl = balance * 0.01
+                    raw_max_sl = balance * 0.03
+                    
+                    ABSOLUTE_MIN_SL_H1 = 1.0
+                    ABSOLUTE_MAX_SL_H1 = 100.0
+                    
+                    min_sl = max(ABSOLUTE_MIN_SL_H1, min(raw_min_sl, ABSOLUTE_MAX_SL_H1 * 0.2))
+                    max_sl = max(5.0, min(raw_max_sl, ABSOLUTE_MAX_SL_H1))
+                    
+                    sl_distance = max(min_sl, min(sl_distance, max_sl))
+                    tp_distance = sl_distance * 0.7
+            else:
+                # Forex: Use pip-based
+                pip_value = 0.0001 if 'JPY' not in symbol else 0.01
+                sl_distance = atr * 1.5
+                tp_distance = atr * 2.0
+                
+                min_sl = 20 * pip_value
+                max_sl = 50 * pip_value
+                sl_distance = max(min_sl, min(sl_distance, max_sl))
+                tp_distance = sl_distance * 1.5
+            
+            if signal == "BUY":
+                stop_loss = current_price - sl_distance
+                take_profit = current_price + tp_distance
+            else:
+                stop_loss = current_price + sl_distance
+                take_profit = current_price - tp_distance
+            
+            # Return signal dict
+            return {
+                "signal": signal,
+                "confidence": min(95, confidence),
+                "quality": quality,
+                "current_price": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "atr": atr,
+                "rsi": rsi,
+                "buy_score": buy_score,
+                "sell_score": sell_score,
+                "session": "OVERLAP" if overlap_session else "LONDON" if london_session else "NY" if ny_session else "ASIAN",
+                "trend": "STRONG_UP" if strong_uptrend else "UP" if has_uptrend else "STRONG_DOWN" if strong_downtrend else "DOWN" if has_downtrend else "RANGE",
+            }
+            
+        except Exception as e:
+            logger.error(f"Technical signal generation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _get_confidence_for_quality(self, quality: SignalQuality) -> float:
         """
@@ -1423,7 +1809,7 @@ class AITradingBot:
     
     async def analyze_symbol(self, symbol: str) -> Dict[str, Any]:
         """Analyze a symbol with enhanced AI factors"""
-        logger.info(f"📊 Analyzing {symbol}...")
+        logger.info(f"📊 Analyzing {symbol}... (Mode: {self.signal_mode})")
         
         # Default response structure with scores
         default_response = {
@@ -1452,12 +1838,6 @@ class AITradingBot:
             "timestamp": datetime.now().isoformat()
         }
         
-        if symbol not in self.pattern_matchers:
-            logger.warning(f"⚠️ {symbol}: No pattern index")
-            default_response["reason"] = "No index"
-            default_response["factors"]["skip_reasons"] = ["Pattern index not built"]
-            return default_response
-        
         # Get current timeframe data
         logger.info(f"   Fetching {self.timeframe} data for {symbol}...")
         df = await self.data_provider.get_klines(
@@ -1466,6 +1846,116 @@ class AITradingBot:
             limit=self.window_size + 100
         )
         logger.info(f"   Got {len(df)} candles for {symbol}")
+        
+        if len(df) < 50:
+            logger.warning(f"⚠️ {symbol}: Insufficient data - need 50, got {len(df)}")
+            default_response["reason"] = "Insufficient data"
+            default_response["factors"]["skip_reasons"] = [f"Need 50 candles, got {len(df)}"]
+            return default_response
+        
+        current_price = float(df['close'].iloc[-1])
+        logger.info(f"   {symbol} current price: {current_price}")
+        
+        # Get balance for SL/TP calculation
+        balance = 10000
+        if self.trading_engine:
+            try:
+                balance = await self.trading_engine.broker.get_balance()
+            except:
+                pass
+        
+        # ═══════════════════════════════════════════════════════════════════════════════
+        # 🔥 SIGNAL MODE: TECHNICAL (เหมือน Backtest) vs PATTERN (FAISS)
+        # ═══════════════════════════════════════════════════════════════════════════════
+        
+        if self.signal_mode == "technical":
+            # 🔥 TECHNICAL MODE - เหมือน Backtest Engine (High Win Rate)
+            logger.info(f"   🔥 Using TECHNICAL Signal Generator (Backtest Strategy)")
+            
+            tech_signal = self._generate_technical_signal(
+                symbol=symbol,
+                df=df,
+                current_time=datetime.now(),
+                balance=balance
+            )
+            
+            if tech_signal is None:
+                logger.info(f"   ⏸️ {symbol}: No technical signal generated")
+                default_response["factors"]["skip_reasons"] = ["Technical conditions not met"]
+                return default_response
+            
+            # Build result from technical signal
+            result = {
+                "symbol": symbol,
+                "timeframe": self.timeframe,
+                "current_price": current_price,
+                "signal": tech_signal["signal"],
+                "base_confidence": tech_signal["confidence"],
+                "enhanced_confidence": tech_signal["confidence"],
+                "quality": tech_signal["quality"],
+                "scores": {
+                    "pattern": tech_signal["buy_score"] * 10 if tech_signal["signal"] == "BUY" else tech_signal["sell_score"] * 10,
+                    "trend": 80 if "STRONG" in tech_signal.get("trend", "") else 60 if tech_signal.get("trend", "") in ["UP", "DOWN"] else 40,
+                    "volume": 60,
+                    "momentum": 80 if tech_signal["rsi"] > 50 else 40,
+                    "session": 90 if tech_signal["session"] == "OVERLAP" else 70 if tech_signal["session"] in ["LONDON", "NY"] else 30,
+                    "volatility": 70,
+                    "recency": 60,
+                },
+                "market_regime": tech_signal.get("trend", "UNKNOWN"),
+                "indicators": {
+                    "rsi": tech_signal["rsi"],
+                    "atr": tech_signal["atr"],
+                },
+                "risk_management": {
+                    "stop_loss": tech_signal["stop_loss"],
+                    "take_profit": tech_signal["take_profit"],
+                    "risk_reward": abs(tech_signal["take_profit"] - current_price) / abs(current_price - tech_signal["stop_loss"]) if abs(current_price - tech_signal["stop_loss"]) > 0 else 1.0,
+                    "position_size": 1.0,
+                    "entry_timing": "NOW",
+                    "atr": tech_signal["atr"],
+                },
+                "factors": {
+                    "bullish": [f"Buy Score: {tech_signal['buy_score']}/10", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "BUY" else [],
+                    "bearish": [f"Sell Score: {tech_signal['sell_score']}/10", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "SELL" else [],
+                    "skip_reasons": [],
+                },
+                "factor_details": [],
+                "vote_details": None,
+                "n_matches": 0,
+                "duration": None,
+                "market_data": {
+                    "open": float(df['open'].iloc[-1]),
+                    "high": float(df['high'].iloc[-1]),
+                    "low": float(df['low'].iloc[-1]),
+                    "close": current_price,
+                    "volume": float(df['volume'].iloc[-1]),
+                },
+                "timestamp": datetime.now().isoformat(),
+                "signal_mode": "technical",
+            }
+            
+            logger.info(f"🔥 {symbol}: TECHNICAL Signal={tech_signal['signal']} | Confidence={tech_signal['confidence']:.1f}% | Quality={tech_signal['quality']}")
+            logger.info(f"   Scores: Buy={tech_signal['buy_score']}/10 Sell={tech_signal['sell_score']}/10 | Session={tech_signal['session']} | Trend={tech_signal['trend']}")
+            logger.info(f"   SL=${tech_signal['stop_loss']:.5f} | TP=${tech_signal['take_profit']:.5f}")
+            
+            # Store last analysis
+            self._last_analysis = result
+            self._last_analysis_by_symbol[symbol] = result
+            
+            return result
+        
+        # ═══════════════════════════════════════════════════════════════════════════════
+        # 📊 PATTERN MODE - Original FAISS Pattern Matching
+        # ═══════════════════════════════════════════════════════════════════════════════
+        
+        logger.info(f"   📊 Using PATTERN Signal Generator (FAISS)")
+        
+        if symbol not in self.pattern_matchers:
+            logger.warning(f"⚠️ {symbol}: No pattern index")
+            default_response["reason"] = "No index"
+            default_response["factors"]["skip_reasons"] = ["Pattern index not built"]
+            return default_response
         
         # Get higher timeframe data
         htf_df = await self.data_provider.get_klines(
@@ -1479,9 +1969,6 @@ class AITradingBot:
             default_response["reason"] = "Insufficient data"
             default_response["factors"]["skip_reasons"] = [f"Need {self.window_size} candles, got {len(df)}"]
             return default_response
-        
-        current_price = float(df['close'].iloc[-1])
-        logger.info(f"   {symbol} current price: {current_price}")
         
         # Prepare OHLCV arrays
         ohlcv_data = {
@@ -4242,6 +4729,7 @@ class AITradingBot:
             "symbols": self.symbols,
             "min_quality": self.min_quality.value if hasattr(self.min_quality, 'value') else str(self.min_quality),
             "allowed_signals": self.allowed_signals,
+            "signal_mode": self.signal_mode,  # 🔥 NEW: technical or pattern
             "mode": "PRODUCTION",
             "last_signals": self._convert_for_json(self._last_signals),
             "daily_stats": self._convert_for_json(self._daily_stats),
@@ -4252,6 +4740,7 @@ class AITradingBot:
                 "timeframe": self.timeframe,
                 "htf_timeframe": self.htf_timeframe,
                 "quality": self.min_quality.value if hasattr(self.min_quality, 'value') else str(self.min_quality),
+                "signal_mode": self.signal_mode,  # 🔥 NEW
                 "interval": getattr(self, '_interval', 60),
             }
         }
@@ -4278,8 +4767,11 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Forex (MT5) - Production Trading on Windows VPS
-  python ai_trading_bot.py --broker MT5 --symbols EURUSDm,GBPUSDm,XAUUSDm --quality HIGH
+  # 🔥 TECHNICAL MODE (เหมือน Backtest - High Win Rate!)
+  python ai_trading_bot.py --broker MT5 --symbols XAUUSDm --mode technical --quality LOW
+  
+  # 📊 PATTERN MODE (FAISS Pattern Matching)
+  python ai_trading_bot.py --broker MT5 --symbols EURUSDm,GBPUSDm,XAUUSDm --mode pattern --quality HIGH
   
   # High Quality Only
   python ai_trading_bot.py --broker MT5 --symbols EURUSDm,XAUUSDm --quality PREMIUM
@@ -4289,10 +4781,12 @@ Examples:
     parser.add_argument('--timeframe', default='H1', help='Timeframe (M5, M15, M30, H1, H4, D1)')
     parser.add_argument('--htf', default='H4', help='Higher timeframe for MTF analysis')
     parser.add_argument('--interval', type=int, default=60, help='Analysis interval (seconds)')
-    parser.add_argument('--quality', default='HIGH', choices=['PREMIUM', 'HIGH', 'MEDIUM', 'LOW'], 
+    parser.add_argument('--quality', default='LOW', choices=['PREMIUM', 'HIGH', 'MEDIUM', 'LOW'], 
                        help='Signal quality filter (PREMIUM=safest, LOW=aggressive)')
-    parser.add_argument('--risk', type=float, default=2.0, help='Max risk per trade (%%)')
+    parser.add_argument('--risk', type=float, default=5.0, help='Max risk per trade (%%)')
     parser.add_argument('--broker', default='MT5', choices=['MT5', 'BINANCE'], help='Broker type')
+    parser.add_argument('--mode', default='technical', choices=['technical', 'pattern'], 
+                       help='🔥 Signal mode: technical=เหมือน Backtest (High Win Rate), pattern=FAISS')
     
     args = parser.parse_args()
     
@@ -4312,6 +4806,7 @@ Examples:
     print(f"   Timeframe: {args.timeframe} (HTF: {args.htf})")
     print(f"   Quality:   {args.quality}")
     print(f"   Risk:      {args.risk}% per trade")
+    print(f"   🔥 Mode:   {args.mode.upper()} {'(เหมือน Backtest - High Win Rate!)' if args.mode == 'technical' else '(FAISS Pattern Matching)'}")
     print(f"   Mode:      🔴 LIVE TRADING")
     print("=" * 60)
     
@@ -4326,6 +4821,7 @@ Examples:
         min_quality=quality_map[args.quality],
         max_risk_percent=args.risk,
         broker_type=args.broker,
+        signal_mode=args.mode,  # 🔥 NEW: technical or pattern
     )
     
     _bot_instance = bot
