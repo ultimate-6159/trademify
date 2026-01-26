@@ -573,11 +573,22 @@ async def get_account_info():
     # Try to get account info even if trading_engine is not initialized
     account = None
     balance = 0
+    equity = 0
+    margin = 0
+    free_margin = 0
+    leverage = 0
+    profit = 0
     
     if trading_engine and trading_engine.broker:
         try:
             account = await trading_engine.broker.get_account_info()
             balance = await trading_engine.broker.get_balance()
+            if account:
+                equity = account.get("equity", balance)
+                margin = account.get("margin", 0)
+                free_margin = account.get("free_margin", balance)
+                leverage = account.get("leverage", 0)
+                profit = account.get("profit", 0)
         except Exception as e:
             logger.warning(f"Failed to get account from trading_engine: {e}")
     
@@ -599,31 +610,45 @@ async def get_account_info():
                         "currency": info.currency,
                     }
                     balance = info.balance
+                    equity = info.equity
+                    margin = info.margin
+                    free_margin = info.margin_free
+                    leverage = info.leverage
+                    profit = info.profit
         except Exception as e:
             logger.warning(f"Failed to get account from MT5: {e}")
     
+    # Calculate margin level
+    margin_level = (equity / margin * 100) if margin > 0 else 0
+    
     if not account:
-        # Return empty/default response instead of 400 error
+        # Return empty/default response instead of 400 error - fields at ROOT level for frontend
         return {
-            "account": {
-                "login": 0,
-                "balance": 0,
-                "equity": 0,
-                "margin": 0,
-                "free_margin": 0,
-                "leverage": 0,
-                "profit": 0,
-                "currency": "USD",
-            },
             "balance": 0,
+            "equity": 0,
+            "margin": 0,
+            "free_margin": 0,
+            "margin_level": 0,
+            "leverage": 0,
+            "profit": 0,
+            "currency": "USD",
+            "account": None,
             "broker_type": trading_config.broker_type.value if trading_config else "MT5",
             "status": "not_connected",
             "message": "Trading system not initialized or MT5 not connected"
         }
     
+    # Return fields at ROOT level for frontend compatibility
     return {
-        "account": account,
         "balance": balance,
+        "equity": equity,
+        "margin": margin,
+        "free_margin": free_margin,
+        "margin_level": margin_level,
+        "leverage": leverage,
+        "profit": profit,
+        "currency": account.get("currency", "USD"),
+        "account": account,
         "broker_type": trading_config.broker_type.value,
         "status": "connected"
     }
