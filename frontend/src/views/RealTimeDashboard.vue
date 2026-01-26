@@ -23,15 +23,17 @@
           </option>
         </select>
         
-        <!-- Auto Refresh Toggle -->
-        <button 
-          @click="toggleAutoRefresh"
-          :class="autoRefresh ? 'bg-green-600' : 'bg-gray-600'"
-          class="px-3 py-2 rounded-lg text-white text-sm flex items-center gap-1"
+        <!-- ?? Bot Mode Badge -->
+        <div 
+          class="px-3 py-2 rounded-lg text-sm font-semibold"
+          :class="botMode === 'auto' 
+            ? 'bg-green-900 text-green-400 border border-green-600' 
+            : botMode === 'manual' 
+              ? 'bg-blue-900 text-blue-400 border border-blue-600'
+              : 'bg-gray-700 text-gray-400'"
         >
-          <span :class="{ 'animate-spin': autoRefresh && isLoading }">??</span>
-          {{ autoRefresh ? 'Auto' : 'Manual' }}
-        </button>
+          {{ botMode === 'auto' ? '?? Auto' : botMode === 'manual' ? '?? Manual' : '?? Stopped' }}
+        </div>
       </div>
     </div>
 
@@ -261,6 +263,7 @@ const isLoading = ref(false)
 const autoRefresh = ref(true)
 const botRunning = ref(false)
 const signalMode = ref('technical')
+const botMode = ref('stopped')  // ?? Bot trading mode: stopped, auto, manual
 
 const account = ref({
   balance: 0,
@@ -358,15 +361,17 @@ function onSignalUpdated(signal) {
 
 async function fetchBotStatus() {
   try {
-    const response = await fetch(`${API_BASE}/api/v1/bot/status`)
+    // ?? Use Unified API for consistent mode tracking
+    const response = await fetch(`${API_BASE}/api/v1/unified/status`)
     if (response.ok) {
       const data = await response.json()
       isConnected.value = true
-      botRunning.value = data.running || false
-      signalMode.value = data.signal_mode || data.config?.signal_mode || 'technical'
+      botRunning.value = data.bot?.running || false
+      botMode.value = data.bot?.mode || 'stopped'  // ?? Sync bot mode
+      signalMode.value = data.bot?.signal_mode || 'technical'
       
-      if (data.symbols && data.symbols.length > 0) {
-        symbols.value = data.symbols
+      if (data.bot?.symbols && data.bot.symbols.length > 0) {
+        symbols.value = data.bot.symbols
       }
       
       if (data.daily_stats) {
