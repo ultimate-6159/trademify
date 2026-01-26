@@ -70,8 +70,34 @@
             </div>
           </div>
         </div>
-        <div class="text-gray-400 text-sm">
-          Signal Mode: <span class="text-white font-semibold">{{ signalMode.toUpperCase() }}</span>
+        
+        <!-- ?? Start/Stop Button + Mode -->
+        <div class="flex items-center gap-3">
+          <div class="text-gray-400 text-sm hidden sm:block">
+            Signal Mode: <span class="text-white font-semibold">{{ signalMode.toUpperCase() }}</span>
+          </div>
+          
+          <!-- Start/Stop Button -->
+          <button
+            v-if="!botRunning"
+            @click="startBot"
+            :disabled="isStarting"
+            class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg font-semibold flex items-center gap-2"
+          >
+            <span v-if="isStarting" class="animate-spin">?</span>
+            <span v-else>??</span>
+            Start Bot
+          </button>
+          <button
+            v-else
+            @click="stopBot"
+            :disabled="isStopping"
+            class="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg font-semibold flex items-center gap-2"
+          >
+            <span v-if="isStopping" class="animate-spin">?</span>
+            <span v-else>??</span>
+            Stop Bot
+          </button>
         </div>
       </div>
     </div>
@@ -262,6 +288,8 @@ const isConnected = ref(true)
 const isLoading = ref(false)
 const autoRefresh = ref(true)
 const botRunning = ref(false)
+const isStarting = ref(false)  // ?? For start button
+const isStopping = ref(false)  // ?? For stop button
 const signalMode = ref('technical')
 const botMode = ref('stopped')  // ?? Bot trading mode: stopped, auto, manual
 
@@ -370,6 +398,7 @@ async function fetchBotStatus() {
       botMode.value = data.bot?.mode || 'stopped'  // ?? Sync bot mode
       signalMode.value = data.bot?.signal_mode || 'technical'
       
+      
       if (data.bot?.symbols && data.bot.symbols.length > 0) {
         symbols.value = data.bot.symbols
       }
@@ -383,6 +412,61 @@ async function fetchBotStatus() {
   } catch (error) {
     console.error('Failed to fetch bot status:', error)
     isConnected.value = false
+  }
+}
+
+// ?? Start Bot (AUTO mode by default)
+async function startBot() {
+  isStarting.value = true
+  try {
+    const response = await fetch(`${API_BASE}/api/v1/unified/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'auto',  // Default to AUTO mode
+        symbols: symbols.value.join(','),
+        timeframe: 'H1',
+        signal_mode: 'technical',
+        quality: 'MEDIUM',
+        interval: 60
+      })
+    })
+    
+    if (response.ok) {
+      console.log('[RealTime] Bot started in AUTO mode')
+      await fetchBotStatus()
+    } else {
+      const error = await response.json()
+      alert(error.message || 'Failed to start bot')
+    }
+  } catch (error) {
+    console.error('Failed to start bot:', error)
+    alert('Failed to start bot: ' + error.message)
+  } finally {
+    isStarting.value = false
+  }
+}
+
+// ?? Stop Bot
+async function stopBot() {
+  isStopping.value = true
+  try {
+    const response = await fetch(`${API_BASE}/api/v1/unified/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    
+    if (response.ok) {
+      console.log('[RealTime] Bot stopped')
+      await fetchBotStatus()
+    } else {
+      const error = await response.json()
+      alert(error.message || 'Failed to stop bot')
+    }
+  } catch (error) {
+    console.error('Failed to stop bot:', error)
+  } finally {
+    isStopping.value = false
   }
 }
 
