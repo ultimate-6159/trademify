@@ -10,6 +10,11 @@ const router = createRouter({
       component: PipelineDashboard,
     },
     {
+      path: "/realtime",
+      name: "realtime",
+      component: () => import("../views/RealTimeDashboard.vue"),
+    },
+    {
       path: "/settings",
       name: "settings",
       component: () => import("../views/Settings.vue"),
@@ -21,7 +26,7 @@ const router = createRouter({
     },
     {
       path: "/dashboard",
-      redirect: "/",
+      redirect: "/realtime",
     },
     {
       path: "/trading",

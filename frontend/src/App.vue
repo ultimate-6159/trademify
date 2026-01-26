@@ -25,6 +25,13 @@
               <span>🔬</span> Control Center
             </router-link>
             <router-link
+              to="/realtime"
+              class="text-gray-400 hover:text-white transition-colors flex items-center gap-1 text-sm lg:text-base"
+              :class="{ 'text-white': $route.path === '/realtime' }"
+            >
+              <span>📊</span> Real-time
+            </router-link>
+            <router-link
               to="/intelligence"
               class="text-gray-400 hover:text-white transition-colors flex items-center gap-1 text-sm lg:text-base"
               :class="{ 'text-white': $route.path === '/intelligence' }"
@@ -62,6 +69,16 @@
             :class="{ 'text-white bg-gray-800': $route.path === '/' }"
           >
             <span>🔬</span> Control Center
+          </router-link>
+          <router-link
+            to="/realtime"
+            @click="mobileMenuOpen = false"
+            class="block py-2 px-3 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            :class="{
+              'text-white bg-gray-800': $route.path === '/realtime',
+            }"
+          >
+            <span>📊</span> Real-time Dashboard
           </router-link>
           <router-link
             to="/intelligence"
@@ -102,6 +119,16 @@
         >
           <span class="text-lg">🔬</span>
           <span>Control</span>
+        </router-link>
+        <router-link
+          to="/realtime"
+          class="flex flex-col items-center py-1 px-3 text-xs"
+          :class="
+            $route.path === '/realtime' ? 'text-blue-400' : 'text-gray-400'
+          "
+        >
+          <span class="text-lg">📊</span>
+          <span>Live</span>
         </router-link>
         <router-link
           to="/intelligence"

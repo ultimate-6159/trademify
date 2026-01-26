@@ -2245,6 +2245,206 @@ async def get_bot_signals(limit: int = 20):
         return {"signals": [], "count": 0, "error": str(e)}
 
 
+@app.get("/api/v1/bot/signal/{symbol}")
+async def get_bot_signal_by_symbol(symbol: str):
+    """
+    🔥 Get real-time signal for a specific symbol
+    
+    Returns the latest technical signal analysis with all scores,
+    indicators, and risk management data.
+    
+    This endpoint returns data that matches the backend's 
+    _generate_technical_signal() output.
+    """
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "symbol": symbol,
+            "signal": "WAIT",
+            "message": "Start the bot to get signals"
+        }
+    
+    try:
+        # Get last signal for this symbol
+        last_signals = getattr(_auto_bot, '_last_signals', {})
+        signal_data = last_signals.get(symbol)
+        
+        if not signal_data:
+            # Try to analyze now if bot is running
+            if _auto_bot._running:
+                try:
+                    signal_data = await _auto_bot.analyze_symbol(symbol)
+                except Exception as e:
+                    logger.warning(f"Failed to analyze {symbol}: {e}")
+        
+        if not signal_data:
+            return {
+                "status": "no_signal",
+                "symbol": symbol,
+                "signal": "WAIT",
+                "message": f"No signal available for {symbol}"
+            }
+        
+        # Get additional layer data
+        last_analysis = getattr(_auto_bot, '_last_analysis_by_symbol', {}).get(symbol, {})
+        last_trade_result = getattr(_auto_bot, '_last_trade_result_by_symbol', {}).get(symbol, {})
+        
+        # Build comprehensive response
+        response = {
+            "status": "success",
+            "symbol": symbol,
+            "signal": signal_data.get("signal", "WAIT"),
+            "signal_mode": getattr(_auto_bot, 'signal_mode', 'technical'),
+            "quality": signal_data.get("quality", "SKIP"),
+            "enhanced_confidence": signal_data.get("enhanced_confidence", 0),
+            "current_price": signal_data.get("current_price", 0),
+            "timestamp": signal_data.get("timestamp", datetime.now().isoformat()),
+            
+            # Technical Scores (from _generate_technical_signal)
+            "scores": signal_data.get("scores", {}),
+            
+            # Indicators
+            "indicators": signal_data.get("indicators", {}),
+            
+            # Risk Management
+            "risk_management": signal_data.get("risk_management", {}),
+            
+            # Factors
+            "factors": signal_data.get("factors", {
+                "bullish": [],
+                "bearish": [],
+                "skip_reasons": []
+            }),
+            
+            # Factor Details (for UI display)
+            "factor_details": signal_data.get("factor_details", []),
+            
+            # Market Data
+            "market_data": signal_data.get("market_data", {}),
+            
+            # Market Regime
+            "market_regime": signal_data.get("market_regime", "UNKNOWN"),
+            
+            # Vote Details (if pattern mode)
+            "vote_details": signal_data.get("vote_details"),
+            
+            # Pattern Match Count (if pattern mode)
+            "n_matches": signal_data.get("n_matches", 0),
+            
+            # Last Trade Result (why trade didn't execute)
+            "last_trade_result": last_trade_result,
+        }
+        
+        return convert_numpy_types(response)
+        
+    except Exception as e:
+        logger.error(f"Error getting signal for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "symbol": symbol,
+            "signal": "WAIT",
+            "error": str(e)
+        }
+
+
+@app.get("/api/v1/bot/layers/{symbol}")
+async def get_bot_layers_by_symbol(symbol: str):
+    """
+    🏛️ Get 20-Layer Intelligence status for a specific symbol
+    
+    Returns the detailed status of all 20 layers with their
+    can_trade status, scores, and multipliers.
+    """
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "symbol": symbol,
+            "layers": [],
+            "message": "Start the bot to see layer data"
+        }
+    
+    try:
+        # Build layer results from bot's internal state
+        layers = []
+        
+        # Layer definitions with their data sources
+        layer_defs = [
+            ("SmartFeatures", 1, "_last_smart_result_by_symbol"),
+            ("Correlation", 3, None),
+            ("AdvancedIntelligence", 5, "_last_intel_result_by_symbol"),
+            ("SmartBrain", 6, "_last_smart_result_by_symbol"),
+            ("NeuralBrain", 7, "_last_neural_result_by_symbol"),
+            ("DeepIntelligence", 8, "_last_deep_result_by_symbol"),
+            ("QuantumStrategy", 9, "_last_quantum_result_by_symbol"),
+            ("AlphaEngine", 10, "_last_alpha_result_by_symbol"),
+            ("OmegaBrain", 11, "_last_omega_result_by_symbol"),
+            ("TitanCore", 12, "_last_titan_decision_by_symbol"),
+            ("ProFeatures", 14, "_last_pro_result_by_symbol"),
+            ("RiskGuardian", 15, None),
+            ("UltraIntelligence", 17, "_last_ultra_decision"),
+            ("SupremeIntelligence", 18, "_last_supreme_decision"),
+            ("TranscendentIntelligence", 19, "_last_transcendent_decision"),
+            ("OmniscientIntelligence", 20, "_last_omniscient_decision"),
+        ]
+        
+        for layer_name, layer_num, attr_name in layer_defs:
+            layer_data = {}
+            
+            if attr_name:
+                data_source = getattr(_auto_bot, attr_name, {})
+                if isinstance(data_source, dict) and symbol in data_source:
+                    layer_data = data_source[symbol]
+                elif isinstance(data_source, dict) and data_source:
+                    layer_data = data_source
+            
+            # Determine can_trade and score from layer data
+            can_trade = layer_data.get("can_trade", layer_data.get("should_trade", True))
+            score = layer_data.get("score", layer_data.get("confidence", 
+                    layer_data.get("alpha_score", layer_data.get("omega_score", 
+                    layer_data.get("titan_score", 50)))))
+            multiplier = layer_data.get("multiplier", layer_data.get("position_multiplier", 1.0))
+            
+            layers.append({
+                "layer": layer_name,
+                "layer_num": layer_num,
+                "can_trade": bool(can_trade),
+                "score": float(score) if score else 50.0,
+                "multiplier": float(multiplier) if multiplier else 1.0,
+                "data": convert_numpy_types(layer_data) if layer_data else {}
+            })
+        
+        # Calculate overall stats
+        passed_count = sum(1 for l in layers if l["can_trade"])
+        total_count = len(layers)
+        pass_rate = passed_count / total_count if total_count > 0 else 0
+        
+        return convert_numpy_types({
+            "status": "success",
+            "symbol": symbol,
+            "layers": layers,
+            "summary": {
+                "passed_count": passed_count,
+                "total_count": total_count,
+                "pass_rate": pass_rate,
+                "final_decision": "APPROVE" if pass_rate >= 0.15 else "SKIP"
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting layers for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "symbol": symbol,
+            "layers": [],
+            "error": str(e)
+        }
+
+
 @app.get("/api/v1/bot/diagnostic")
 async def get_bot_diagnostic():
     """
@@ -3429,6 +3629,331 @@ async def get_all_intelligence_layers():
         },
         "timestamp": datetime.now().isoformat()
     })
+
+
+# =============================================================================
+# 🎯 17. REAL-TIME DASHBOARD ENDPOINTS (NEW)
+# =============================================================================
+
+@app.get("/api/v1/bot/technical-signal")
+async def get_technical_signal(symbol: str = "EURUSDm"):
+    """
+    📊 Get Technical Signal data for Real-time Dashboard
+    
+    Returns signal data from the Technical Signal Generator
+    (same strategy used in backtest for high win rate)
+    """
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "symbol": symbol,
+            "signal": "WAIT",
+            "confidence": 0,
+            "quality": "SKIP",
+            "scores": {"buy": 0, "sell": 0},
+            "session": "N/A",
+            "trend": "UNKNOWN",
+            "message": "Start the bot to see technical signals"
+        }
+    
+    # Get symbol-specific analysis
+    last_analysis_by_symbol = getattr(_auto_bot, '_last_analysis_by_symbol', {})
+    analysis = last_analysis_by_symbol.get(symbol, getattr(_auto_bot, '_last_analysis', {})) or {}
+    
+    if not analysis:
+        return {
+            "status": "no_analysis",
+            "symbol": symbol,
+            "signal": "WAIT",
+            "confidence": 0,
+            "quality": "SKIP",
+            "scores": {"buy": 0, "sell": 0},
+            "session": "N/A",
+            "trend": "UNKNOWN",
+            "message": "Waiting for first analysis..."
+        }
+    
+    # Extract technical signal data
+    scores = analysis.get("scores", {})
+    risk_mgmt = analysis.get("risk_management", {})
+    
+    return convert_numpy_types({
+        "status": "active",
+        "symbol": symbol,
+        "signal": analysis.get("signal", "WAIT"),
+        "confidence": analysis.get("enhanced_confidence", analysis.get("base_confidence", 0)),
+        "quality": analysis.get("quality", "SKIP"),
+        "current_price": analysis.get("current_price", 0),
+        "stop_loss": risk_mgmt.get("stop_loss", 0),
+        "take_profit": risk_mgmt.get("take_profit", 0),
+        "scores": {
+            "buy": scores.get("pattern", 0) if analysis.get("signal") in ["BUY", "STRONG_BUY"] else 0,
+            "sell": scores.get("pattern", 0) if analysis.get("signal") in ["SELL", "STRONG_SELL"] else 0,
+            "pattern": scores.get("pattern", 0),
+            "trend": scores.get("trend", 0),
+            "volume": scores.get("volume", 0),
+            "momentum": scores.get("momentum", 0),
+            "session": scores.get("session", 0),
+        },
+        "session": analysis.get("market_data", {}).get("session", "N/A"),
+        "trend": analysis.get("market_regime", "UNKNOWN"),
+        "rsi": analysis.get("indicators", {}).get("rsi", 0) if analysis.get("indicators") else 0,
+        "atr": risk_mgmt.get("atr", 0),
+        "timestamp": analysis.get("timestamp", datetime.now().isoformat()),
+        "signal_mode": getattr(_auto_bot, 'signal_mode', 'technical'),
+    })
+
+
+@app.get("/api/v1/bot/layer-status")
+async def get_layer_status(symbol: str = "EURUSDm"):
+    """
+    🏛️ Get 20-Layer Status for Real-time Dashboard
+    
+    Returns comprehensive layer pass/fail status for the UI
+    """
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "symbol": symbol,
+            "total_layers": 20,
+            "layers_passed": 0,
+            "pass_rate": 0,
+            "final_decision": "WAITING",
+            "layers": [],
+            "message": "Start the bot to see layer status"
+        }
+    
+    # Build layer status from bot's internal state
+    layers = []
+    layers_passed = 0
+    
+    # Layer data sources mapping
+    layer_configs = [
+        {"num": 1, "name": "Smart Features", "icon": "🎯", "attr": None},
+        {"num": 3, "name": "Correlation Check", "icon": "🔗", "attr": None},
+        {"num": 5, "name": "Advanced Intelligence", "icon": "🧠", "attr": "_last_intel_result_by_symbol"},
+        {"num": 6, "name": "Smart Brain", "icon": "💡", "attr": "_last_smart_result_by_symbol"},
+        {"num": 7, "name": "Neural Brain", "icon": "🔮", "attr": "_last_neural_result_by_symbol"},
+        {"num": 8, "name": "Deep Intelligence", "icon": "🌊", "attr": "_last_deep_result_by_symbol"},
+        {"num": 9, "name": "Quantum Strategy", "icon": "⚛️", "attr": "_last_quantum_result_by_symbol"},
+        {"num": 10, "name": "Alpha Engine", "icon": "🅰️", "attr": "_last_alpha_result_by_symbol"},
+        {"num": 11, "name": "Omega Brain", "icon": "Ω", "attr": "_last_omega_result_by_symbol"},
+        {"num": 12, "name": "Titan Core", "icon": "🏛️", "attr": "_last_titan_decision_by_symbol"},
+        {"num": 14, "name": "Pro Features", "icon": "⭐", "attr": "_last_pro_result_by_symbol"},
+        {"num": 15, "name": "Risk Guardian", "icon": "🛡️", "attr": None},
+        {"num": 17, "name": "Ultra Intelligence", "icon": "⚡", "attr": "_last_ultra_decision"},
+        {"num": 18, "name": "Supreme Intelligence", "icon": "👑", "attr": "_last_supreme_decision"},
+        {"num": 19, "name": "Transcendent Intelligence", "icon": "✨", "attr": "_last_transcendent_decision"},
+        {"num": 20, "name": "Omniscient Intelligence", "icon": "🌟", "attr": "_last_omniscient_decision"},
+    ]
+    
+    for config in layer_configs:
+        layer_data = {}
+        can_trade = False
+        score = 0
+        multiplier = 1.0
+        
+        if config["attr"]:
+            data_source = getattr(_auto_bot, config["attr"], {})
+            if isinstance(data_source, dict):
+                if symbol in data_source:
+                    layer_data = data_source[symbol]
+                elif data_source:
+                    layer_data = data_source
+            
+            can_trade = layer_data.get("can_trade", layer_data.get("should_trade", False))
+            score = layer_data.get("score", layer_data.get("confidence", 0))
+            multiplier = layer_data.get("multiplier", layer_data.get("position_multiplier", 1.0))
+        else:
+            # Default layers without specific data
+            can_trade = True  # Assume pass if no data
+            score = 70
+            multiplier = 1.0
+        
+        if can_trade:
+            layers_passed += 1
+        
+        layers.append({
+            "num": config["num"],
+            "name": config["name"],
+            "icon": config["icon"],
+            "status": "PASS" if can_trade else "WARN",
+            "can_trade": can_trade,
+            "score": round(score, 1) if score else 0,
+            "multiplier": round(multiplier, 2) if multiplier else 1.0,
+        })
+    
+    total_layers = len(layers)
+    pass_rate = layers_passed / total_layers if total_layers > 0 else 0
+    
+    # Determine final decision
+    min_pass_rate = float(os.getenv("MIN_PASS_RATE", "0.15"))
+    if pass_rate >= min_pass_rate:
+        final_decision = "APPROVE"
+    else:
+        final_decision = "REJECT"
+    
+    return convert_numpy_types({
+        "status": "active",
+        "symbol": symbol,
+        "total_layers": total_layers,
+        "layers_passed": layers_passed,
+        "pass_rate": round(pass_rate * 100, 1),
+        "min_pass_rate": min_pass_rate * 100,
+        "final_decision": final_decision,
+        "layers": layers,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.get("/api/v1/bot/realtime-dashboard")
+async def get_realtime_dashboard(symbol: str = None):
+    """
+    📊 Get complete Real-time Dashboard data in one call
+    
+    Combines technical signal, layer status, positions, and stats
+    """
+    global _auto_bot
+    
+    # Default to first symbol if bot running, else EURUSDm
+    if not symbol and _auto_bot and _auto_bot.symbols:
+        symbol = _auto_bot.symbols[0]
+    elif not symbol:
+        symbol = "EURUSDm"
+    
+    if not _auto_bot:
+        return {
+            "status": "bot_not_running",
+            "symbols": ["EURUSDm", "GBPUSDm", "XAUUSDm"],
+            "selected_symbol": symbol,
+            "technical_signal": None,
+            "layer_status": None,
+            "positions": [],
+            "daily_stats": {"trades": 0, "wins": 0, "losses": 0, "pnl": 0},
+            "system_health": {"mt5_connected": False, "bot_running": False},
+            "message": "Start the bot to see real-time data",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # Get technical signal
+    tech_signal = await get_technical_signal(symbol)
+    
+    # Get layer status
+    layer_status = await get_layer_status(symbol)
+    
+    # Get positions
+    positions = []
+    if _auto_bot.trading_engine and _auto_bot.trading_engine.positions:
+        for pos_id, pos in _auto_bot.trading_engine.positions.items():
+            positions.append({
+                "id": pos_id,
+                "symbol": pos.symbol,
+                "side": pos.side.value if hasattr(pos.side, 'value') else str(pos.side),
+                "quantity": pos.quantity,
+                "entry_price": pos.entry_price,
+                "current_price": pos.current_price,
+                "stop_loss": pos.stop_loss,
+                "take_profit": pos.take_profit,
+                "pnl": pos.pnl,
+                "pnl_percent": ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price and pos.current_price else 0,
+            })
+    
+    # Get daily stats
+    daily_stats = getattr(_auto_bot, '_daily_stats', {
+        "trades": 0, "wins": 0, "losses": 0, "pnl": 0
+    })
+    
+    # System health
+    mt5_connected = False
+    if _auto_bot.trading_engine and _auto_bot.trading_engine.broker:
+        mt5_connected = getattr(_auto_bot.trading_engine.broker, '_connected', False)
+    
+    return convert_numpy_types({
+        "status": "active",
+        "symbols": _auto_bot.symbols or ["EURUSDm", "GBPUSDm", "XAUUSDm"],
+        "selected_symbol": symbol,
+        "technical_signal": tech_signal,
+        "layer_status": layer_status,
+        "positions": positions,
+        "daily_stats": daily_stats,
+        "system_health": {
+            "mt5_connected": mt5_connected,
+            "bot_running": _auto_bot._running,
+            "data_provider": _auto_bot.data_provider is not None,
+            "trading_engine": _auto_bot.trading_engine is not None,
+        },
+        "config": {
+            "timeframe": _auto_bot.timeframe,
+            "htf_timeframe": _auto_bot.htf_timeframe,
+            "min_quality": _auto_bot.min_quality.value if hasattr(_auto_bot.min_quality, 'value') else str(_auto_bot.min_quality),
+            "signal_mode": getattr(_auto_bot, 'signal_mode', 'technical'),
+        },
+        "timestamp": datetime.now().isoformat()
+    })
+
+
+@app.get("/api/v1/intelligence/ultra")
+async def get_ultra_decision(symbol: str = "EURUSDm"):
+    """Get Ultra Intelligence (Layer 17) decision data"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {"status": "bot_not_running", "can_trade": False}
+    
+    last_ultra = getattr(_auto_bot, '_last_ultra_decision', {})
+    if not last_ultra:
+        return {"status": "no_data", "can_trade": False}
+    
+    return convert_numpy_types({"status": "active", **last_ultra})
+
+
+@app.get("/api/v1/intelligence/supreme")
+async def get_supreme_decision(symbol: str = "EURUSDm"):
+    """Get Supreme Intelligence (Layer 18) decision data"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {"status": "bot_not_running", "can_trade": False}
+    
+    last_supreme = getattr(_auto_bot, '_last_supreme_decision', {})
+    if not last_supreme:
+        return {"status": "no_data", "can_trade": False}
+    
+    return convert_numpy_types({"status": "active", **last_supreme})
+
+
+@app.get("/api/v1/intelligence/transcendent")
+async def get_transcendent_decision(symbol: str = "EURUSDm"):
+    """Get Transcendent Intelligence (Layer 19) decision data"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {"status": "bot_not_running", "can_trade": False}
+    
+    last_transcendent = getattr(_auto_bot, '_last_transcendent_decision', {})
+    if not last_transcendent:
+        return {"status": "no_data", "can_trade": False}
+    
+    return convert_numpy_types({"status": "active", **last_transcendent})
+
+
+@app.get("/api/v1/intelligence/omniscient")
+async def get_omniscient_decision(symbol: str = "EURUSDm"):
+    """Get Omniscient Intelligence (Layer 20) decision data"""
+    global _auto_bot
+    
+    if not _auto_bot:
+        return {"status": "bot_not_running", "can_trade": False}
+    
+    last_omniscient = getattr(_auto_bot, '_last_omniscient_decision', {})
+    if not last_omniscient:
+        return {"status": "no_data", "can_trade": False}
+    
+    return convert_numpy_types({"status": "active", **last_omniscient})
 
 
 # Run with: uvicorn api.main:app --reload

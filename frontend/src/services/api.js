@@ -2172,6 +2172,169 @@ const api = {
     URL.revokeObjectURL(url);
     log.success("[Export] Metrics exported");
   },
+
+  // ===========================================
+  // 🎯 17. REAL-TIME DASHBOARD APIs (NEW)
+  // ===========================================
+
+  // Technical Signal Panel Data
+  async getTechnicalSignal(symbol = "EURUSDm") {
+    return smartApiCall(
+      () => apiClient.get(`/bot/technical-signal?symbol=${symbol}`),
+      () => ({
+        symbol,
+        signal: "WAIT",
+        confidence: 0,
+        quality: "SKIP",
+        current_price: 0,
+        stop_loss: 0,
+        take_profit: 0,
+        scores: { buy: 0, sell: 0 },
+        session: "N/A",
+        trend: "UNKNOWN",
+        timestamp: new Date().toISOString(),
+      }),
+      { cacheKey: `tech_signal_${symbol}`, cacheTTL: 2000 },
+    );
+  },
+
+  // 20-Layer Status Panel Data
+  async getLayerStatus(symbol = "EURUSDm") {
+    return smartApiCall(
+      () => apiClient.get(`/bot/layer-status?symbol=${symbol}`),
+      () => ({
+        symbol,
+        total_layers: 20,
+        layers_passed: 0,
+        pass_rate: 0,
+        final_decision: "WAITING",
+        layers: [],
+        timestamp: new Date().toISOString(),
+      }),
+      { cacheKey: `layer_status_${symbol}`, cacheTTL: 2000 },
+    );
+  },
+
+  // Full Real-time Dashboard Data
+  async getRealTimeDashboard(symbol = null) {
+    return smartApiCall(
+      () => apiClient.get(`/bot/realtime-dashboard${symbol ? `?symbol=${symbol}` : ''}`),
+      () => ({
+        status: "offline",
+        symbols: ["EURUSDm", "GBPUSDm", "XAUUSDm"],
+        selected_symbol: symbol || "EURUSDm",
+        technical_signal: null,
+        layer_status: null,
+        positions: [],
+        daily_stats: { trades: 0, wins: 0, losses: 0, pnl: 0 },
+        system_health: { mt5_connected: false, bot_running: false },
+        timestamp: new Date().toISOString(),
+      }),
+      { cacheKey: `realtime_dash_${symbol || 'all'}`, cacheTTL: 1500 },
+    );
+  },
+
+  // Last Trade Result (for debugging)
+  async getLastTradeResult(symbol = null) {
+    return tryApiOrMock(
+      () => apiClient.get(`/bot/last-trade-result${symbol ? `?symbol=${symbol}` : ''}`),
+      () => ({
+        symbol: symbol || "N/A",
+        signal: null,
+        quality: null,
+        result: null,
+        timestamp: null,
+      }),
+    );
+  },
+
+  // Signal History with Pagination
+  async getSignalHistoryPaginated(page = 1, limit = 20, symbol = null) {
+    const params = new URLSearchParams({ page, limit });
+    if (symbol) params.append('symbol', symbol);
+    return tryApiOrMock(
+      () => apiClient.get(`/bot/signal-history?${params.toString()}`),
+      () => ({
+        signals: [],
+        total: 0,
+        page,
+        limit,
+        pages: 0,
+      }),
+    );
+  },
+
+  // Ultra Intelligence Decision
+  async getUltraDecision(symbol = "EURUSDm") {
+    return tryApiOrMock(
+      () => apiClient.get(`/intelligence/ultra?symbol=${symbol}`),
+      () => ({
+        symbol,
+        can_trade: false,
+        confidence: 0,
+        session: "N/A",
+        volatility: "N/A",
+        phase: "N/A",
+        size_multiplier: 1,
+        timestamp: null,
+      }),
+    );
+  },
+
+  // Supreme Intelligence Decision
+  async getSupremeDecision(symbol = "EURUSDm") {
+    return tryApiOrMock(
+      () => apiClient.get(`/intelligence/supreme?symbol=${symbol}`),
+      () => ({
+        symbol,
+        can_trade: false,
+        confidence: 0,
+        entropy: "N/A",
+        institutional: "N/A",
+        momentum: "N/A",
+        win_probability: 0,
+        alpha_potential: 0,
+        timestamp: null,
+      }),
+    );
+  },
+
+  // Transcendent Intelligence Decision
+  async getTranscendentDecision(symbol = "EURUSDm") {
+    return tryApiOrMock(
+      () => apiClient.get(`/intelligence/transcendent?symbol=${symbol}`),
+      () => ({
+        symbol,
+        can_trade: false,
+        confidence: 0,
+        quantum_state: "N/A",
+        bull_probability: 0,
+        bear_probability: 0,
+        transcendent_score: 0,
+        intelligence_level: "N/A",
+        timestamp: null,
+      }),
+    );
+  },
+
+  // Omniscient Intelligence Decision
+  async getOmniscientDecision(symbol = "EURUSDm") {
+    return tryApiOrMock(
+      () => apiClient.get(`/intelligence/omniscient?symbol=${symbol}`),
+      () => ({
+        symbol,
+        can_trade: false,
+        confidence: 0,
+        consciousness_level: "N/A",
+        omniscient_score: 0,
+        universal_alignment: 0,
+        physics_state: "N/A",
+        neural_vote: "NEUTRAL",
+        chaos_level: "N/A",
+        timestamp: null,
+      }),
+    );
+  },
 };
 
 // 🧬 Auto-log genius status on load
