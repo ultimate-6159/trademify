@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-        <span class="text-2xl">???</span>
+        <span class="text-2xl text-purple-400">&#x1F3DB;</span>
         20-Layer Intelligence Status
       </h2>
       <div class="flex items-center gap-2">
@@ -18,7 +18,7 @@
           :disabled="isLoading"
           class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1"
         >
-          <span :class="{ 'animate-spin': isLoading }">??</span>
+          <span :class="{ 'animate-spin': isLoading }">&#x21BB;</span>
         </button>
       </div>
     </div>
@@ -46,7 +46,7 @@
       <!-- Base Layers (1-16) -->
       <div class="bg-gray-700 rounded-lg p-4">
         <h3 class="text-white font-semibold mb-3 flex items-center gap-2">
-          <span>???</span> Base Layers (1-16) - STRICT Gate Keepers
+          <span class="text-blue-400">&#x1F6E1;</span> Base Layers (1-16) - STRICT Gate Keepers
         </h3>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div 
@@ -60,7 +60,7 @@
               class="text-sm font-bold"
               :class="layer.can_trade ? 'text-green-400' : 'text-red-400'"
             >
-              {{ layer.can_trade ? '?' : '??' }}
+              {{ layer.can_trade ? '&#x2705;' : '&#x26A0;' }}
             </div>
             <div class="text-xs" :class="layer.can_trade ? 'text-green-300' : 'text-red-300'">
               {{ (layer.score || 0).toFixed(0) }}%
@@ -72,7 +72,7 @@
       <!-- Adaptive Layers (17-20) -->
       <div class="bg-gray-700 rounded-lg p-4">
         <h3 class="text-white font-semibold mb-3 flex items-center gap-2">
-          <span>???</span> Adaptive Layers (17-20) - DYNAMIC Thresholds
+          <span class="text-yellow-400">&#x1F39B;</span> Adaptive Layers (17-20) - DYNAMIC Thresholds
         </h3>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div 
@@ -114,8 +114,8 @@
         @click="showDetails = !showDetails"
         class="w-full text-left text-gray-400 hover:text-white text-sm flex items-center justify-between p-2 bg-gray-700 rounded-lg"
       >
-        <span>?? View Detailed Layer Results</span>
-        <span>{{ showDetails ? '?' : '?' }}</span>
+        <span>&#x1F4CB; View Detailed Layer Results</span>
+        <span>{{ showDetails ? '&#x25B2;' : '&#x25BC;' }}</span>
       </button>
       
       <div v-if="showDetails" class="mt-2 bg-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
@@ -126,7 +126,7 @@
         >
           <div class="flex items-center gap-2">
             <span :class="layer.can_trade ? 'text-green-400' : 'text-red-400'">
-              {{ layer.can_trade ? '?' : '?' }}
+              {{ layer.can_trade ? '&#x2705;' : '&#x274C;' }}
             </span>
             <span class="text-white text-sm">Layer {{ layer.layer_num || '?' }}: {{ layer.name }}</span>
           </div>
@@ -228,10 +228,10 @@ const passRateBarClass = computed(() => {
 })
 
 const finalDecisionEmoji = computed(() => {
-  if (finalDecision.value === 'APPROVE') return '?'
-  if (finalDecision.value === 'SKIP') return '??'
-  if (finalDecision.value === 'WAITING') return '?'
-  return '?'
+  if (finalDecision.value === 'APPROVE') return '\u2705'  // ?
+  if (finalDecision.value === 'SKIP') return '\u23F8'     // ?
+  if (finalDecision.value === 'WAITING') return '\u23F3'  // ?
+  return '\u2753'  // ?
 })
 
 const finalDecisionBgClass = computed(() => {

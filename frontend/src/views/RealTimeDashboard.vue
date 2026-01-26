@@ -4,7 +4,7 @@
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
-          <span>??</span> Real-Time Trading
+          <span class="text-orange-500">&#x1F525;</span> Real-Time Trading
         </h1>
         <p class="text-gray-400 text-sm mt-1">
           Live signal analysis from backend • {{ connectionStatus }}

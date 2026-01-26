@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-        <span class="text-2xl">??</span>
+        <span class="text-2xl text-orange-500">&#x1F4CA;</span>
         <span>Technical Signal</span>
         <span 
           class="text-xs px-2 py-1 rounded-full"
@@ -17,7 +17,7 @@
         :disabled="isLoading"
         class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1"
       >
-        <span :class="{ 'animate-spin': isLoading }">??</span>
+        <span :class="{ 'animate-spin': isLoading }">&#x21BB;</span>
         Refresh
       </button>
     </div>
