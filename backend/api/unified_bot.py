@@ -122,6 +122,18 @@ _trade_cooldown_seconds = 10  # 10 seconds cooldown between trades
 _enable_reverse_signal_close = True   # ✅ เปิด! ปิด position เมื่อสัญญาณตรงข้าม
 _open_new_after_close = True          # ✅ เปิด! ปิดแล้วเปิดใหม่ตามสัญญาณใหม่
 
+# ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว
+_signal_history = {}  # {symbol: [{"signal": "BUY", "quality": "HIGH", "confidence": 75, "timestamp": datetime}, ...]}
+_signal_weakening_config = {
+    "enabled": True,
+    "history_size": 5,                      # เก็บ signal ย้อนหลัง 5 รายการ
+    "close_on_quality_drop": True,          # ✅ ปิดเมื่อ quality ลดลง 2 ระดับ
+    "close_on_confidence_drop": True,       # ✅ ปิดเมื่อ confidence ลดลง >= 15%
+    "quality_drop_threshold": 2,            # PREMIUM→MEDIUM = 2 ระดับ
+    "confidence_drop_threshold": 15,        # ปิดเมื่อ confidence ลดลง 15% จาก peak
+    "min_profit_to_exit_early": 50,         # ต้องมีกำไร >= $50 ถึงจะ early exit (ไม่ปิดขาดทุน)
+}
+
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
 # ❌ ปิดถาวร! ใช้สัญญาณปกติ (BUY=BUY, SELL=SELL)
 _contrarian_mode = {
@@ -241,6 +253,12 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                         "timestamp": datetime.now().isoformat()
                     }
                     _bot_status["last_signal"][symbol] = signal_data
+                    
+                    # ⚡ TRACK SIGNAL HISTORY for momentum detection
+                    _track_signal_history(symbol, signal_data)
+                    
+                    # ⚡ CHECK SIGNAL WEAKENING - ปิด position ก่อนสัญญาณกลับทิศ
+                    await _check_and_close_weakening_positions(symbol, signal_data)
                     
                     # Extract layer status
                     _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
@@ -829,6 +847,205 @@ async def _check_open_positions(symbol: str) -> bool:
     except Exception as e:
         logger.warning(f"Failed to check positions: {e}")
         return False  # Assume no position if check fails
+
+
+# ⚡ SIGNAL MOMENTUM FUNCTIONS
+def _track_signal_history(symbol: str, signal_data: Dict):
+    """Track signal history for momentum detection"""
+    global _signal_history, _signal_weakening_config
+    
+    if not _signal_weakening_config.get("enabled", True):
+        return
+    
+    history_size = _signal_weakening_config.get("history_size", 5)
+    
+    if symbol not in _signal_history:
+        _signal_history[symbol] = []
+    
+    # Add new signal to history
+    _signal_history[symbol].append({
+        "signal": signal_data.get("signal", "WAIT"),
+        "quality": signal_data.get("quality", "SKIP"),
+        "confidence": signal_data.get("confidence", 0),
+        "timestamp": datetime.now()
+    })
+    
+    # Keep only last N signals
+    if len(_signal_history[symbol]) > history_size:
+        _signal_history[symbol] = _signal_history[symbol][-history_size:]
+
+
+def _detect_signal_weakening(symbol: str, current_signal: Dict, position_side: str) -> tuple[bool, str]:
+    """
+    ⚡ Detect if signal is weakening (should close position early)
+    
+    Returns: (should_close: bool, reason: str)
+    
+    Detects:
+    1. Quality dropping: PREMIUM → HIGH → MEDIUM
+    2. Confidence dropping: 88% → 76% → 65%
+    3. Signal direction weakening: BUY → WAIT (แต่ยังไม่ SELL)
+    """
+    global _signal_history, _signal_weakening_config
+    
+    if not _signal_weakening_config.get("enabled", True):
+        return False, "Weakening detection disabled"
+    
+    history = _signal_history.get(symbol, [])
+    if len(history) < 3:  # Need at least 3 signals to detect trend
+        return False, "Not enough history"
+    
+    current_signal_type = current_signal.get("signal", "WAIT")
+    current_quality = current_signal.get("quality", "SKIP")
+    current_confidence = current_signal.get("confidence", 0)
+    
+    quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+    
+    # 1. Check if signal direction changed (BUY → WAIT/SELL while holding BUY)
+    if position_side == "BUY" and current_signal_type in ["SELL", "STRONG_SELL"]:
+        return True, f"⚠️ Signal reversed to {current_signal_type} - CLOSE IMMEDIATELY"
+    if position_side == "SELL" and current_signal_type in ["BUY", "STRONG_BUY"]:
+        return True, f"⚠️ Signal reversed to {current_signal_type} - CLOSE IMMEDIATELY"
+    
+    # 2. Check quality drop (e.g., PREMIUM → HIGH → MEDIUM)
+    if _signal_weakening_config.get("close_on_quality_drop", True):
+        # Find peak quality in recent history
+        peak_quality_idx = 0
+        for h in history:
+            q_idx = quality_order.get(h.get("quality", "SKIP"), 0)
+            peak_quality_idx = max(peak_quality_idx, q_idx)
+        
+        current_quality_idx = quality_order.get(current_quality, 0)
+        quality_drop = peak_quality_idx - current_quality_idx
+        threshold = _signal_weakening_config.get("quality_drop_threshold", 2)
+        
+        if quality_drop >= threshold:
+            peak_quality_name = [k for k, v in quality_order.items() if v == peak_quality_idx][0]
+            return True, f"⚠️ Quality dropped {quality_drop} levels: {peak_quality_name} → {current_quality}"
+    
+    # 3. Check confidence drop
+    if _signal_weakening_config.get("close_on_confidence_drop", True):
+        # Find peak confidence in recent history
+        peak_confidence = max(h.get("confidence", 0) for h in history)
+        confidence_drop = peak_confidence - current_confidence
+        threshold = _signal_weakening_config.get("confidence_drop_threshold", 15)
+        
+        if confidence_drop >= threshold:
+            return True, f"⚠️ Confidence dropped {confidence_drop:.1f}%: {peak_confidence:.1f}% → {current_confidence:.1f}%"
+    
+    # 4. Check if signal is becoming WAIT (momentum fading)
+    if position_side in ["BUY", "SELL"] and current_signal_type == "WAIT":
+        # Check if we had strong signal before
+        recent_strong = any(
+            h.get("signal") in ["BUY", "STRONG_BUY", "SELL", "STRONG_SELL"] 
+            for h in history[-3:]
+        )
+        if recent_strong:
+            return True, f"⚠️ Signal faded to WAIT - momentum lost"
+    
+    return False, "Signal stable"
+
+
+async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
+    """
+    ⚡ Check if any positions should be closed due to weakening signal
+    """
+    global _bot, _signal_weakening_config
+    
+    if not _signal_weakening_config.get("enabled", True):
+        return
+    
+    if not _bot or not _bot.trading_engine:
+        return
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return
+        
+        for pos in positions:
+            # Get position details
+            if isinstance(pos, dict):
+                pos_symbol = pos.get("symbol", "")
+                pos_side = pos.get("side", "")
+                pos_pnl = pos.get("profit", pos.get("pnl", 0))
+                pos_ticket = pos.get("ticket", pos.get("id", ""))
+            else:
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_side = getattr(pos, "side", "")
+                pos_pnl = getattr(pos, "profit", getattr(pos, "pnl", 0))
+                pos_ticket = getattr(pos, "ticket", getattr(pos, "id", ""))
+            
+            if pos_symbol.upper() != symbol.upper():
+                continue
+            
+            # Normalize side
+            if hasattr(pos_side, 'value'):
+                pos_side = pos_side.value
+            pos_side = str(pos_side).upper()
+            if pos_side in ["0", "ORDER_TYPE_BUY"]:
+                pos_side = "BUY"
+            elif pos_side in ["1", "ORDER_TYPE_SELL"]:
+                pos_side = "SELL"
+            
+            # Check if signal is weakening
+            should_close, reason = _detect_signal_weakening(symbol, signal_data, pos_side)
+            
+            if should_close:
+                # Check minimum profit requirement for early exit
+                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 50)
+                
+                # If profitable or signal reversed, close
+                if pos_pnl >= min_profit or "reversed" in reason.lower():
+                    logger.warning(f"⚡ SIGNAL WEAKENING: {symbol} - {reason}")
+                    logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f}")
+                    logger.warning(f"   ACTION: Closing position early to protect profit")
+                    
+                    # Close position
+                    try:
+                        import MetaTrader5 as mt5
+                        # Get current price for closing
+                        tick = mt5.symbol_info_tick(symbol)
+                        if tick:
+                            close_price = tick.bid if pos_side == "BUY" else tick.ask
+                            
+                            # Prepare close request
+                            close_request = {
+                                "action": mt5.TRADE_ACTION_DEAL,
+                                "symbol": symbol,
+                                "volume": pos.get("volume", 0.01) if isinstance(pos, dict) else getattr(pos, "volume", 0.01),
+                                "type": mt5.ORDER_TYPE_SELL if pos_side == "BUY" else mt5.ORDER_TYPE_BUY,
+                                "position": pos_ticket,
+                                "price": close_price,
+                                "deviation": 20,
+                                "magic": 123456,
+                                "comment": f"Signal Weakening: {reason[:20]}",
+                                "type_time": mt5.ORDER_TIME_GTC,
+                                "type_filling": mt5.ORDER_FILLING_IOC,
+                            }
+                            
+                            result = mt5.order_send(close_request)
+                            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                                logger.info(f"✅ Position closed early: {symbol} | Reason: {reason}")
+                                # Update daily stats
+                                _bot_status["daily_stats"]["trades"] += 1
+                                if pos_pnl > 0:
+                                    _bot_status["daily_stats"]["wins"] += 1
+                                else:
+                                    _bot_status["daily_stats"]["losses"] += 1
+                                _bot_status["daily_stats"]["pnl"] += pos_pnl
+                            else:
+                                logger.error(f"❌ Failed to close: {result}")
+                    except Exception as e:
+                        logger.error(f"Error closing weakening position: {e}")
+                else:
+                    logger.info(f"⚠️ Signal weakening but PnL ${pos_pnl:.2f} < ${min_profit} - holding")
+                    
+    except Exception as e:
+        logger.error(f"Error checking weakening positions: {e}")
+
+
+
 
 
 async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
