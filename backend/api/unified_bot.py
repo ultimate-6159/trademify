@@ -150,11 +150,11 @@ _contrarian_mode = {
 # สัญญาณมา → รอราคา pullback → รอนิ่ง → ค่อยเข้า
 _pullback_config = {
     "enabled": True,                         # ✅ เปิดใช้งาน
-    "min_pullback_percent": 0.15,            # รอราคา pullback อย่างน้อย 0.15%
-    "max_pullback_percent": 1.0,             # ถ้า pullback เกิน 1% = สัญญาณอาจผิด
+    "min_pullback_percent": 0.10,            # 🔥 ลดเหลือ 0.10% (Gold = ~$5)
+    "max_pullback_percent": 0.50,            # 🔥 ลดเหลือ 0.50% (Gold = ~$25) ถ้าเกินนี้ = สัญญาณผิด
     "wait_for_stabilization": True,          # รอให้ราคานิ่งก่อน
-    "stabilization_candles": 2,              # รอ 2 แท่งเทียนหลัง pullback
-    "max_wait_minutes": 30,                  # รอไม่เกิน 30 นาที
+    "stabilization_candles": 1,              # 🔥 ลดเหลือ 1 รอบ (เร็วขึ้น)
+    "max_wait_minutes": 15,                  # 🔥 ลดเหลือ 15 นาที
     "require_signal_still_valid": True,      # สัญญาณต้องยังคงอยู่
 }
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
@@ -1339,6 +1339,8 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
 
 
 
+
+
 async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_check: bool = False):
     """Execute trade based on signal with duplicate prevention
     
@@ -1347,12 +1349,20 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
         signal_data: Signal data dict
         skip_position_check: If True, skip checking for existing positions (used after closing opposite position)
     """
-    global _bot, _bot_status, _last_traded_signal
+    global _bot, _bot_status, _last_traded_signal, _pullback_config
     
     # Double check - only execute in AUTO mode
     if _bot_status["mode"] != BotMode.AUTO.value:
         logger.warning(f"⛔ Trade blocked - not in AUTO mode")
         return
+    
+    # 🎯 PULLBACK CHECK - ต้องเช็คเสมอ! (ไม่ว่า skip_position_check จะเป็นอะไร)
+    current_price = signal_data.get("current_price", 0)
+    if _pullback_config.get("enabled", True) and current_price > 0:
+        can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
+        if not can_enter_pullback:
+            logger.info(f"⏳ PULLBACK WAIT: {symbol} - {pullback_reason}")
+            return  # ❌ ไม่เข้าเทรด - รอ pullback
     
     # 🔥 DUPLICATE PREVENTION CHECK (can skip if coming from reverse signal close)
     if not skip_position_check:
