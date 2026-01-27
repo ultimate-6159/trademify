@@ -219,15 +219,88 @@ def _get_bot_instance():
     return _bot
 
 
+async def _reinitialize_bot():
+    """Reinitialize bot when MT5 connection fails repeatedly"""
+    global _bot, _bot_status
+    
+    logger.info("Reinitializing bot...")
+    
+    try:
+        symbols = _bot_status.get("symbols", ["XAUUSDm"])
+        timeframe = _bot_status.get("timeframe", "H1")
+        signal_mode = _bot_status.get("signal_mode", "technical")
+        quality = _bot_status.get("quality", "MEDIUM")
+        
+        if _bot:
+            try:
+                await _bot.stop()
+            except:
+                pass
+        
+        from ai_trading_bot import AITradingBot, SignalQuality
+        quality_map = {
+            "LOW": SignalQuality.LOW,
+            "MEDIUM": SignalQuality.MEDIUM,
+            "HIGH": SignalQuality.HIGH,
+            "PREMIUM": SignalQuality.PREMIUM
+        }
+        quality_enum = quality_map.get(quality.upper(), SignalQuality.MEDIUM)
+        
+        _bot = AITradingBot(
+            symbols=symbols,
+            timeframe=timeframe,
+            min_quality=quality_enum,
+            broker_type="MT5",
+            signal_mode=signal_mode
+        )
+        
+        await _bot.initialize()
+        _bot_status["initialized"] = True
+        _bot_status["error"] = None
+        
+        logger.info("Bot reinitialized successfully!")
+        
+    except Exception as e:
+        logger.error(f"Failed to reinitialize bot: {e}")
+        _bot_status["error"] = f"Reinitialization failed: {e}"
+
+
 async def _run_bot_loop(interval: int, auto_trade: bool):
-    """Main bot analysis loop"""
+    """Main bot analysis loop with auto-reconnect"""
     global _bot, _bot_status
     
     mode_str = "AUTO" if auto_trade else "MANUAL"
-    logger.info(f"?? Unified bot loop starting (mode={mode_str}, interval={interval}s)")
+    logger.info(f"Unified bot loop starting (mode={mode_str}, interval={interval}s)")
+    
+    consecutive_failures = 0
+    max_failures = 5
     
     while _bot_status["running"]:
         try:
+            # Check MT5 connection before each cycle
+            mt5_ok = True
+            if _bot and _bot.trading_engine and _bot.trading_engine.broker:
+                broker = _bot.trading_engine.broker
+                if hasattr(broker, 'ensure_connected'):
+                    mt5_ok = broker.ensure_connected()
+                    if not mt5_ok:
+                        logger.warning("MT5 not connected - waiting for reconnect...")
+                        _bot_status["error"] = "MT5 disconnected - attempting reconnect"
+                        consecutive_failures += 1
+                        
+                        if consecutive_failures >= max_failures:
+                            logger.error(f"{max_failures} consecutive failures - reinitializing bot...")
+                            await _reinitialize_bot()
+                            consecutive_failures = 0
+                        
+                        await asyncio.sleep(10)
+                        continue
+                    else:
+                        if _bot_status.get("error") == "MT5 disconnected - attempting reconnect":
+                            _bot_status["error"] = None
+                            logger.info("MT5 reconnected successfully!")
+                        consecutive_failures = 0
+            
             for symbol in _bot_status["symbols"]:
                 # Run analysis
                 analysis = await _bot.analyze_symbol(symbol)
