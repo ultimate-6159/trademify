@@ -747,29 +747,55 @@ class AITradingBot:
                 )
                 
             else:
-                # Original conditions for non-Gold
+                # 🔵 FOREX STRATEGY - More strict than before
+                # Forex ต้องการ confirmation มากกว่า Gold เพราะมี noise มากกว่า
+                
+                # 💱 FOREX: ใช้ EMA crossover + trend confirmation
+                forex_uptrend = ema_fast > ema_mid > ema_slow and current_price > ema_mid
+                forex_downtrend = ema_fast < ema_mid < ema_slow and current_price < ema_mid
+                
+                # 💱 FOREX: RSI must be in favorable zone (not overbought/oversold)
+                forex_rsi_buy = 35 <= rsi <= 55 and rsi_rising  # RSI ต้องต่ำและกำลังขึ้น
+                forex_rsi_sell = 45 <= rsi <= 65 and rsi_falling  # RSI ต้องสูงและกำลังลง
+                
+                # 💱 FOREX: Require clear candle signal
+                forex_bullish_candle = bullish_candle and body_ratio > 0.4
+                forex_bearish_candle = bearish_candle and body_ratio > 0.4
+                
                 buy_conditions = [
-                    has_uptrend,                        # 1. Trend
-                    has_bullish_cross,                  # 2. Crossover
-                    rsi_ok_buy,                         # 3. RSI range
-                    rsi_rising,                         # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bullish_candle or bullish_engulf,   # 6. Candle
-                    in_pullback_zone or near_support,   # 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
+                    forex_uptrend,                      # 1. Strong Trend (stricter)
+                    has_bullish_cross,                  # 2. EMA Crossover
+                    forex_rsi_buy,                      # 3. RSI in buy zone + rising
+                    good_session,                       # 4. Active Session
+                    forex_bullish_candle or bullish_engulf,  # 5. Strong Candle
+                    in_pullback_zone or near_support,   # 6. Good entry zone
+                    volatility_ok,                      # 7. Volatility OK
+                    current_price > ema_slow,           # 8. Above slow EMA
+                    not asian_session,                  # 9. Not Asian session
+                    overlap_session or london_session,  # 10. Best sessions
                 ]
                 
                 sell_conditions = [
-                    has_downtrend,                      # 1. Trend
-                    has_bearish_cross,                  # 2. Crossover
-                    rsi_ok_sell,                        # 3. RSI range
-                    rsi_falling,                        # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bearish_candle or bearish_engulf,   # 6. Candle
-                    in_pullback_zone or near_resistance,# 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
+                    forex_downtrend,                    # 1. Strong Trend (stricter)
+                    has_bearish_cross,                  # 2. EMA Crossover
+                    forex_rsi_sell,                     # 3. RSI in sell zone + falling
+                    good_session,                       # 4. Active Session
+                    forex_bearish_candle or bearish_engulf,  # 5. Strong Candle
+                    in_pullback_zone or near_resistance,# 6. Good entry zone
+                    volatility_ok,                      # 7. Volatility OK
+                    current_price < ema_slow,           # 8. Below slow EMA
+                    not asian_session,                  # 9. Not Asian session
+                    overlap_session or london_session,  # 10. Best sessions
                 ]
-                gold_no_trade = False
+                
+                # 💱 FOREX NO TRADE CONDITIONS
+                forex_no_trade = (
+                    is_weekend_risk or                  # Weekend risk
+                    asian_session or                    # Asian session มี noise มาก
+                    (not forex_uptrend and not forex_downtrend) or  # ไม่มี trend ชัดเจน
+                    (rsi > 70 or rsi < 30)              # RSI extreme
+                )
+                gold_no_trade = forex_no_trade  # Use same variable name
             
             buy_score = sum(buy_conditions)
             sell_score = sum(sell_conditions)
@@ -783,13 +809,26 @@ class AITradingBot:
                 buy_score += 1
                 sell_score += 1
             
-            # 🥇 GOLD: Need higher score
+            # 🔵 FOREX: Add bonus for strong confirmation
+            is_forex = not is_gold and not is_m15
+            if is_forex:
+                # Bonus for multi-timeframe alignment
+                if forex_uptrend and strong_uptrend:
+                    buy_score += 1
+                if forex_downtrend and strong_downtrend:
+                    sell_score += 1
+                # Bonus for best session
+                if overlap_session:
+                    buy_score += 1
+                    sell_score += 1
+            
+            # Min conditions - 💱 FOREX needs higher threshold
             if is_gold:
                 min_conditions = 6  # Gold needs 6/12 conditions
             elif is_m15:
                 min_conditions = 3
             else:
-                min_conditions = 4
+                min_conditions = 6  # 💱 FOREX: Increased from 4 to 6 for stricter filter
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL
@@ -831,6 +870,11 @@ class AITradingBot:
                     logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, weekend={is_weekend_risk}, allow_all={allow_all}")
                     return None
                 
+                # 💱 FOREX: Check forex_no_trade filter
+                if is_forex and gold_no_trade:  # gold_no_trade = forex_no_trade
+                    logger.info(f"   💱 FOREX FILTER: No trade - trend={forex_uptrend or forex_downtrend}, weekend={is_weekend_risk}, asian={asian_session}")
+                    return None
+                
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
                     # 🥇 GOLD: Higher confidence requirement
@@ -845,10 +889,11 @@ class AITradingBot:
                         else:
                             quality = "LOW"
                     else:
-                        confidence = 60 + (buy_score - min_conditions) * 8
-                        if buy_score >= 8:
+                        # 💱 FOREX: Higher threshold for quality
+                        confidence = 65 + (buy_score - min_conditions) * 5
+                        if buy_score >= 10:
                             quality = "PREMIUM"
-                        elif buy_score >= 7:
+                        elif buy_score >= 8:
                             quality = "HIGH"
                         elif buy_score >= 6:
                             quality = "MEDIUM"
@@ -868,10 +913,11 @@ class AITradingBot:
                         else:
                             quality = "LOW"
                     else:
-                        confidence = 60 + (sell_score - min_conditions) * 8
-                        if sell_score >= 8:
+                        # 💱 FOREX: Higher threshold for quality
+                        confidence = 65 + (sell_score - min_conditions) * 5
+                        if sell_score >= 10:
                             quality = "PREMIUM"
-                        elif sell_score >= 7:
+                        elif sell_score >= 8:
                             quality = "HIGH"
                         elif sell_score >= 6:
                             quality = "MEDIUM"
