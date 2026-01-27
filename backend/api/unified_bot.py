@@ -113,21 +113,22 @@ _bot_status = {
 
 
 
+
 # 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 10  # 10 seconds cooldown between trades
+_trade_cooldown_seconds = 300  # 🔥 เพิ่มเป็น 5 นาที (ป้องกันเทรดถี่เกินไป)
 
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม + เปิดใหม่
-_enable_reverse_signal_close = True   # ✅ เปิด! ปิด position เมื่อสัญญาณตรงข้าม
-_open_new_after_close = True          # ✅ เปิด! ปิดแล้วเปิดใหม่ตามสัญญาณใหม่
+_enable_reverse_signal_close = False   # 🔥 ปิด! ไม่ปิด position ทันทีเมื่อสัญญาณตรงข้าม
+_open_new_after_close = False          # 🔥 ปิด! ไม่เปิดใหม่ทันที (รอ pullback)
 
 # ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว
 _signal_history = {}  # {symbol: [{"signal": "BUY", "quality": "HIGH", "confidence": 75, "timestamp": datetime}, ...]}
 _signal_weakening_config = {
-    "enabled": True,
+    "enabled": False,                       # 🔥 ปิด! ไม่ปิด position เมื่อ signal weaken
     "history_size": 5,                      # เก็บ signal ย้อนหลัง 5 รายการ
-    "close_on_quality_drop": True,          # ✅ ปิดเมื่อ quality ลดลง 2 ระดับ
+    "close_on_quality_drop": False,         # 🔥 ปิด
     "close_on_confidence_drop": True,       # ✅ ปิดเมื่อ confidence ลดลง >= 15%
     "quality_drop_threshold": 2,            # PREMIUM→MEDIUM = 2 ระดับ
     "confidence_drop_threshold": 15,        # ปิดเมื่อ confidence ลดลง 15% จาก peak
@@ -142,11 +143,24 @@ _contrarian_mode = {
     "reverse_strong_signal": False,
 }
 
+# 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
+# สัญญาณมา → รอราคา pullback → รอนิ่ง → ค่อยเข้า
+_pullback_config = {
+    "enabled": True,                         # ✅ เปิดใช้งาน
+    "min_pullback_percent": 0.15,            # รอราคา pullback อย่างน้อย 0.15%
+    "max_pullback_percent": 1.0,             # ถ้า pullback เกิน 1% = สัญญาณอาจผิด
+    "wait_for_stabilization": True,          # รอให้ราคานิ่งก่อน
+    "stabilization_candles": 2,              # รอ 2 แท่งเทียนหลัง pullback
+    "max_wait_minutes": 30,                  # รอไม่เกิน 30 นาที
+    "require_signal_still_valid": True,      # สัญญาณต้องยังคงอยู่
+}
+_pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
+
 # 🎯 SMART TRADING CONFIG - เทรดบ่อย + แม่นยำ
 _aggressive_config = {
     "enabled": True,
-    "min_confidence_to_trade": 65,          # ✅ Confidence >= 65% (แม่นยำพอ)
-    "min_quality": "MEDIUM",                # ✅ ไม่รับ LOW quality
+    "min_confidence_to_trade": 75,          # 🔥 เพิ่มเป็น 75% (Conservative)
+    "min_quality": "HIGH",                  # 🔥 ต้อง HIGH ขึ้นไป
     "signal_window_minutes": 5,             # Signal ID window 5 นาที
     "allow_same_direction_reentry": True,   # ✅ เปิด re-entry ทิศทางเดียวกัน
     "min_profit_for_wait_close": 200,       # ✅ ปิดเมื่อ WAIT + กำไร >= $200 (ไม่รอนาน)
@@ -166,8 +180,8 @@ _peak_profit_by_position = {}
 # 🚨 MAX LOSS PROTECTION - บังคับปิดเมื่อขาดทุนเกินกำหนด
 _max_loss_config = {
     "enabled": True,
-    "max_loss_per_position": 3000,          # ✅ ปิดเมื่อขาดทุน >= $3,000 ต่อ position
-    "max_loss_percent": 5,                  # ✅ หรือขาดทุน >= 5% ของ balance
+    "max_loss_per_position": 1500,          # 🔥 ลดเหลือ $1,500 ต่อ position
+    "max_loss_percent": 3,                  # 🔥 ลดเหลือ 3% ของ balance
     "close_on_reverse_signal": True,        # ✅ ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
 }
 
@@ -881,6 +895,129 @@ def _apply_contrarian_mode(signal: str) -> str:
     return signal
 
 
+# =====================
+# 🎯 PULLBACK ENTRY FUNCTIONS
+# =====================
+
+def _check_pullback_entry(symbol: str, signal_data: Dict, current_price: float) -> tuple[bool, str]:
+    """
+    🎯 PULLBACK ENTRY STRATEGY
+    
+    สัญญาณมา → รอราคา pullback → รอนิ่ง → ค่อยเข้า
+    
+    Logic:
+    1. BUY signal มา ที่ราคา $2750
+    2. รอราคาลง (pullback) เช่น ลงมา $2745 (0.18%)
+    3. รอราคาเริ่มนิ่ง/กลับขึ้น
+    4. เข้า BUY ที่ราคาดีกว่า
+    
+    Returns: (can_enter: bool, reason: str)
+    """
+    global _pullback_config, _pending_signals
+    
+    if not _pullback_config.get("enabled", False):
+        return True, "Pullback disabled - enter immediately"
+    
+    signal = signal_data.get("signal", "WAIT")
+    if signal not in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+        return False, "No valid signal"
+    
+    is_buy = "BUY" in signal
+    pending = _pending_signals.get(symbol)
+    
+    # First time seeing this signal? Store it and wait
+    if not pending or pending.get("signal") != signal:
+        _pending_signals[symbol] = {
+            "signal": signal,
+            "price_at_signal": current_price,
+            "timestamp": datetime.now(),
+            "pullback_detected": False,
+            "lowest_price": current_price if is_buy else current_price,
+            "highest_price": current_price if not is_buy else current_price,
+            "stable_count": 0
+        }
+        logger.info(f"🎯 PULLBACK: {symbol} {signal} detected @ {current_price:.2f} - WAITING for pullback...")
+        return False, f"New signal - waiting for pullback"
+    
+    # Check if signal expired
+    signal_age = (datetime.now() - pending["timestamp"]).total_seconds() / 60
+    max_wait = _pullback_config.get("max_wait_minutes", 30)
+    if signal_age > max_wait:
+        del _pending_signals[symbol]
+        logger.info(f"🎯 PULLBACK: {symbol} signal expired after {max_wait} minutes")
+        return False, "Signal expired"
+    
+    signal_price = pending["price_at_signal"]
+    min_pullback_pct = _pullback_config.get("min_pullback_percent", 0.15)
+    max_pullback_pct = _pullback_config.get("max_pullback_percent", 1.0)
+    
+    if is_buy:
+        # For BUY: we want price to go DOWN first, then stabilize
+        pending["lowest_price"] = min(pending["lowest_price"], current_price)
+        pullback_pct = ((signal_price - pending["lowest_price"]) / signal_price) * 100
+        
+        # Check if pullback exceeded max (signal might be wrong)
+        if pullback_pct > max_pullback_pct:
+            del _pending_signals[symbol]
+            logger.warning(f"🎯 PULLBACK: {symbol} pullback too large ({pullback_pct:.2f}%) - cancelling signal")
+            return False, "Pullback too large - signal cancelled"
+        
+        # Check if minimum pullback achieved
+        if pullback_pct < min_pullback_pct:
+            return False, f"Waiting for pullback ({pullback_pct:.2f}% < {min_pullback_pct}%)"
+        
+        # Pullback detected!
+        if not pending["pullback_detected"]:
+            pending["pullback_detected"] = True
+            logger.info(f"🎯 PULLBACK: {symbol} pullback detected ({pullback_pct:.2f}%) - waiting for stabilization")
+        
+        # Check if price stabilizing (going back up)
+        if current_price > pending["lowest_price"]:
+            pending["stable_count"] += 1
+            required_stable = _pullback_config.get("stabilization_candles", 2)
+            
+            if pending["stable_count"] >= required_stable:
+                logger.info(f"✅ PULLBACK ENTRY: {symbol} {signal} - price stabilized after {pullback_pct:.2f}% pullback")
+                del _pending_signals[symbol]
+                return True, f"Pullback complete ({pullback_pct:.2f}%)"
+            else:
+                return False, f"Waiting for stabilization ({pending['stable_count']}/{required_stable})"
+        else:
+            pending["stable_count"] = 0
+            return False, "Price still falling"
+    
+    else:  # SELL
+        # For SELL: we want price to go UP first, then stabilize
+        pending["highest_price"] = max(pending["highest_price"], current_price)
+        pullback_pct = ((pending["highest_price"] - signal_price) / signal_price) * 100
+        
+        if pullback_pct > max_pullback_pct:
+            del _pending_signals[symbol]
+            logger.warning(f"🎯 PULLBACK: {symbol} pullback too large ({pullback_pct:.2f}%) - cancelling signal")
+            return False, "Pullback too large - signal cancelled"
+        
+        if pullback_pct < min_pullback_pct:
+            return False, f"Waiting for pullback ({pullback_pct:.2f}% < {min_pullback_pct}%)"
+        
+        if not pending["pullback_detected"]:
+            pending["pullback_detected"] = True
+            logger.info(f"🎯 PULLBACK: {symbol} pullback detected ({pullback_pct:.2f}%) - waiting for stabilization")
+        
+        if current_price < pending["highest_price"]:
+            pending["stable_count"] += 1
+            required_stable = _pullback_config.get("stabilization_candles", 2)
+            
+            if pending["stable_count"] >= required_stable:
+                logger.info(f"✅ PULLBACK ENTRY: {symbol} {signal} - price stabilized after {pullback_pct:.2f}% pullback")
+                del _pending_signals[symbol]
+                return True, f"Pullback complete ({pullback_pct:.2f}%)"
+            else:
+                return False, f"Waiting for stabilization ({pending['stable_count']}/{required_stable})"
+        else:
+            pending["stable_count"] = 0
+            return False, "Price still rising"
+
+
 def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
     """Generate unique signal ID to prevent duplicate trades - AGGRESSIVE VERSION"""
     import hashlib
@@ -1144,14 +1281,13 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     # 2. 🎯 SYMBOL-SPECIFIC QUALITY FILTER
     is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-    # Gold: MEDIUM OK (65%+) - Gold Strategy v2 has strict filters
-    # Forex: HIGH required (75%+) - Need stronger signals
+    # 🔥 Conservative mode - HIGH quality for all
     if is_gold:
-        min_quality = "MEDIUM"
-        min_confidence = 65
+        min_quality = "HIGH"      # 🔥 Gold ต้อง HIGH ขึ้นไป
+        min_confidence = 75       # 🔥 Gold ต้อง 75%+
     else:
-        min_quality = "HIGH"  # 🔥 Forex needs HIGH quality
-        min_confidence = 75   # 🔥 Forex needs 75%+ confidence
+        min_quality = "HIGH"      # 🔥 Forex needs HIGH quality
+        min_confidence = 80       # 🔥 Forex needs 80%+ confidence
     
     quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
     if quality_order.get(quality, 0) < quality_order.get(min_quality, 2):
@@ -1161,12 +1297,19 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     if confidence < min_confidence:
         return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}% (for {'Gold' if is_gold else 'Forex'})"
     
-    # 4. Check for open positions
+    # 4. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า
+    current_price = signal_data.get("current_price", 0)
+    if current_price > 0:
+        can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
+        if not can_enter_pullback:
+            return False, f"PULLBACK: {pullback_reason}"
+    
+    # 5. Check for open positions
     has_position = await _check_open_positions(symbol)
     if has_position:
         return False, f"Already have open position for {symbol}"
     
-    # 5. Generate signal ID
+    # 6. Generate signal ID
     signal_id = _generate_signal_id(symbol, signal, confidence)
     
     # 6. Check if we already traded this signal
