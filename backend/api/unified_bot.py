@@ -104,6 +104,8 @@ _bot_status = {
 }
 
 
+
+
 # 🔓 DUPLICATE TRADE PREVENTION - AGGRESSIVE FOR MORE TRADES
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
@@ -111,6 +113,13 @@ _trade_cooldown_seconds = 10  # 🔥 AGGRESSIVE: 10 seconds cooldown (was 30) - 
 
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม
 _enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
+
+# 🔀 CONTRARIAN MODE - กลับสัญญาณ (BUY→SELL, SELL→BUY)
+_contrarian_mode = {
+    "enabled": True,                    # 🔥 เปิด Contrarian Mode!
+    "reverse_signal": True,             # BUY→SELL, SELL→BUY
+    "reverse_strong_signal": True,      # STRONG_BUY→STRONG_SELL, STRONG_SELL→STRONG_BUY
+}
 
 # 🎯 AGGRESSIVE TRADING CONFIG - เทรดเยอะ กำไรเยอะ
 _aggressive_config = {
@@ -721,6 +730,45 @@ def _get_trade_protection_info() -> Dict:
     }
 
 
+def _apply_contrarian_mode(signal: str) -> str:
+    """
+    🔀 CONTRARIAN MODE - กลับสัญญาณ
+    
+    ถ้าสัญญาณเดิมผิดบ่อย → กลับสัญญาณ!
+    - BUY → SELL
+    - SELL → BUY
+    - STRONG_BUY → STRONG_SELL
+    - STRONG_SELL → STRONG_BUY
+    
+    Returns: Reversed signal or original signal
+    """
+    global _contrarian_mode
+    
+    if not _contrarian_mode.get("enabled", False):
+        return signal
+    
+    # Signal mapping
+    signal_map = {
+        "BUY": "SELL",
+        "SELL": "BUY",
+        "STRONG_BUY": "STRONG_SELL",
+        "STRONG_SELL": "STRONG_BUY",
+    }
+    
+    # Check if we should reverse this signal
+    if signal in ["BUY", "SELL"] and _contrarian_mode.get("reverse_signal", True):
+        reversed_signal = signal_map.get(signal, signal)
+        logger.info(f"🔀 CONTRARIAN: {signal} → {reversed_signal}")
+        return reversed_signal
+    
+    if signal in ["STRONG_BUY", "STRONG_SELL"] and _contrarian_mode.get("reverse_strong_signal", True):
+        reversed_signal = signal_map.get(signal, signal)
+        logger.info(f"🔀 CONTRARIAN: {signal} → {reversed_signal}")
+        return reversed_signal
+    
+    return signal
+
+
 def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
     """Generate unique signal ID to prevent duplicate trades - AGGRESSIVE VERSION"""
     import hashlib
@@ -823,30 +871,48 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict):
     
     try:
         if _bot and _bot.trading_engine:
-            side = "BUY" if "BUY" in signal_data["signal"] else "SELL"
-            signal_id = _generate_signal_id(symbol, signal_data["signal"], signal_data.get("confidence", 0))
+            original_signal = signal_data["signal"]
+            
+            # 🔀 CONTRARIAN MODE - กลับสัญญาณ!
+            final_signal = _apply_contrarian_mode(original_signal)
+            
+            # Determine side from FINAL signal (after contrarian)
+            side = "BUY" if "BUY" in final_signal else "SELL"
+            signal_id = _generate_signal_id(symbol, final_signal, signal_data.get("confidence", 0))
+            
+            if original_signal != final_signal:
+                logger.info(f"🔀 CONTRARIAN MODE: Original={original_signal} → Final={final_signal}")
             
             logger.info(f"🎯 Attempting trade: {symbol} {side} (Signal ID: {signal_id})")
             
-            # 🔧 Use full analysis dict (execute_trade expects analysis object)
+            # 🔧 Modify analysis to use reversed signal
             analysis = _bot_status["last_analysis"].get(symbol)
             if not analysis:
                 logger.warning(f"⚠️ No analysis found for {symbol}")
                 return
             
-            result = await _bot.execute_trade(analysis)
+            # Create modified analysis with reversed signal
+            modified_analysis = analysis.copy()
+            modified_analysis["signal"] = final_signal
+            modified_analysis["original_signal"] = original_signal
+            modified_analysis["contrarian_applied"] = (original_signal != final_signal)
+            
+            result = await _bot.execute_trade(modified_analysis)
             
             if result and result.get("success"):
                 # ✅ Record successful trade to prevent duplicates
                 _last_traded_signal[symbol] = {
-                    "signal": signal_data["signal"],
+                    "signal": final_signal,
+                    "original_signal": original_signal,
                     "signal_id": signal_id,
                     "timestamp": datetime.now(),
                     "confidence": signal_data.get("confidence", 0),
-                    "side": side
+                    "side": side,
+                    "contrarian": (original_signal != final_signal)
                 }
                 
-                logger.info(f"✅ Trade executed: {symbol} {side} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
+                contrarian_tag = " [CONTRARIAN]" if original_signal != final_signal else ""
+                logger.info(f"✅ Trade executed: {symbol} {side}{contrarian_tag} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
                 _bot_status["daily_stats"]["trades"] += 1
             else:
                 reason = result.get("reason", "Unknown") if result else "No result"
@@ -869,6 +935,7 @@ async def _stop_bot_internal():
         except asyncio.CancelledError:
             pass
         _bot_task = None
+    
     
     if _bot:
         try:
@@ -1496,6 +1563,93 @@ async def reset_trade_protection(symbol: str = None):
     else:
         _last_traded_signal.clear()
         return {"status": "reset_all"}
+
+
+# =====================
+# 🔀 CONTRARIAN MODE
+# =====================
+
+@router.get("/contrarian")
+async def get_contrarian_status():
+    """
+    🔀 Get Contrarian Mode status
+    
+    Contrarian = กลับสัญญาณ (BUY→SELL, SELL→BUY)
+    ใช้เมื่อสัญญาณเดิมผิดบ่อย
+    """
+    global _contrarian_mode
+    
+    return {
+        "config": _contrarian_mode,
+        "description": "กลับสัญญาณอัตโนมัติ - ถ้าระบบบอก BUY จะเทรด SELL แทน",
+        "mapping": {
+            "BUY": "SELL",
+            "SELL": "BUY",
+            "STRONG_BUY": "STRONG_SELL",
+            "STRONG_SELL": "STRONG_BUY"
+        }
+    }
+
+
+@router.post("/contrarian/toggle")
+async def toggle_contrarian_mode(enabled: bool = True):
+    """
+    🔀 Enable/Disable Contrarian Mode
+    
+    - enabled=true: กลับสัญญาณ (BUY→SELL, SELL→BUY)
+    - enabled=false: ใช้สัญญาณปกติ
+    """
+    global _contrarian_mode
+    
+    _contrarian_mode["enabled"] = enabled
+    
+    status = "ENABLED 🔀" if enabled else "DISABLED"
+    logger.info(f"🔀 Contrarian Mode: {status}")
+    
+    return {
+        "status": "success",
+        "contrarian_enabled": enabled,
+        "message": f"Contrarian Mode {status}",
+        "note": "BUY→SELL, SELL→BUY" if enabled else "Using original signals"
+    }
+
+
+@router.post("/contrarian/configure")
+async def configure_contrarian_mode(
+    enabled: bool = None,
+    reverse_signal: bool = None,
+    reverse_strong_signal: bool = None
+):
+    """
+    🔀 Configure Contrarian Mode
+    
+    - enabled: เปิด/ปิด Contrarian Mode
+    - reverse_signal: กลับ BUY/SELL
+    - reverse_strong_signal: กลับ STRONG_BUY/STRONG_SELL
+    """
+    global _contrarian_mode
+    
+    changes = []
+    
+    if enabled is not None:
+        _contrarian_mode["enabled"] = enabled
+        changes.append(f"enabled: {enabled}")
+    
+    if reverse_signal is not None:
+        _contrarian_mode["reverse_signal"] = reverse_signal
+        changes.append(f"reverse_signal: {reverse_signal}")
+    
+    if reverse_strong_signal is not None:
+        _contrarian_mode["reverse_strong_signal"] = reverse_strong_signal
+        changes.append(f"reverse_strong_signal: {reverse_strong_signal}")
+    
+    logger.info(f"🔀 Contrarian config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _contrarian_mode
+    }
 
 
 # =====================
