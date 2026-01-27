@@ -78,6 +78,7 @@
           </div>
         </div>
         
+        
         <!-- ?? Start/Stop Button + Mode -->
         <div class="flex items-center gap-3">
           <div class="text-gray-400 text-sm hidden sm:block">
