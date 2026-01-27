@@ -108,48 +108,55 @@ _bot_status = {
 
 
 
-# 🔓 DUPLICATE TRADE PREVENTION - AGGRESSIVE FOR MORE TRADES
+
+
+
+
+
+# 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 10  # 🔥 AGGRESSIVE: 10 seconds cooldown (was 30) - maximum trades!
+_trade_cooldown_seconds = 10  # 10 seconds cooldown between trades
 
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม + เปิดใหม่
-_enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
-_open_new_after_close = True         # 🔥 NEW: ปิด position เดิม → เปิดใหม่ตามสัญญาณใหม่
+_enable_reverse_signal_close = True   # ✅ เปิด! ปิด position เมื่อสัญญาณตรงข้าม
+_open_new_after_close = True          # ✅ เปิด! ปิดแล้วเปิดใหม่ตามสัญญาณใหม่
 
-# 🔀 CONTRARIAN MODE - กลับสัญญาณ (BUY→SELL, SELL→BUY)
+# 🔀 CONTRARIAN MODE - กลับสัญญาณ
+# ❌ ปิดถาวร! ใช้สัญญาณปกติ (BUY=BUY, SELL=SELL)
 _contrarian_mode = {
-    "enabled": False,                   # ❌ ปิด Contrarian Mode (ใช้สัญญาณปกติ)
-    "reverse_signal": False,            # BUY→SELL, SELL→BUY
-    "reverse_strong_signal": False,     # STRONG_BUY→STRONG_SELL, STRONG_SELL→STRONG_BUY
+    "enabled": False,
+    "reverse_signal": False,
+    "reverse_strong_signal": False,
 }
 
-# 🎯 AGGRESSIVE TRADING CONFIG - เทรดเยอะ กำไรเยอะ
+# 🎯 SMART TRADING CONFIG - เทรดบ่อย + แม่นยำ
 _aggressive_config = {
     "enabled": True,
-    "min_confidence_to_trade": 60,          # 🔥 ลดจาก 65 → 60 (เทรดง่ายขึ้น)
-    "signal_window_minutes": 5,             # 🔥 ลดจาก 15 → 5 นาที (เทรดถี่ขึ้น)
+    "min_confidence_to_trade": 65,          # ✅ Confidence >= 65% (แม่นยำพอ)
+    "min_quality": "MEDIUM",                # ✅ ไม่รับ LOW quality
+    "signal_window_minutes": 5,             # Signal ID window 5 นาที
     "allow_same_direction_reentry": True,   # ✅ เปิด re-entry ทิศทางเดียวกัน
-    "min_profit_for_wait_close": 500,       # 🔥 ปิดเมื่อ WAIT เฉพาะกำไร >= $500 (ไม่ปิดเร็วไป)
-    "quick_scalp_mode": False,              # Scalping mode (ยังไม่เปิด)
+    "min_profit_for_wait_close": 200,       # ✅ ปิดเมื่อ WAIT + กำไร >= $200 (ไม่รอนาน)
+    "quick_scalp_mode": False,
 }
 
 # 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
 _profit_protection_config = {
-    "enabled": True,                    # เปิด/ปิด feature
-    "profit_drawdown_percent": 30,      # ปิดเมื่อกำไรลดลง 30% จาก peak (เช่น peak $1000 → ปิดเมื่อเหลือ $700)
-    "min_profit_to_protect": 100,       # เริ่ม protect เมื่อกำไร >= $100
-    "trailing_stop_trigger": 500,       # เริ่ม trailing เมื่อกำไร >= $500
-    "trailing_stop_distance": 200,      # trailing stop ห่าง $200 จาก current profit
+    "enabled": True,
+    "profit_drawdown_percent": 25,          # ✅ ปิดเมื่อกำไรลดลง 25% จาก peak
+    "min_profit_to_protect": 50,            # ✅ เริ่ม protect เมื่อกำไร >= $50
+    "trailing_stop_trigger": 300,           # เริ่ม trailing เมื่อกำไร >= $300
+    "trailing_stop_distance": 100,          # trailing stop ห่าง $100
 }
-_peak_profit_by_position = {}           # {ticket: peak_profit} - เก็บกำไรสูงสุดของแต่ละ position
+_peak_profit_by_position = {}
 
 # 🚨 MAX LOSS PROTECTION - บังคับปิดเมื่อขาดทุนเกินกำหนด
 _max_loss_config = {
-    "enabled": True,                    # เปิด/ปิด feature
-    "max_loss_per_position": 5000,      # ปิดเมื่อขาดทุน >= $5,000 ต่อ position
-    "max_loss_percent": 10,             # หรือขาดทุน >= 10% ของ balance
-    "close_on_reverse_signal": True,    # ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
+    "enabled": True,
+    "max_loss_per_position": 3000,          # ✅ ปิดเมื่อขาดทุน >= $3,000 ต่อ position
+    "max_loss_percent": 5,                  # ✅ หรือขาดทุน >= 5% ของ balance
+    "close_on_reverse_signal": True,        # ✅ ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
 }
 
 
@@ -824,29 +831,41 @@ async def _check_open_positions(symbol: str) -> bool:
 
 async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     """
-    ?? DUPLICATE TRADE PREVENTION
-    Check if we should trade this signal
+    🎯 SMART TRADE FILTER
+    Check if we should trade this signal - Quality + Confidence filter
     
     Returns: (can_trade: bool, reason: str)
     """
-    global _last_traded_signal, _open_positions, _trade_cooldown_seconds
+    global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config
     
     signal = signal_data.get("signal", "WAIT")
     confidence = signal_data.get("confidence", 0)
+    quality = signal_data.get("quality", "SKIP")
     
     # 1. Check if signal is tradeable
     if signal in ["WAIT", "SKIP"]:
         return False, "Signal is WAIT/SKIP"
     
-    # 2. Check for open positions
+    # 2. 🎯 NEW: Quality Filter - ไม่รับ LOW quality
+    min_quality = _aggressive_config.get("min_quality", "MEDIUM")
+    quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+    if quality_order.get(quality, 0) < quality_order.get(min_quality, 2):
+        return False, f"Quality {quality} < minimum {min_quality}"
+    
+    # 3. 🎯 NEW: Confidence Filter
+    min_confidence = _aggressive_config.get("min_confidence_to_trade", 65)
+    if confidence < min_confidence:
+        return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}%"
+    
+    # 4. Check for open positions
     has_position = await _check_open_positions(symbol)
     if has_position:
         return False, f"Already have open position for {symbol}"
     
-    # 3. Generate signal ID
+    # 5. Generate signal ID
     signal_id = _generate_signal_id(symbol, signal, confidence)
     
-    # 4. Check if we already traded this signal
+    # 6. Check if we already traded this signal
     last_trade = _last_traded_signal.get(symbol)
     if last_trade:
         last_signal_id = last_trade.get("signal_id")
