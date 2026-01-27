@@ -398,9 +398,15 @@ class TradingEngine:
     
     async def _monitor_positions(self) -> None:
         """Monitor และอัพเดท Position"""
+        _already_closing = set()  # Track positions being closed to prevent log spam
+        
         while self._running:
             try:
                 for position_id, position in list(self.positions.items()):
+                    # Skip if already trying to close
+                    if position_id in _already_closing:
+                        continue
+                    
                     current_price = await self.broker.get_current_price(position.symbol)
                     position.update_pnl(current_price)
                     
@@ -408,14 +414,19 @@ class TradingEngine:
                     should_close, reason = self._check_exit_conditions(position, current_price)
                     
                     if should_close:
+                        _already_closing.add(position_id)  # Mark as closing
                         logger.info(f"Closing position {position_id}: {reason}")
                         result = await self.broker.close_position(position_id)
                         
                         if result.success:
                             del self.positions[position_id]
+                            _already_closing.discard(position_id)
                             
                             if self.on_position_closed:
                                 self.on_position_closed(result)
+                        else:
+                            # Failed to close - remove from closing set to retry later
+                            _already_closing.discard(position_id)
                 
                 await asyncio.sleep(1)  # Check every second
                 

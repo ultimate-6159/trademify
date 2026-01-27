@@ -103,6 +103,7 @@ _bot_status = {
     "started_at": None
 }
 
+
 # 🔓 DUPLICATE TRADE PREVENTION - RELAXED FOR MORE TRADES
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
@@ -120,6 +121,14 @@ _profit_protection_config = {
     "trailing_stop_distance": 200,      # trailing stop ห่าง $200 จาก current profit
 }
 _peak_profit_by_position = {}           # {ticket: peak_profit} - เก็บกำไรสูงสุดของแต่ละ position
+
+# 🚨 MAX LOSS PROTECTION - บังคับปิดเมื่อขาดทุนเกินกำหนด
+_max_loss_config = {
+    "enabled": True,                    # เปิด/ปิด feature
+    "max_loss_per_position": 5000,      # ปิดเมื่อขาดทุน >= $5,000 ต่อ position
+    "max_loss_percent": 10,             # หรือขาดทุน >= 10% ของ balance
+    "close_on_reverse_signal": True,    # ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
+}
 
 
 # =====================
@@ -539,23 +548,27 @@ async def _close_profitable_on_wait_signal(symbol: str) -> bool:
         
         return closed_any
         
+        
     except Exception as e:
         logger.error(f"Error in WAIT signal close: {e}")
         return False
 
 
+
+
 async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> bool:
     """
-    🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณมาตรงข้าม (เฉพาะกำไร)
+    🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณมาตรงข้าม
     
-    Logic:
-    - มี SELL position อยู่ + สัญญาณ BUY มา + กำไร > 0 → ปิด SELL ทันที
-    - มี BUY position อยู่ + สัญญาณ SELL มา + กำไร > 0 → ปิด BUY ทันที
-    - ถ้าขาดทุน → ไม่ปิด รอ SL/TP
+    Logic (ใหม่):
+    - มี SELL position อยู่ + สัญญาณ BUY มา → ปิด SELL ทันที (ไม่ว่ากำไรหรือขาดทุน)
+    - มี BUY position อยู่ + สัญญาณ SELL มา → ปิด BUY ทันที (ไม่ว่ากำไรหรือขาดทุน)
+    
+    🚨 สำคัญ: สัญญาณตรงข้าม = ตลาดเปลี่ยนทิศทาง → ต้องปิดทันที!
     
     Returns: True if position was closed, False otherwise
     """
-    global _bot, _enable_reverse_signal_close
+    global _bot, _enable_reverse_signal_close, _max_loss_config
     
     if not _enable_reverse_signal_close:
         return False
@@ -569,6 +582,9 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
     
     if not is_buy_signal and not is_sell_signal:
         return False
+    
+    # Check if we should close losing positions on reverse signal
+    close_on_reverse = _max_loss_config.get("close_on_reverse_signal", True)
     
     try:
         # Get current positions
@@ -597,34 +613,53 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
             if pos_symbol.upper() != symbol.upper():
                 continue
             
-            # 💰 CHECK PROFIT - ต้องมีกำไรถึงจะปิด
-            if pos_pnl <= 0:
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has {pos_side} position but PnL=${pos_pnl:.2f} (loss) → NOT closing, wait for SL/TP")
-                continue
-            
             # Check if signal is opposite to position
-            should_close = False
+            is_opposite = False
             
             if pos_side == "BUY" and is_sell_signal:
-                should_close = True
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has BUY position with PROFIT ${pos_pnl:.2f}, got SELL signal")
+                is_opposite = True
             elif pos_side == "SELL" and is_buy_signal:
+                is_opposite = True
+            
+            if not is_opposite:
+                continue
+            
+            # Determine if we should close
+            should_close = False
+            close_reason = ""
+            
+            if pos_pnl > 0:
+                # กำไร → ปิดเสมอ
                 should_close = True
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} has SELL position with PROFIT ${pos_pnl:.2f}, got BUY signal")
+                close_reason = f"PROFIT ${pos_pnl:.2f} + reverse signal"
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} {pos_side} position with PROFIT ${pos_pnl:.2f}, got {new_signal}")
+            elif close_on_reverse:
+                # ขาดทุน + เปิด option close_on_reverse_signal → ปิดเพื่อหยุดขาดทุน!
+                should_close = True
+                close_reason = f"LOSS ${pos_pnl:.2f} + reverse signal (CUT LOSS)"
+                logger.warning(f"🚨 REVERSE SIGNAL CUT LOSS: {symbol} {pos_side} position with LOSS ${pos_pnl:.2f}, got {new_signal}")
+                logger.warning(f"   Market direction changed! Cutting loss to prevent further damage!")
+            else:
+                # ขาดทุน + ไม่เปิด option → ไม่ปิด
+                logger.info(f"🔄 REVERSE SIGNAL: {symbol} {pos_side} position with LOSS ${pos_pnl:.2f}, got {new_signal} → NOT closing (close_on_reverse disabled)")
+                continue
             
             if should_close and pos_id:
-                logger.info(f"💰 Closing profitable position #{pos_id} | PnL: +${pos_pnl:.2f}")
+                logger.info(f"🔄 Closing position #{pos_id} | Reason: {close_reason}")
                 
                 # Close the position
                 try:
                     result = await _bot.trading_engine.broker.close_position(pos_id)
                     if result:
-                        logger.info(f"✅ Position #{pos_id} closed successfully! Realized PROFIT: +${pos_pnl:.2f}")
+                        logger.info(f"✅ Position #{pos_id} closed! PnL: ${pos_pnl:.2f}")
                         
                         # Update daily stats
                         _bot_status["daily_stats"]["trades"] += 1
                         _bot_status["daily_stats"]["pnl"] += float(pos_pnl)
-                        _bot_status["daily_stats"]["wins"] += 1  # Always win because we only close profitable
+                        if pos_pnl > 0:
+                            _bot_status["daily_stats"]["wins"] += 1
+                        else:
+                            _bot_status["daily_stats"]["losses"] += 1
                         
                         return True
                     else:
