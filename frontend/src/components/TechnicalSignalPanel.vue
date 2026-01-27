@@ -32,7 +32,7 @@
         <div class="text-5xl mb-2">{{ signalEmoji }}</div>
         <div class="text-2xl font-bold text-white">{{ signal?.signal || 'WAIT' }}</div>
         <div class="text-sm text-gray-300 mt-1">
-          Confidence: {{ (signal?.enhanced_confidence || 0).toFixed(1) }}%
+          Confidence: {{ displayConfidence.toFixed(1) }}%
         </div>
       </div>
 
@@ -401,6 +401,17 @@ const rsiColorClass = computed(() => {
   if (rsi > 70) return 'text-red-400'
   if (rsi < 30) return 'text-green-400'
   return 'text-white'
+})
+
+// ?? Display Confidence - Try multiple fields
+const displayConfidence = computed(() => {
+  if (!signal.value) return 0
+  // Try: confidence, enhanced_confidence, base_confidence in order
+  const conf = signal.value.confidence 
+    || signal.value.enhanced_confidence 
+    || signal.value.base_confidence 
+    || 0
+  return Number(conf) || 0
 })
 
 // Methods
