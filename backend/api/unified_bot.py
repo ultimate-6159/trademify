@@ -907,7 +907,7 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
         can_trade, reason = await _can_trade_signal(symbol, signal_data)
         if not can_trade:
             logger.info(f"⛔ Trade blocked for {symbol}: {reason}")
-        return
+            return  # ✅ Fix: return inside if block
     
     try:
         if _bot and _bot.trading_engine:
