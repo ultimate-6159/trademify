@@ -649,6 +649,9 @@ class AITradingBot:
             has_bearish_cross = bearish_cross or price_cross_down
             
             # 4. RSI CONFIRMATION - 🔥 GOLD ต้องไม่ Overbought/Oversold
+            rsi_rising = rsi > rsi_prev
+            rsi_falling = rsi < rsi_prev
+            
             if is_gold:
                 # Gold RSI more strict - avoid extremes
                 rsi_ok_buy = 35 <= rsi <= 60  # ไม่ซื้อเมื่อ RSI สูงเกินไป
@@ -663,9 +666,6 @@ class AITradingBot:
                 rsi_ok_buy = 35 <= rsi <= 65
                 rsi_ok_sell = 35 <= rsi <= 65
                 rsi_divergence_buy = rsi_divergence_sell = False
-            
-            rsi_rising = rsi > rsi_prev
-            rsi_falling = rsi < rsi_prev
             
             # 5. CANDLE CONFIRMATION - 🔥 GOLD ต้องมีแท่งเทียน Strong
             min_body_ratio = 0.4 if is_gold else (0.25 if is_m15 else 0.3)
