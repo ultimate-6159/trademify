@@ -150,7 +150,7 @@
     </div>
 
     <!-- Risk Management -->
-    <div v-if="signal?.risk_management" class="mb-6">
+    <div v-if="signal?.stop_loss || signal?.risk_management" class="mb-6">
       <h3 class="text-white font-semibold mb-3 flex items-center gap-2">
         <span>???</span> Risk Management
       </h3>
@@ -166,21 +166,21 @@
         <div class="bg-gray-700 rounded-lg p-3">
           <div class="text-xs text-gray-400 mb-1">Stop Loss</div>
           <div class="text-sm font-bold text-red-400">
-            {{ formatPrice(signal.risk_management.stop_loss) }}
+            {{ formatPrice(signal.stop_loss || signal.risk_management?.stop_loss) }}
           </div>
         </div>
 
         <div class="bg-gray-700 rounded-lg p-3">
           <div class="text-xs text-gray-400 mb-1">Take Profit</div>
           <div class="text-sm font-bold text-green-400">
-            {{ formatPrice(signal.risk_management.take_profit) }}
+            {{ formatPrice(signal.take_profit || signal.risk_management?.take_profit) }}
           </div>
         </div>
 
         <div class="bg-gray-700 rounded-lg p-3">
           <div class="text-xs text-gray-400 mb-1">R:R Ratio</div>
           <div class="text-sm font-bold text-purple-400">
-            1:{{ (signal.risk_management.risk_reward || 0).toFixed(2) }}
+            1:{{ computedRiskReward.toFixed(2) }}
           </div>
         </div>
       </div>
@@ -326,28 +326,49 @@ const technicalData = computed(() => {
   }
   
   return {
-    buy_score: buyScore || (scores.pattern / 10),
+    buy_score: buyScore || Math.round((scores.pattern || 0) / 10),
     sell_score: sellScore || 0,
-    session: session,
-    trend: trend || signal.value.market_regime,
+    session: session || 'N/A',
+    trend: trend || signal.value.market_regime || 'RANGE',
     rsi: indicators.rsi || 50,
     atr: indicators.atr || 0
   }
 })
 
+// Computed Risk/Reward - works with both flat and nested structure
+const computedRiskReward = computed(() => {
+  if (!signal.value) return 0
+  
+  // Try nested first
+  if (signal.value.risk_management?.risk_reward) {
+    return signal.value.risk_management.risk_reward
+  }
+  
+  // Calculate from flat structure
+  const entry = signal.value.current_price || 0
+  const sl = signal.value.stop_loss || signal.value.risk_management?.stop_loss || 0
+  const tp = signal.value.take_profit || signal.value.risk_management?.take_profit || 0
+  
+  if (entry && sl && tp) {
+    const risk = Math.abs(entry - sl)
+    const reward = Math.abs(tp - entry)
+    if (risk > 0) return reward / risk
+  }
+  return 0
+})
+
 const riskReward = computed(() => {
-  if (!signal.value?.risk_management) return 0
-  return signal.value.risk_management.risk_reward || 0
+  return computedRiskReward.value
 })
 
 const signalEmoji = computed(() => {
   const sig = signal.value?.signal
   const map = {
-    'STRONG_BUY': '????',
+    'STRONG_BUY': '??',
     'BUY': '??',
     'WAIT': '??',
     'SELL': '??',
-    'STRONG_SELL': '????'
+    'STRONG_SELL': '??'
   }
   return map[sig] || '??'
 })
