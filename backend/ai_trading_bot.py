@@ -598,27 +598,36 @@ class AITradingBot:
             hour = current_time.hour
             day_of_week = current_time.weekday()
             
-            # 1. SESSION FILTER
+            
+            # 1. SESSION FILTER - 🔥 GOLD ต้องเทรดเฉพาะ London/NY เท่านั้น!
             london_session = 7 <= hour <= 16
             ny_session = 13 <= hour <= 21
-            overlap_session = 13 <= hour <= 16
+            overlap_session = 13 <= hour <= 16  # Best session for Gold!
             asian_session = 0 <= hour <= 6 or hour >= 22
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
             
-            if is_m15:
-                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+            # 🥇 GOLD SPECIFIC: Only trade during active sessions
+            if is_gold:
+                good_session = overlap_session or (london_session and not asian_session)
+                best_session = overlap_session  # Bonus for overlap
             else:
                 good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+                best_session = overlap_session
             
-            # 2. TREND ANALYSIS
+            # 2. TREND ANALYSIS - 🔥 GOLD ต้องมี Trend ชัดเจน
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
             strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
             
             moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
             moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
             
-            has_uptrend = strong_uptrend or moderate_uptrend
-            has_downtrend = strong_downtrend or moderate_downtrend
+            # 🥇 GOLD SPECIFIC: Require stronger trend confirmation
+            if is_gold:
+                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
+                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
+            else:
+                has_uptrend = strong_uptrend or moderate_uptrend
+                has_downtrend = strong_downtrend or moderate_downtrend
             
             # 3. CROSSOVER SIGNALS
             bullish_cross = ema_fast_prev <= ema_mid_prev and ema_fast > ema_mid
@@ -630,68 +639,125 @@ class AITradingBot:
             has_bullish_cross = bullish_cross or price_cross_up
             has_bearish_cross = bearish_cross or price_cross_down
             
-            # 4. RSI CONFIRMATION
-            if is_m15:
+            # 4. RSI CONFIRMATION - 🔥 GOLD ต้องไม่ Overbought/Oversold
+            if is_gold:
+                # Gold RSI more strict - avoid extremes
+                rsi_ok_buy = 35 <= rsi <= 60  # ไม่ซื้อเมื่อ RSI สูงเกินไป
+                rsi_ok_sell = 40 <= rsi <= 65  # ไม่ขายเมื่อ RSI ต่ำเกินไป
+                rsi_divergence_buy = rsi < 45 and rsi_rising  # RSI ต่ำแต่กำลังขึ้น
+                rsi_divergence_sell = rsi > 55 and rsi_falling  # RSI สูงแต่กำลังลง
+            elif is_m15:
                 rsi_ok_buy = 30 <= rsi <= 70
                 rsi_ok_sell = 30 <= rsi <= 70
+                rsi_divergence_buy = rsi_divergence_sell = False
             else:
                 rsi_ok_buy = 35 <= rsi <= 65
                 rsi_ok_sell = 35 <= rsi <= 65
+                rsi_divergence_buy = rsi_divergence_sell = False
             
             rsi_rising = rsi > rsi_prev
             rsi_falling = rsi < rsi_prev
             
-            # 5. CANDLE CONFIRMATION
-            min_body_ratio = 0.25 if is_m15 else 0.3
+            # 5. CANDLE CONFIRMATION - 🔥 GOLD ต้องมีแท่งเทียน Strong
+            min_body_ratio = 0.4 if is_gold else (0.25 if is_m15 else 0.3)
             bullish_candle = is_bullish and body_ratio > min_body_ratio
             bearish_candle = is_bearish and body_ratio > min_body_ratio
             
             bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
             bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
             
+            # 🥇 GOLD: Require engulfing or strong candle
+            if is_gold:
+                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.5)
+                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.5)
+            else:
+                bullish_candle_ok = bullish_candle or bullish_engulf
+                bearish_candle_ok = bearish_candle or bearish_engulf
+            
             # 6. PULLBACK ZONE
             distance_to_ema = abs(current_price - ema_slow)
-            pullback_atr_mult = 3.0 if is_m15 else 2.5
+            pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Tighter for Gold
             in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
             
-            # 7. VOLATILITY CHECK
-            max_volatility = 4.0 if is_m15 else 3.0
+            # 7. VOLATILITY CHECK - 🔥 GOLD ต้องไม่ volatile เกินไป
+            max_volatility = 2.5 if is_gold else (4.0 if is_m15 else 3.0)  # Stricter for Gold
             volatility_ok = atr_pct <= max_volatility
             
             # 8. SUPPORT/RESISTANCE
-            lookback = 15 if is_m15 else 20
+            lookback = 20 if is_gold else (15 if is_m15 else 20)
             recent_high = np.max(high[-lookback:])
             recent_low = np.min(low[-lookback:])
             price_range = recent_high - recent_low
             
-            near_support = current_price <= recent_low + price_range * 0.35
-            near_resistance = current_price >= recent_high - price_range * 0.35
+            # 🥇 GOLD: Tighter entry zones
+            zone_pct = 0.25 if is_gold else 0.35
+            near_support = current_price <= recent_low + price_range * zone_pct
+            near_resistance = current_price >= recent_high - price_range * zone_pct
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SIGNAL SCORING
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            buy_conditions = [
-                has_uptrend,                        # 1. Trend
-                has_bullish_cross,                  # 2. Crossover
-                rsi_ok_buy,                         # 3. RSI range
-                rsi_rising,                         # 4. RSI momentum
-                good_session,                       # 5. Session
-                bullish_candle or bullish_engulf,   # 6. Candle
-                in_pullback_zone or near_support,   # 7. Entry zone
-                volatility_ok,                      # 8. Volatility
-            ]
-            
-            sell_conditions = [
-                has_downtrend,                      # 1. Trend
-                has_bearish_cross,                  # 2. Crossover
-                rsi_ok_sell,                        # 3. RSI range
-                rsi_falling,                        # 4. RSI momentum
-                good_session,                       # 5. Session
-                bearish_candle or bearish_engulf,   # 6. Candle
-                in_pullback_zone or near_resistance,# 7. Entry zone
-                volatility_ok,                      # 8. Volatility
-            ]
+            # 🥇 GOLD SPECIFIC CONDITIONS
+            if is_gold:
+                buy_conditions = [
+                    has_uptrend,                        # 1. Trend (MUST for Gold)
+                    has_bullish_cross,                  # 2. Crossover
+                    rsi_ok_buy,                         # 3. RSI range
+                    rsi_rising or rsi_divergence_buy,   # 4. RSI momentum
+                    good_session,                       # 5. Session (MUST for Gold)
+                    bullish_candle_ok,                  # 6. Strong Candle
+                    in_pullback_zone or near_support,   # 7. Entry zone
+                    volatility_ok,                      # 8. Volatility
+                    current_price > ema_slow,           # 9. Price above EMA Slow
+                    strong_uptrend or best_session,     # 10. Extra confirmation
+                ]
+                
+                sell_conditions = [
+                    has_downtrend,                      # 1. Trend (MUST for Gold)
+                    has_bearish_cross,                  # 2. Crossover
+                    rsi_ok_sell,                        # 3. RSI range
+                    rsi_falling or rsi_divergence_sell, # 4. RSI momentum
+                    good_session,                       # 5. Session (MUST for Gold)
+                    bearish_candle_ok,                  # 6. Strong Candle
+                    in_pullback_zone or near_resistance,# 7. Entry zone
+                    volatility_ok,                      # 8. Volatility
+                    current_price < ema_slow,           # 9. Price below EMA Slow
+                    strong_downtrend or best_session,   # 10. Extra confirmation
+                ]
+                
+                # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน
+                gold_no_trade = (
+                    not good_session or              # ไม่ใช่ช่วงเวลาดี
+                    asian_session or                 # Asian session = sideway
+                    is_weekend_risk or               # Weekend risk
+                    (not has_uptrend and not has_downtrend)  # ไม่มี trend
+                )
+                
+            else:
+                # Original conditions for non-Gold
+                buy_conditions = [
+                    has_uptrend,                        # 1. Trend
+                    has_bullish_cross,                  # 2. Crossover
+                    rsi_ok_buy,                         # 3. RSI range
+                    rsi_rising,                         # 4. RSI momentum
+                    good_session,                       # 5. Session
+                    bullish_candle or bullish_engulf,   # 6. Candle
+                    in_pullback_zone or near_support,   # 7. Entry zone
+                    volatility_ok,                      # 8. Volatility
+                ]
+                
+                sell_conditions = [
+                    has_downtrend,                      # 1. Trend
+                    has_bearish_cross,                  # 2. Crossover
+                    rsi_ok_sell,                        # 3. RSI range
+                    rsi_falling,                        # 4. RSI momentum
+                    good_session,                       # 5. Session
+                    bearish_candle or bearish_engulf,   # 6. Candle
+                    in_pullback_zone or near_resistance,# 7. Entry zone
+                    volatility_ok,                      # 8. Volatility
+                ]
+                gold_no_trade = False
             
             buy_score = sum(buy_conditions)
             sell_score = sum(sell_conditions)
@@ -705,9 +771,13 @@ class AITradingBot:
                 buy_score += 1
                 sell_score += 1
             
-            # M15: Need only 3/10 conditions (very relaxed for more trades)
-            # H1: Need 4/10 conditions
-            min_conditions = 3 if is_m15 else 4
+            # 🥇 GOLD: Need higher score
+            if is_gold:
+                min_conditions = 6  # Gold needs 6/12 conditions
+            elif is_m15:
+                min_conditions = 3
+            else:
+                min_conditions = 4
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL
@@ -743,28 +813,57 @@ class AITradingBot:
                 else:
                     return None
             else:
+                # 🥇 GOLD: Check gold_no_trade filter first
+                if is_gold and gold_no_trade:
+                    logger.info(f"   🥇 GOLD FILTER: No trade - session={good_session}, trend={has_uptrend or has_downtrend}")
+                    return None
+                
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
-                    confidence = 60 + (buy_score - min_conditions) * 8
-                    if buy_score >= 8:
-                        quality = "PREMIUM"
-                    elif buy_score >= 7:
-                        quality = "HIGH"
-                    elif buy_score >= 6:
-                        quality = "MEDIUM"
+                    # 🥇 GOLD: Higher confidence requirement
+                    if is_gold:
+                        confidence = 65 + (buy_score - min_conditions) * 5
+                        if buy_score >= 9:
+                            quality = "PREMIUM"
+                        elif buy_score >= 7:
+                            quality = "HIGH"
+                        elif buy_score >= 6:
+                            quality = "MEDIUM"
+                        else:
+                            quality = "LOW"
                     else:
-                        quality = "LOW"
+                        confidence = 60 + (buy_score - min_conditions) * 8
+                        if buy_score >= 8:
+                            quality = "PREMIUM"
+                        elif buy_score >= 7:
+                            quality = "HIGH"
+                        elif buy_score >= 6:
+                            quality = "MEDIUM"
+                        else:
+                            quality = "LOW"
                 elif sell_score >= min_conditions and sell_score > buy_score:
                     signal = "SELL"
-                    confidence = 60 + (sell_score - min_conditions) * 8
-                    if sell_score >= 8:
-                        quality = "PREMIUM"
-                    elif sell_score >= 7:
-                        quality = "HIGH"
-                    elif sell_score >= 6:
-                        quality = "MEDIUM"
+                    # 🥇 GOLD: Higher confidence requirement
+                    if is_gold:
+                        confidence = 65 + (sell_score - min_conditions) * 5
+                        if sell_score >= 9:
+                            quality = "PREMIUM"
+                        elif sell_score >= 7:
+                            quality = "HIGH"
+                        elif sell_score >= 6:
+                            quality = "MEDIUM"
+                        else:
+                            quality = "LOW"
                     else:
-                        quality = "LOW"
+                        confidence = 60 + (sell_score - min_conditions) * 8
+                        if sell_score >= 8:
+                            quality = "PREMIUM"
+                        elif sell_score >= 7:
+                            quality = "HIGH"
+                        elif sell_score >= 6:
+                            quality = "MEDIUM"
+                        else:
+                            quality = "LOW"
                 else:
                     return None
             
