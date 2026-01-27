@@ -836,6 +836,9 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     🎯 SMART TRADE FILTER
     Check if we should trade this signal - Quality + Confidence filter
     
+    🥇 Gold: MEDIUM quality OK (Gold Strategy v2 มี filter เข้มอยู่แล้ว)
+    💱 Forex: HIGH quality required (ต้องการ signal ที่แข็งแกร่งกว่า)
+    
     Returns: (can_trade: bool, reason: str)
     """
     global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config
@@ -848,16 +851,25 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     if signal in ["WAIT", "SKIP"]:
         return False, "Signal is WAIT/SKIP"
     
-    # 2. 🎯 NEW: Quality Filter - ไม่รับ LOW quality
-    min_quality = _aggressive_config.get("min_quality", "MEDIUM")
+    # 2. 🎯 SYMBOL-SPECIFIC QUALITY FILTER
+    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+    
+    # Gold: MEDIUM OK (65%+) - Gold Strategy v2 has strict filters
+    # Forex: HIGH required (75%+) - Need stronger signals
+    if is_gold:
+        min_quality = "MEDIUM"
+        min_confidence = 65
+    else:
+        min_quality = "HIGH"  # 🔥 Forex needs HIGH quality
+        min_confidence = 75   # 🔥 Forex needs 75%+ confidence
+    
     quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
     if quality_order.get(quality, 0) < quality_order.get(min_quality, 2):
-        return False, f"Quality {quality} < minimum {min_quality}"
+        return False, f"Quality {quality} < minimum {min_quality} (for {'Gold' if is_gold else 'Forex'})"
     
-    # 3. 🎯 NEW: Confidence Filter
-    min_confidence = _aggressive_config.get("min_confidence_to_trade", 65)
+    # 3. 🎯 Confidence Filter
     if confidence < min_confidence:
-        return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}%"
+        return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}% (for {'Gold' if is_gold else 'Forex'})"
     
     # 4. Check for open positions
     has_position = await _check_open_positions(symbol)
@@ -885,6 +897,9 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
                 return False, f"Cooldown active ({remaining}s remaining)"
     
     return True, "OK"
+
+
+
 
 
 async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_check: bool = False):
