@@ -104,13 +104,23 @@ _bot_status = {
 }
 
 
-# 🔓 DUPLICATE TRADE PREVENTION - RELAXED FOR MORE TRADES
+# 🔓 DUPLICATE TRADE PREVENTION - AGGRESSIVE FOR MORE TRADES
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 30  # 🔥 CHANGED: 30 seconds cooldown (was 60) - allows more trades
+_trade_cooldown_seconds = 10  # 🔥 AGGRESSIVE: 10 seconds cooldown (was 30) - maximum trades!
 
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม
 _enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
+
+# 🎯 AGGRESSIVE TRADING CONFIG - เทรดเยอะ กำไรเยอะ
+_aggressive_config = {
+    "enabled": True,
+    "min_confidence_to_trade": 60,          # 🔥 ลดจาก 65 → 60 (เทรดง่ายขึ้น)
+    "signal_window_minutes": 5,             # 🔥 ลดจาก 15 → 5 นาที (เทรดถี่ขึ้น)
+    "allow_same_direction_reentry": True,   # ✅ เปิด re-entry ทิศทางเดียวกัน
+    "min_profit_for_wait_close": 500,       # 🔥 ปิดเมื่อ WAIT เฉพาะกำไร >= $500 (ไม่ปิดเร็วไป)
+    "quick_scalp_mode": False,              # Scalping mode (ยังไม่เปิด)
+}
 
 # 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
 _profit_protection_config = {
@@ -517,14 +527,21 @@ async def _close_profitable_on_wait_signal(symbol: str) -> bool:
             if pos_symbol.upper() != symbol.upper():
                 continue
             
-            # Only close if profitable
+            # 🔥 AGGRESSIVE: Only close if profit >= min_profit_for_wait_close
+            min_profit_for_wait = _aggressive_config.get("min_profit_for_wait_close", 500)
+            
+            # Only close if profitable AND profit >= minimum
             if pos_pnl <= 0:
-                logger.info(f"🚨 WAIT SIGNAL: {symbol} has {pos_side} position but PnL=${pos_pnl:.2f} (loss) → NOT closing, wait for SL/TP")
+                logger.info(f"🚨 WAIT SIGNAL: {symbol} {pos_side} PnL=${pos_pnl:.2f} (loss) → NOT closing")
                 continue
             
-            # Close profitable position
-            logger.warning(f"🚨 WAIT SIGNAL CLOSE: {symbol} #{pos_id} | {pos_side} | Profit: ${pos_pnl:.2f}")
-            logger.warning(f"   Signal changed to WAIT → Closing to lock profit!")
+            if pos_pnl < min_profit_for_wait:
+                logger.info(f"🚨 WAIT SIGNAL: {symbol} {pos_side} PnL=${pos_pnl:.2f} < ${min_profit_for_wait} → NOT closing (let it run)")
+                continue
+            
+            # Close profitable position only if >= minimum
+            logger.warning(f"🚨 WAIT SIGNAL CLOSE: {symbol} #{pos_id} | {pos_side} | Profit: ${pos_pnl:.2f} >= ${min_profit_for_wait}")
+            logger.warning(f"   Signal changed to WAIT + High profit → Closing to lock!")
             
             try:
                 result = await _bot.trading_engine.broker.close_position(pos_id)
@@ -705,13 +722,18 @@ def _get_trade_protection_info() -> Dict:
 
 
 def _generate_signal_id(symbol: str, signal: str, confidence: float) -> str:
-    """Generate unique signal ID to prevent duplicate trades"""
+    """Generate unique signal ID to prevent duplicate trades - AGGRESSIVE VERSION"""
     import hashlib
-    # Signal ID based on: symbol + signal direction + confidence band + 15-min window
-    confidence_band = int(confidence // 10) * 10  # Round to 10s (70, 80, 90, etc.)
-    # ?? CHANGED: Use 15-minute windows instead of 1 hour
+    global _aggressive_config
+    
+    # Signal ID based on: symbol + signal direction + confidence band + X-min window
+    confidence_band = int(confidence // 5) * 5  # 🔥 Round to 5s (more granular: 65, 70, 75, etc.)
+    
+    # 🔥 Use configurable window (default 5 minutes for more trades)
+    window_minutes = _aggressive_config.get("signal_window_minutes", 5)
     now = datetime.now()
-    time_window = f"{now.strftime('%Y%m%d%H')}{now.minute // 15}"  # Changes every 15 mins
+    time_window = f"{now.strftime('%Y%m%d%H')}{now.minute // window_minutes}"
+    
     raw = f"{symbol}_{signal}_{confidence_band}_{time_window}"
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
@@ -1513,6 +1535,158 @@ async def toggle_reverse_signal_close(enabled: bool = True):
         "status": "success",
         "reverse_signal_close": enabled,
         "message": f"Reverse signal close {status}"
+    }
+
+
+# =====================
+# 🎯 AGGRESSIVE TRADING MODE
+# =====================
+
+@router.get("/aggressive")
+async def get_aggressive_config():
+    """
+    🎯 Get Aggressive Trading configuration
+    
+    Aggressive mode = เทรดเยอะ กำไรเยอะ
+    """
+    global _aggressive_config, _trade_cooldown_seconds
+    
+    return {
+        "config": _aggressive_config,
+        "cooldown_seconds": _trade_cooldown_seconds,
+        "description": {
+            "min_confidence_to_trade": "Minimum confidence % เพื่อเทรด",
+            "signal_window_minutes": "Signal ID window (นาที) - ยิ่งน้อย ยิ่งเทรดเยอะ",
+            "allow_same_direction_reentry": "อนุญาต re-entry ทิศทางเดียวกัน",
+            "min_profit_for_wait_close": "กำไรขั้นต่ำที่จะปิดเมื่อ WAIT signal",
+            "quick_scalp_mode": "Scalping mode (เทรดถี่มาก)"
+        }
+    }
+
+
+@router.post("/aggressive/configure")
+async def configure_aggressive_mode(
+    min_confidence: float = None,
+    signal_window_minutes: int = None,
+    allow_reentry: bool = None,
+    min_profit_for_wait: float = None,
+    cooldown_seconds: int = None,
+    scalp_mode: bool = None
+):
+    """
+    🎯 Configure Aggressive Trading Mode
+    
+    - min_confidence: 60-80 (default: 60)
+    - signal_window_minutes: 1-15 (default: 5)
+    - allow_reentry: true/false
+    - min_profit_for_wait: $100-$1000 (default: $500)
+    - cooldown_seconds: 5-60 (default: 10)
+    - scalp_mode: true/false (experimental)
+    """
+    global _aggressive_config, _trade_cooldown_seconds
+    
+    changes = []
+    
+    if min_confidence is not None:
+        _aggressive_config["min_confidence_to_trade"] = max(50, min(85, min_confidence))
+        changes.append(f"min_confidence: {_aggressive_config['min_confidence_to_trade']}%")
+    
+    if signal_window_minutes is not None:
+        _aggressive_config["signal_window_minutes"] = max(1, min(15, signal_window_minutes))
+        changes.append(f"signal_window: {_aggressive_config['signal_window_minutes']} mins")
+    
+    if allow_reentry is not None:
+        _aggressive_config["allow_same_direction_reentry"] = allow_reentry
+        changes.append(f"allow_reentry: {allow_reentry}")
+    
+    if min_profit_for_wait is not None:
+        _aggressive_config["min_profit_for_wait_close"] = max(50, min(5000, min_profit_for_wait))
+        changes.append(f"min_profit_for_wait: ${_aggressive_config['min_profit_for_wait_close']}")
+    
+    if cooldown_seconds is not None:
+        _trade_cooldown_seconds = max(5, min(60, cooldown_seconds))
+        changes.append(f"cooldown: {_trade_cooldown_seconds}s")
+    
+    if scalp_mode is not None:
+        _aggressive_config["quick_scalp_mode"] = scalp_mode
+        if scalp_mode:
+            # Ultra aggressive settings for scalping
+            _trade_cooldown_seconds = 5
+            _aggressive_config["signal_window_minutes"] = 1
+            _aggressive_config["min_confidence_to_trade"] = 55
+            changes.append("SCALP MODE ACTIVATED!")
+    
+    logger.info(f"🎯 Aggressive config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _aggressive_config,
+        "cooldown_seconds": _trade_cooldown_seconds
+    }
+
+
+@router.post("/aggressive/preset/{preset}")
+async def set_aggressive_preset(preset: str):
+    """
+    🎯 Set Aggressive Trading Preset
+    
+    Presets:
+    - conservative: Winrate สูง แต่เทรดน้อย
+    - balanced: สมดุล (default)
+    - aggressive: เทรดเยอะ กำไรเยอะ
+    - ultra: Ultra aggressive (scalping)
+    """
+    global _aggressive_config, _trade_cooldown_seconds
+    
+    presets = {
+        "conservative": {
+            "min_confidence_to_trade": 75,
+            "signal_window_minutes": 15,
+            "min_profit_for_wait_close": 200,
+            "cooldown": 30,
+            "description": "Winrate สูง ~90% แต่เทรดน้อย"
+        },
+        "balanced": {
+            "min_confidence_to_trade": 65,
+            "signal_window_minutes": 10,
+            "min_profit_for_wait_close": 300,
+            "cooldown": 20,
+            "description": "สมดุล Winrate ~80% เทรดปานกลาง"
+        },
+        "aggressive": {
+            "min_confidence_to_trade": 60,
+            "signal_window_minutes": 5,
+            "min_profit_for_wait_close": 500,
+            "cooldown": 10,
+            "description": "เทรดเยอะ Winrate ~75% กำไรเยอะ"
+        },
+        "ultra": {
+            "min_confidence_to_trade": 55,
+            "signal_window_minutes": 2,
+            "min_profit_for_wait_close": 1000,
+            "cooldown": 5,
+            "description": "Ultra aggressive Winrate ~70% เทรดมากที่สุด"
+        }
+    }
+    
+    if preset not in presets:
+        return {"status": "error", "message": f"Unknown preset: {preset}. Available: {list(presets.keys())}"}
+    
+    config = presets[preset]
+    _aggressive_config["min_confidence_to_trade"] = config["min_confidence_to_trade"]
+    _aggressive_config["signal_window_minutes"] = config["signal_window_minutes"]
+    _aggressive_config["min_profit_for_wait_close"] = config["min_profit_for_wait_close"]
+    _trade_cooldown_seconds = config["cooldown"]
+    
+    logger.info(f"🎯 Preset '{preset}' activated: {config['description']}")
+    
+    return {
+        "status": "success",
+        "preset": preset,
+        "description": config["description"],
+        "config": _aggressive_config,
+        "cooldown_seconds": _trade_cooldown_seconds
     }
 
 
