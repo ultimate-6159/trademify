@@ -398,13 +398,24 @@ class TradingEngine:
     
     async def _monitor_positions(self) -> None:
         """Monitor และอัพเดท Position"""
-        _already_closing = set()  # Track positions being closed to prevent log spam
+        # 🔥 Use instance variable to track closing positions across iterations
+        if not hasattr(self, '_closing_positions'):
+            self._closing_positions = set()
+        if not hasattr(self, '_recently_logged'):
+            self._recently_logged = {}  # {position_id: timestamp}
         
         while self._running:
             try:
+                # Clean up old logged entries (older than 60 seconds)
+                current_time = datetime.now().timestamp()
+                self._recently_logged = {
+                    pid: ts for pid, ts in self._recently_logged.items() 
+                    if current_time - ts < 60
+                }
+                
                 for position_id, position in list(self.positions.items()):
                     # Skip if already trying to close
-                    if position_id in _already_closing:
+                    if position_id in self._closing_positions:
                         continue
                     
                     current_price = await self.broker.get_current_price(position.symbol)
@@ -414,19 +425,37 @@ class TradingEngine:
                     should_close, reason = self._check_exit_conditions(position, current_price)
                     
                     if should_close:
-                        _already_closing.add(position_id)  # Mark as closing
-                        logger.info(f"Closing position {position_id}: {reason}")
+                        self._closing_positions.add(position_id)  # Mark as closing
+                        
+                        # 🔥 Only log if not recently logged
+                        if position_id not in self._recently_logged:
+                            logger.info(f"Closing position {position_id}: {reason}")
+                            self._recently_logged[position_id] = current_time
+                        
                         result = await self.broker.close_position(position_id)
                         
                         if result.success:
-                            del self.positions[position_id]
-                            _already_closing.discard(position_id)
+                            # 🔥 Verify position is actually closed
+                            await asyncio.sleep(0.5)  # Wait for MT5 to process
+                            broker_positions = await self.broker.get_positions()
+                            still_open = any(
+                                str(getattr(p, 'ticket', getattr(p, 'id', ''))) == str(position_id) or
+                                str(getattr(p, 'id', '')) == str(position_id)
+                                for p in broker_positions
+                            )
                             
-                            if self.on_position_closed:
-                                self.on_position_closed(result)
+                            if not still_open:
+                                del self.positions[position_id]
+                                self._closing_positions.discard(position_id)
+                                
+                                if self.on_position_closed:
+                                    self.on_position_closed(result)
+                            else:
+                                # Position still open - don't remove from closing set
+                                logger.warning(f"⚠️ Position {position_id} still open after close attempt")
                         else:
                             # Failed to close - remove from closing set to retry later
-                            _already_closing.discard(position_id)
+                            self._closing_positions.discard(position_id)
                 
                 await asyncio.sleep(1)  # Check every second
                 
