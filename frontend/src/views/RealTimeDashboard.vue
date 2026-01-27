@@ -6,8 +6,15 @@
         <h1 class="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
           <span class="text-orange-500">&#x1F525;</span> Real-Time Trading
         </h1>
-        <p class="text-gray-400 text-sm mt-1">
-          Live signal analysis from backend • {{ connectionStatus }}
+        <p class="text-gray-400 text-sm mt-1 flex items-center gap-2">
+          Live signal analysis from backend
+          <span 
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+            :class="isConnected ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'"
+          >
+            <span class="w-2 h-2 rounded-full" :class="isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'"></span>
+            {{ isConnected ? 'Connected' : 'Disconnected' }}
+          </span>
         </p>
       </div>
       
@@ -292,6 +299,7 @@ const isStarting = ref(false)  // ?? For start button
 const isStopping = ref(false)  // ?? For stop button
 const signalMode = ref('technical')
 const botMode = ref('stopped')  // ?? Bot trading mode: stopped, auto, manual
+const lastUpdated = ref(null)  // ?? Track last successful update
 
 const account = ref({
   balance: 0,
@@ -316,6 +324,15 @@ let pollInterval = null
 // Computed
 const connectionStatus = computed(() => {
   return isConnected.value ? '?? Connected' : '?? Disconnected'
+})
+
+// ?? Computed: Time since last update
+const timeSinceUpdate = computed(() => {
+  if (!lastUpdated.value) return 'Never'
+  const diff = Math.floor((Date.now() - lastUpdated.value) / 1000)
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
 })
 
 // Methods
@@ -507,6 +524,10 @@ async function refreshAll() {
       fetchAccount(),
       fetchPositions()
     ])
+    // ?? Track successful update time
+    if (isConnected.value) {
+      lastUpdated.value = Date.now()
+    }
   } finally {
     isLoading.value = false
   }
@@ -515,6 +536,9 @@ async function refreshAll() {
 function startPolling() {
   if (pollInterval) return
   pollInterval = setInterval(refreshAll, 10000) // Poll every 10 seconds
+  
+  // ?? Mobile: Reconnect when page becomes visible again
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 }
 
 function stopPolling() {
@@ -522,6 +546,31 @@ function stopPolling() {
     clearInterval(pollInterval)
     pollInterval = null
   }
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+}
+
+// ?? MOBILE FIX: Refresh immediately when returning to tab
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    console.log('[RealTime] Page visible - refreshing immediately')
+    refreshAll()
+    // Restart polling to ensure interval is fresh
+    if (autoRefresh.value && !pollInterval) {
+      startPolling()
+    }
+  }
+}
+
+// ?? MOBILE FIX: Handle network reconnection
+function handleOnline() {
+  console.log('[RealTime] Network reconnected - refreshing')
+  isConnected.value = true
+  refreshAll()
+}
+
+function handleOffline() {
+  console.log('[RealTime] Network disconnected')
+  isConnected.value = false
 }
 
 // Lifecycle
@@ -530,9 +579,16 @@ onMounted(() => {
   if (autoRefresh.value) {
     startPolling()
   }
+  
+  // ?? Mobile: Listen for network changes
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
 })
 
 onUnmounted(() => {
   stopPolling()
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
