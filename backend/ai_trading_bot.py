@@ -599,19 +599,28 @@ class AITradingBot:
             day_of_week = current_time.weekday()
             
             
-            # 1. SESSION FILTER - 🔥 GOLD ต้องเทรดเฉพาะ London/NY เท่านั้น!
+            # 1. SESSION FILTER - ให้เทรดได้ทุก Session แต่ให้ Bonus สำหรับ Active Sessions
             london_session = 7 <= hour <= 16
             ny_session = 13 <= hour <= 21
             overlap_session = 13 <= hour <= 16  # Best session for Gold!
             asian_session = 0 <= hour <= 6 or hour >= 22
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
             
-            # 🥇 GOLD SPECIFIC: Only trade during active sessions
+            # 🥇 GOLD: เทรดได้ทุก Session (ไม่บล็อก Asian) - ให้ Bonus สำหรับ Active Sessions
+            # 🚀 RELAXED: Allow trading in all sessions for more opportunities
+            allow_all_sessions = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
+            
             if is_gold:
-                good_session = overlap_session or (london_session and not asian_session)
-                best_session = overlap_session  # Bonus for overlap
+                if allow_all_sessions:
+                    good_session = True  # เทรดได้ทุก Session
+                else:
+                    good_session = overlap_session or london_session or ny_session
+                best_session = overlap_session or (london_session and not asian_session)
             else:
-                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+                if allow_all_sessions:
+                    good_session = not is_weekend_risk  # เทรดได้ทุก Session ยกเว้น Weekend
+                else:
+                    good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
                 best_session = overlap_session
             
             # 2. TREND ANALYSIS - 🔥 GOLD ต้องมี Trend ชัดเจน
@@ -726,11 +735,14 @@ class AITradingBot:
                     strong_downtrend or best_session,   # 10. Extra confirmation
                 ]
                 
-                # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน
+                # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน (Relaxed for more trades)
+                # 🚀 UPDATED: Allow all sessions if ENV set
+                allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
+                
                 gold_no_trade = (
-                    not good_session or              # ไม่ใช่ช่วงเวลาดี
-                    asian_session or                 # Asian session = sideway
-                    is_weekend_risk or               # Weekend risk
+                    (not allow_all and not good_session) or  # Session filter (if enabled)
+                    (not allow_all and asian_session) or     # Asian session (if filter enabled)
+                    is_weekend_risk or               # Weekend risk (always block)
                     (not has_uptrend and not has_downtrend)  # ไม่มี trend
                 )
                 
@@ -815,7 +827,8 @@ class AITradingBot:
             else:
                 # 🥇 GOLD: Check gold_no_trade filter first
                 if is_gold and gold_no_trade:
-                    logger.info(f"   🥇 GOLD FILTER: No trade - session={good_session}, trend={has_uptrend or has_downtrend}")
+                    allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
+                    logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, weekend={is_weekend_risk}, allow_all={allow_all}")
                     return None
                 
                 if buy_score >= min_conditions and buy_score > sell_score:
