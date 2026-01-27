@@ -106,19 +106,22 @@ _bot_status = {
 
 
 
+
+
 # 🔓 DUPLICATE TRADE PREVENTION - AGGRESSIVE FOR MORE TRADES
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
 _trade_cooldown_seconds = 10  # 🔥 AGGRESSIVE: 10 seconds cooldown (was 30) - maximum trades!
 
-# 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม
+# 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม + เปิดใหม่
 _enable_reverse_signal_close = True  # เปิด/ปิด feature นี้
+_open_new_after_close = True         # 🔥 NEW: ปิด position เดิม → เปิดใหม่ตามสัญญาณใหม่
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ (BUY→SELL, SELL→BUY)
 _contrarian_mode = {
-    "enabled": True,                    # 🔥 เปิด Contrarian Mode!
-    "reverse_signal": True,             # BUY→SELL, SELL→BUY
-    "reverse_strong_signal": True,      # STRONG_BUY→STRONG_SELL, STRONG_SELL→STRONG_BUY
+    "enabled": False,                   # ❌ ปิด Contrarian Mode (ใช้สัญญาณปกติ)
+    "reverse_signal": False,            # BUY→SELL, SELL→BUY
+    "reverse_strong_signal": False,     # STRONG_BUY→STRONG_SELL, STRONG_SELL→STRONG_BUY
 }
 
 # 🎯 AGGRESSIVE TRADING CONFIG - เทรดเยอะ กำไรเยอะ
@@ -235,12 +238,21 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                     
                     logger.info(f"📊 {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
                     
-                    # 🔄 REVERSE SIGNAL CLOSE - ปิด position ถ้าสัญญาณตรงข้าม
+                    # 🔄 REVERSE SIGNAL CLOSE + OPEN NEW - ปิด position เดิม + เปิดใหม่ตามสัญญาณ
+                    closed_opposite = False
                     if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
-                        closed = await _check_and_close_opposite_positions(symbol, signal_data["signal"])
-                        if closed:
+                        closed_opposite = await _check_and_close_opposite_positions(symbol, signal_data["signal"])
+                        if closed_opposite:
                             _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED"
                             logger.info(f"   🔄 {symbol}: Opposite position closed due to reverse signal")
+                            
+                            # 🔥 NEW: Wait a moment then open new position in new direction
+                            if _open_new_after_close and auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
+                                await asyncio.sleep(1)  # รอ 1 วินาทีให้ MT5 update
+                                logger.info(f"   🎯 {symbol}: Opening NEW position in direction {signal_data['signal']}")
+                                # Skip position check because we just closed it!
+                                await _execute_signal_trade(symbol, signal_data, skip_position_check=True)
+                                _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED_AND_OPENED"
                     
                     # 🚨 WAIT SIGNAL = CLOSE PROFITABLE - ถ้าสัญญาณเป็น WAIT และมีกำไร → ปิดทันที
                     elif signal_data["signal"] in ["WAIT", "SKIP"]:
@@ -249,8 +261,8 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                             _bot_status["last_signal"][symbol]["trade_status"] = "CLOSED_ON_WAIT"
                             logger.info(f"   🚨 {symbol}: Profitable position closed due to WAIT signal")
                     
-                    # Auto trade ONLY if mode is AUTO
-                    if auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
+                    # Auto trade ONLY if mode is AUTO (and not already handled by reverse)
+                    if auto_trade and _bot_status["mode"] == BotMode.AUTO.value and not closed_opposite:
                         if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
                             # Check if can trade before attempting
                             can_trade, reason = await _can_trade_signal(symbol, signal_data)
@@ -263,7 +275,7 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                                 _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
                         else:
                             _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
-                    elif signal_data["signal"] not in ["WAIT", "SKIP"]:
+                    elif signal_data["signal"] not in ["WAIT", "SKIP"] and not closed_opposite:
                         logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
                         _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
             
@@ -854,19 +866,26 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     return True, "OK"
 
 
-async def _execute_signal_trade(symbol: str, signal_data: Dict):
-    """Execute trade based on signal with duplicate prevention"""
+async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_check: bool = False):
+    """Execute trade based on signal with duplicate prevention
+    
+    Args:
+        symbol: Trading symbol
+        signal_data: Signal data dict
+        skip_position_check: If True, skip checking for existing positions (used after closing opposite position)
+    """
     global _bot, _bot_status, _last_traded_signal
     
     # Double check - only execute in AUTO mode
     if _bot_status["mode"] != BotMode.AUTO.value:
-        logger.warning(f"?? Trade blocked - not in AUTO mode")
+        logger.warning(f"⛔ Trade blocked - not in AUTO mode")
         return
     
-    # ?? DUPLICATE PREVENTION CHECK
-    can_trade, reason = await _can_trade_signal(symbol, signal_data)
-    if not can_trade:
-        logger.info(f"??? Trade blocked for {symbol}: {reason}")
+    # 🔥 DUPLICATE PREVENTION CHECK (can skip if coming from reverse signal close)
+    if not skip_position_check:
+        can_trade, reason = await _can_trade_signal(symbol, signal_data)
+        if not can_trade:
+            logger.info(f"⛔ Trade blocked for {symbol}: {reason}")
         return
     
     try:
