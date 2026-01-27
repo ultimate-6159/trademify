@@ -114,25 +114,28 @@ _bot_status = {
 
 
 
+
+
 # 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 300  # 🔥 เพิ่มเป็น 5 นาที (ป้องกันเทรดถี่เกินไป)
+_trade_cooldown_seconds = 300  # 5 นาที cooldown
 
-# 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม + เปิดใหม่
-_enable_reverse_signal_close = False   # 🔥 ปิด! ไม่ปิด position ทันทีเมื่อสัญญาณตรงข้าม
-_open_new_after_close = False          # 🔥 ปิด! ไม่เปิดใหม่ทันที (รอ pullback)
+# 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม (ต้องกำไรก่อน!)
+_enable_reverse_signal_close = True    # ✅ เปิด! แต่ต้องกำไรก่อน
+_open_new_after_close = True           # ✅ ปิดแล้วเปิดใหม่ (รอ pullback)
+_reverse_signal_min_profit = 50        # 🔥 ต้องมีกำไร >= $50 ถึงจะปิดตาม reverse signal
 
-# ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว
+# ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว (ต้องกำไรก่อน!)
 _signal_history = {}  # {symbol: [{"signal": "BUY", "quality": "HIGH", "confidence": 75, "timestamp": datetime}, ...]}
 _signal_weakening_config = {
-    "enabled": False,                       # 🔥 ปิด! ไม่ปิด position เมื่อ signal weaken
+    "enabled": True,                        # ✅ เปิด! แต่ต้องกำไรก่อน
     "history_size": 5,                      # เก็บ signal ย้อนหลัง 5 รายการ
-    "close_on_quality_drop": False,         # 🔥 ปิด
+    "close_on_quality_drop": True,          # ✅ ปิดเมื่อ quality ลดลง 2 ระดับ (ต้องกำไร)
     "close_on_confidence_drop": True,       # ✅ ปิดเมื่อ confidence ลดลง >= 15%
     "quality_drop_threshold": 2,            # PREMIUM→MEDIUM = 2 ระดับ
     "confidence_drop_threshold": 15,        # ปิดเมื่อ confidence ลดลง 15% จาก peak
-    "min_profit_to_exit_early": 50,         # ต้องมีกำไร >= $50 ถึงจะ early exit (ไม่ปิดขาดทุน)
+    "min_profit_to_exit_early": 100,        # 🔥 ต้องมีกำไร >= $100 ถึงจะ early exit
 }
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
@@ -776,24 +779,25 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
             if not is_opposite:
                 continue
             
+            # 🔥 NEW: ต้องมีกำไรขั้นต่ำก่อนถึงจะปิด
+            min_profit_for_reverse = _reverse_signal_min_profit  # Default $50
+            
             # Determine if we should close
             should_close = False
             close_reason = ""
             
-            if pos_pnl > 0:
-                # กำไร → ปิดเสมอ
+            if pos_pnl >= min_profit_for_reverse:
+                # กำไร >= min → ปิดเลย ล็อกกำไร!
                 should_close = True
-                close_reason = f"PROFIT ${pos_pnl:.2f} + reverse signal"
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} {pos_side} position with PROFIT ${pos_pnl:.2f}, got {new_signal}")
-            elif close_on_reverse:
-                # ขาดทุน + เปิด option close_on_reverse_signal → ปิดเพื่อหยุดขาดทุน!
-                should_close = True
-                close_reason = f"LOSS ${pos_pnl:.2f} + reverse signal (CUT LOSS)"
-                logger.warning(f"🚨 REVERSE SIGNAL CUT LOSS: {symbol} {pos_side} position with LOSS ${pos_pnl:.2f}, got {new_signal}")
-                logger.warning(f"   Market direction changed! Cutting loss to prevent further damage!")
-            else:
-                # ขาดทุน + ไม่เปิด option → ไม่ปิด
-                logger.info(f"🔄 REVERSE SIGNAL: {symbol} {pos_side} position with LOSS ${pos_pnl:.2f}, got {new_signal} → NOT closing (close_on_reverse disabled)")
+                close_reason = f"PROFIT ${pos_pnl:.2f} >= ${min_profit_for_reverse} + reverse signal"
+                logger.info(f"✅ REVERSE SIGNAL PROFIT: {symbol} {pos_side} PROFIT ${pos_pnl:.2f} + {new_signal} → CLOSE & LOCK PROFIT!")
+            elif pos_pnl > 0 and pos_pnl < min_profit_for_reverse:
+                # กำไรน้อย → ไม่ปิด รอกำไรเพิ่ม
+                logger.info(f"⏳ REVERSE SIGNAL: {symbol} {pos_side} profit ${pos_pnl:.2f} < ${min_profit_for_reverse} → HOLD (wait for more profit)")
+                continue
+            elif pos_pnl <= 0:
+                # ❌ ขาดทุน → ไม่ปิด! รอกลับมากำไรก่อน
+                logger.info(f"🛑 REVERSE SIGNAL: {symbol} {pos_side} LOSS ${pos_pnl:.2f} + {new_signal} → NOT closing (waiting for profit)")
                 continue
             
             if should_close and pos_id:
@@ -1202,14 +1206,14 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
             should_close, reason = _detect_signal_weakening(symbol, signal_data, pos_side)
             
             if should_close:
-                # Check minimum profit requirement for early exit
-                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 50)
+                # 🔥 ต้องมีกำไรขั้นต่ำก่อนถึงจะปิด
+                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 100)
                 
-                # If profitable or signal reversed, close
-                if pos_pnl >= min_profit or "reversed" in reason.lower():
+                # ต้องมีกำไร >= min_profit ถึงจะปิด
+                if pos_pnl >= min_profit:
                     logger.warning(f"⚡ SIGNAL WEAKENING: {symbol} - {reason}")
-                    logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f}")
-                    logger.warning(f"   ACTION: Closing position early to protect profit")
+                    logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f} (>= ${min_profit})")
+                    logger.warning(f"   ACTION: Closing to LOCK PROFIT!")
                     
                     # Close position
                     try:
