@@ -192,6 +192,13 @@ _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime
 _open_positions = {}          # {symbol: True/False}
 _trade_cooldown_seconds = 300  # 5 นาที cooldown
 
+# 🥇 SYMBOL WHITELIST - เทรดเฉพาะ Gold เท่านั้น!
+_symbol_whitelist = {
+    "enabled": True,                         # ✅ เปิด! Block Forex
+    "allowed_symbols": ["XAUUSDm", "XAUUSD", "GOLD"],  # 🥇 Gold only!
+    "block_forex": True,                     # ❌ Block all Forex pairs
+}
+
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม (ต้องกำไรก่อน!)
 _enable_reverse_signal_close = True    # ✅ เปิด! แต่ต้องกำไรก่อน
 _open_new_after_close = True           # ✅ ปิดแล้วเปิดใหม่ (รอ pullback)
@@ -1848,36 +1855,56 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
 
 
 
+
+
+
 async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     """
     🎯 SMART TRADE FILTER
     Check if we should trade this signal - Quality + Confidence filter
     
     🥇 Gold: MEDIUM quality OK (Gold Strategy v2 มี filter เข้มอยู่แล้ว)
-    💱 Forex: HIGH quality required (ต้องการ signal ที่แข็งแกร่งกว่า)
+    💱 Forex: ❌ BLOCKED! ไม่เทรด Forex
     
     Returns: (can_trade: bool, reason: str)
     """
-    global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config
+    global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config, _symbol_whitelist
     
     signal = signal_data.get("signal", "WAIT")
     confidence = signal_data.get("confidence", 0)
     quality = signal_data.get("quality", "SKIP")
     
+    # 0. 🥇 SYMBOL WHITELIST CHECK - Block non-Gold symbols!
+    if _symbol_whitelist.get("enabled", True):
+        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        
+        if not is_gold and _symbol_whitelist.get("block_forex", True):
+            logger.info(f"🚫 BLOCKED: {symbol} is FOREX - only GOLD trading allowed!")
+            return False, f"FOREX BLOCKED: {symbol} - Only GOLD trading enabled"
+        
+        # Also check explicit whitelist
+        allowed = _symbol_whitelist.get("allowed_symbols", [])
+        if allowed and symbol.upper() not in [s.upper() for s in allowed]:
+            is_in_whitelist = any(sym.upper() in symbol.upper() for sym in allowed)
+            if not is_in_whitelist:
+                logger.info(f"🚫 BLOCKED: {symbol} not in whitelist {allowed}")
+                return False, f"Symbol {symbol} not in whitelist"
+    
     # 1. Check if signal is tradeable
     if signal in ["WAIT", "SKIP"]:
         return False, "Signal is WAIT/SKIP"
     
-    # 2. 🎯 SYMBOL-SPECIFIC QUALITY FILTER
+    # 2. 🎯 SYMBOL-SPECIFIC QUALITY FILTER (Gold only now)
     is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-    # 🔥 Conservative mode - HIGH quality for all
+    # 🔥 Gold-focused settings
     if is_gold:
         min_quality = "HIGH"      # 🔥 Gold ต้อง HIGH ขึ้นไป
         min_confidence = 75       # 🔥 Gold ต้อง 75%+
     else:
-        min_quality = "HIGH"      # 🔥 Forex needs HIGH quality
-        min_confidence = 80       # 🔥 Forex needs 80%+ confidence
+        # Forex blocked above, but just in case
+        min_quality = "PREMIUM"   # 🔥 Forex needs PREMIUM (very strict)
+        min_confidence = 90       # 🔥 Forex needs 90%+ (almost never)
     
     quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
     if quality_order.get(quality, 0) < quality_order.get(min_quality, 2):
@@ -1902,7 +1929,7 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     # 6. Generate signal ID
     signal_id = _generate_signal_id(symbol, signal, confidence)
     
-    # 6. Check if we already traded this signal
+    # 7. Check if we already traded this signal
     last_trade = _last_traded_signal.get(symbol)
     if last_trade:
         last_signal_id = last_trade.get("signal_id")
@@ -1920,9 +1947,6 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
                 return False, f"Cooldown active ({remaining}s remaining)"
     
     return True, "OK"
-
-
-
 
 
 
@@ -3504,6 +3528,7 @@ async def reset_all_tracking_data():
     logger.warning(f"   Cleared: positions={counts['known_positions']}, cooldowns={counts['cooldowns']}, peaks={counts['peak_profits']}, pending={counts['pending_signals']}")
     logger.warning(f"   Old stats: trades={old_stats.get('trades', 0)}, pnl=${old_stats.get('pnl', 0):.2f}")
     
+    
     return {
         "status": "success",
         "message": "All tracking data cleared!",
@@ -3542,4 +3567,96 @@ async def reset_daily_stats_only():
         "message": "Daily stats reset!",
         "old_stats": old_stats,
         "new_stats": _bot_status["daily_stats"]
+    }
+
+
+# =====================
+# 🥇 SYMBOL WHITELIST - Gold Only Mode
+# =====================
+
+@router.get("/whitelist")
+async def get_symbol_whitelist():
+    """
+    🥇 Get Symbol Whitelist configuration
+    
+    Shows which symbols are allowed to trade
+    """
+    global _symbol_whitelist
+    
+    return {
+        "config": _symbol_whitelist,
+        "description": {
+            "enabled": "เปิด/ปิด whitelist filter",
+            "allowed_symbols": "รายชื่อ symbols ที่อนุญาตเทรด",
+            "block_forex": "Block Forex pairs ทั้งหมด (เทรดเฉพาะ Gold)",
+        },
+        "status": "GOLD ONLY MODE" if _symbol_whitelist.get("block_forex", True) else "ALL SYMBOLS"
+    }
+
+
+@router.post("/whitelist/gold-only")
+async def set_gold_only_mode(enabled: bool = True):
+    """
+    🥇 Enable Gold-Only Trading Mode
+    
+    - enabled=true: เทรดเฉพาะ Gold (XAUUSDm)
+    - enabled=false: เทรดทุก symbol
+    """
+    global _symbol_whitelist
+    
+    _symbol_whitelist["enabled"] = enabled
+    _symbol_whitelist["block_forex"] = enabled
+    
+    if enabled:
+        _symbol_whitelist["allowed_symbols"] = ["XAUUSDm", "XAUUSD", "GOLD"]
+        status = "🥇 GOLD ONLY MODE ENABLED!"
+        logger.info(f"🥇 Gold-Only Mode: ENABLED - Forex blocked!")
+    else:
+        _symbol_whitelist["allowed_symbols"] = []
+        status = "ALL SYMBOLS MODE"
+        logger.info(f"🌐 All Symbols Mode: ENABLED - Forex allowed")
+    
+    return {
+        "status": "success",
+        "gold_only_mode": enabled,
+        "message": status,
+        "config": _symbol_whitelist
+    }
+
+
+@router.post("/whitelist/configure")
+async def configure_symbol_whitelist(
+    enabled: bool = None,
+    allowed_symbols: List[str] = None,
+    block_forex: bool = None
+):
+    """
+    🔧 Configure Symbol Whitelist
+    
+    - enabled: เปิด/ปิด whitelist
+    - allowed_symbols: รายชื่อ symbols ที่อนุญาต (e.g., ["XAUUSDm", "EURUSDm"])
+    - block_forex: Block Forex pairs ทั้งหมด
+    """
+    global _symbol_whitelist
+    
+    changes = []
+    
+    if enabled is not None:
+        _symbol_whitelist["enabled"] = enabled
+        changes.append(f"enabled: {enabled}")
+    
+    if allowed_symbols is not None:
+        _symbol_whitelist["allowed_symbols"] = allowed_symbols
+        changes.append(f"allowed_symbols: {allowed_symbols}")
+    
+    if block_forex is not None:
+        _symbol_whitelist["block_forex"] = block_forex
+        changes.append(f"block_forex: {block_forex}")
+    
+    logger.info(f"🔧 Symbol whitelist updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _symbol_whitelist
     }
