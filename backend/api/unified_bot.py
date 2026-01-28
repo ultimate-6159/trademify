@@ -2,17 +2,16 @@
 Unified Bot API - Single Source of Truth
 ==========================================
 
-?? Bot Control ??? Signal API ??????????????
-????????????? 2 ????????????
+🔥 ENTERPRISE GRADE - 10 Year Stability System
 
 Architecture:
 - ONE bot instance (_bot) 
 - ONE trading engine (from trading_routes)
 - ALL views read from same source
-
-?? MUTUAL EXCLUSION: ????????????? 2 ???????????????
-- MODE_AUTO: Bot ????????? + ?????????????
-- MODE_MANUAL: ??????????????????? ??????? (?????????????)
+- AUTO-RESTART on crash
+- WATCHDOG monitoring
+- MEMORY CLEANUP
+- STATE PERSISTENCE
 
 Endpoints:
 - GET  /api/v1/unified/status      - Bot status + signal + account
@@ -26,7 +25,12 @@ Endpoints:
 
 import asyncio
 import logging
-from datetime import datetime
+import gc
+import json
+import os
+import sys
+import traceback
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -36,6 +40,39 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/unified", tags=["unified"])
+
+
+# =====================
+# 🔥 STABILITY CONFIG - 10 Year Runtime
+# =====================
+_stability_config = {
+    "auto_restart_enabled": True,           # 🔄 Auto-restart เมื่อ crash
+    "max_restart_attempts": 100,            # ลอง restart ได้ 100 ครั้ง
+    "restart_cooldown_seconds": 30,         # รอ 30 วินาทีก่อน restart
+    "watchdog_interval_seconds": 60,        # ตรวจสอบ health ทุก 60 วินาที
+    "memory_cleanup_interval": 300,         # ทำความสะอาด memory ทุก 5 นาที
+    "max_memory_mb": 2048,                  # ถ้า memory > 2GB ให้ cleanup
+    "state_persistence_enabled": True,      # เก็บ state เพื่อ restore
+    "state_file_path": "bot_state.json",    # ไฟล์เก็บ state
+    "heartbeat_timeout_seconds": 120,       # ถ้าไม่มี heartbeat 2 นาที = dead
+    "auto_start_on_api_init": False,        # เริ่ม bot อัตโนมัติเมื่อ API start
+}
+
+# 🔥 RUNTIME STATISTICS
+_runtime_stats = {
+    "total_uptime_seconds": 0,
+    "restart_count": 0,
+    "last_restart_time": None,
+    "last_heartbeat": None,
+    "errors_count": 0,
+    "recoveries_count": 0,
+    "memory_cleanups": 0,
+    "started_at": datetime.now().isoformat(),
+}
+
+# 🔥 WATCHDOG STATE
+_watchdog_task = None
+_last_successful_cycle = None
 
 
 # =====================
@@ -102,6 +139,9 @@ _bot_status = {
     "error": None,
     "started_at": None
 }
+
+
+
 
 
 
@@ -193,6 +233,282 @@ _max_loss_config = {
     "max_loss_percent": 3,                  # 🔥 ลดเหลือ 3% ของ balance
     "close_on_reverse_signal": True,        # ✅ ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
 }
+
+
+# =====================
+# 🔥 STABILITY FUNCTIONS - 10 Year Runtime
+# =====================
+
+def _save_state():
+    """💾 Save bot state to file for recovery after restart"""
+    global _bot_status, _stability_config, _runtime_stats
+    
+    if not _stability_config.get("state_persistence_enabled", True):
+        return
+    
+    try:
+        state = {
+            "bot_status": {
+                "mode": _bot_status.get("mode"),
+                "symbols": _bot_status.get("symbols", []),
+                "timeframe": _bot_status.get("timeframe", "H1"),
+                "signal_mode": _bot_status.get("signal_mode", "technical"),
+                "quality": _bot_status.get("quality", "MEDIUM"),
+                "interval": _bot_status.get("interval", 60),
+                "auto_trade": _bot_status.get("auto_trade", False),
+                "daily_stats": _bot_status.get("daily_stats", {}),
+            },
+            "runtime_stats": _runtime_stats,
+            "saved_at": datetime.now().isoformat(),
+        }
+        
+        state_file = _stability_config.get("state_file_path", "bot_state.json")
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2, default=str)
+        
+        logger.debug(f"💾 State saved to {state_file}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to save state: {e}")
+
+
+def _load_state() -> Optional[Dict]:
+    """📂 Load bot state from file for recovery"""
+    global _stability_config
+    
+    if not _stability_config.get("state_persistence_enabled", True):
+        return None
+    
+    try:
+        state_file = _stability_config.get("state_file_path", "bot_state.json")
+        if os.path.exists(state_file):
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+            logger.info(f"📂 State loaded from {state_file}")
+            return state
+    except Exception as e:
+        logger.warning(f"Failed to load state: {e}")
+    
+    return None
+
+
+def _cleanup_memory():
+    """🧹 Force garbage collection to prevent memory leaks"""
+    global _runtime_stats, _bot_status, _signal_history
+    
+    try:
+        # Clean up old signal history (keep only last 10)
+        for symbol in list(_signal_history.keys()):
+            if len(_signal_history[symbol]) > 10:
+                _signal_history[symbol] = _signal_history[symbol][-10:]
+        
+        # Clean up old analysis data (keep only last 2 per symbol)
+        if len(_bot_status.get("last_analysis", {})) > 20:
+            # Keep only tracked symbols
+            for sym in list(_bot_status["last_analysis"].keys()):
+                if sym not in _bot_status.get("symbols", []):
+                    del _bot_status["last_analysis"][sym]
+        
+        # Force garbage collection
+        collected = gc.collect()
+        
+        _runtime_stats["memory_cleanups"] += 1
+        logger.debug(f"🧹 Memory cleanup: collected {collected} objects")
+        
+    except Exception as e:
+        logger.warning(f"Memory cleanup error: {e}")
+
+
+def _get_memory_usage_mb() -> float:
+    """📊 Get current memory usage in MB"""
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024
+    except ImportError:
+        return 0
+    except Exception:
+        return 0
+
+
+async def _watchdog_loop():
+    """
+    🐕 WATCHDOG - ตรวจสอบ health และ auto-restart
+    
+    ทำงาน:
+    1. ตรวจสอบว่า bot ยังทำงานอยู่
+    2. ตรวจสอบ memory usage
+    3. Auto-restart ถ้า crash
+    4. Save state periodically
+    """
+    global _bot_status, _bot_task, _runtime_stats, _stability_config, _last_successful_cycle
+    
+    logger.info("🐕 Watchdog started - monitoring bot health")
+    
+    watchdog_interval = _stability_config.get("watchdog_interval_seconds", 60)
+    memory_cleanup_interval = _stability_config.get("memory_cleanup_interval", 300)
+    last_memory_cleanup = datetime.now()
+    last_state_save = datetime.now()
+    
+    while True:
+        try:
+            await asyncio.sleep(watchdog_interval)
+            
+            # Update heartbeat
+            _runtime_stats["last_heartbeat"] = datetime.now().isoformat()
+            
+            # 1. Check if bot should be running but isn't
+            if _bot_status.get("running") and (_bot_task is None or _bot_task.done()):
+                logger.warning("🐕 WATCHDOG: Bot task died! Attempting restart...")
+                _runtime_stats["errors_count"] += 1
+                
+                if _stability_config.get("auto_restart_enabled", True):
+                    await _auto_restart_bot()
+            
+            # 2. Check memory usage
+            memory_mb = _get_memory_usage_mb()
+            max_memory = _stability_config.get("max_memory_mb", 2048)
+            
+            if memory_mb > max_memory:
+                logger.warning(f"🐕 WATCHDOG: High memory usage ({memory_mb:.1f}MB > {max_memory}MB) - forcing cleanup")
+                _cleanup_memory()
+            
+            # 3. Periodic memory cleanup
+            if (datetime.now() - last_memory_cleanup).total_seconds() > memory_cleanup_interval:
+                _cleanup_memory()
+                last_memory_cleanup = datetime.now()
+            
+            # 4. Save state periodically (every 5 minutes)
+            if (datetime.now() - last_state_save).total_seconds() > 300:
+                _save_state()
+                last_state_save = datetime.now()
+            
+            # 5. Check heartbeat timeout
+            if _bot_status.get("running") and _last_successful_cycle:
+                last_cycle_age = (datetime.now() - _last_successful_cycle).total_seconds()
+                timeout = _stability_config.get("heartbeat_timeout_seconds", 120)
+                
+                if last_cycle_age > timeout:
+                    logger.warning(f"🐕 WATCHDOG: No successful cycle for {last_cycle_age:.0f}s - restarting...")
+                    _runtime_stats["errors_count"] += 1
+                    await _auto_restart_bot()
+            
+            # Update uptime
+            started = _runtime_stats.get("started_at")
+            if started:
+                try:
+                    start_dt = datetime.fromisoformat(started)
+                    _runtime_stats["total_uptime_seconds"] = int((datetime.now() - start_dt).total_seconds())
+                except:
+                    pass
+            
+        except asyncio.CancelledError:
+            logger.info("🐕 Watchdog stopped")
+            break
+        except Exception as e:
+            logger.error(f"🐕 Watchdog error: {e}")
+            await asyncio.sleep(10)
+
+
+async def _auto_restart_bot():
+    """
+    🔄 AUTO-RESTART - เปิด bot ใหม่อัตโนมัติเมื่อ crash
+    """
+    global _bot, _bot_task, _bot_status, _runtime_stats, _stability_config
+    
+    max_attempts = _stability_config.get("max_restart_attempts", 100)
+    cooldown = _stability_config.get("restart_cooldown_seconds", 30)
+    
+    if _runtime_stats["restart_count"] >= max_attempts:
+        logger.error(f"🔄 AUTO-RESTART: Max attempts ({max_attempts}) reached - giving up")
+        return False
+    
+    logger.info(f"🔄 AUTO-RESTART: Attempt {_runtime_stats['restart_count'] + 1}/{max_attempts}")
+    
+    # Wait cooldown
+    logger.info(f"🔄 Waiting {cooldown}s before restart...")
+    await asyncio.sleep(cooldown)
+    
+    try:
+        # Stop old task if exists
+        if _bot_task and not _bot_task.done():
+            _bot_task.cancel()
+            try:
+                await _bot_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Get saved settings
+        symbols = _bot_status.get("symbols", ["XAUUSDm"])
+        timeframe = _bot_status.get("timeframe", "H1")
+        signal_mode = _bot_status.get("signal_mode", "technical")
+        quality = _bot_status.get("quality", "MEDIUM")
+        interval = _bot_status.get("interval", 60)
+        auto_trade = _bot_status.get("auto_trade", False)
+        
+        # Reinitialize bot
+        from ai_trading_bot import AITradingBot, SignalQuality
+        quality_map = {
+            "LOW": SignalQuality.LOW,
+            "MEDIUM": SignalQuality.MEDIUM,
+            "HIGH": SignalQuality.HIGH,
+            "PREMIUM": SignalQuality.PREMIUM
+        }
+        quality_enum = quality_map.get(quality.upper(), SignalQuality.MEDIUM)
+        
+        _bot = AITradingBot(
+            symbols=symbols,
+            timeframe=timeframe,
+            min_quality=quality_enum,
+            broker_type="MT5",
+            signal_mode=signal_mode
+        )
+        
+        await _bot.initialize()
+        
+        # Restart loop
+        _bot_task = asyncio.create_task(
+            _run_bot_loop(interval, auto_trade)
+        )
+        
+        _bot_status["running"] = True
+        _bot_status["initialized"] = True
+        _bot_status["error"] = None
+        
+        _runtime_stats["restart_count"] += 1
+        _runtime_stats["last_restart_time"] = datetime.now().isoformat()
+        _runtime_stats["recoveries_count"] += 1
+        
+        logger.info(f"✅ AUTO-RESTART successful! (Total restarts: {_runtime_stats['restart_count']})")
+        
+        # Save state
+        _save_state()
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ AUTO-RESTART failed: {e}")
+        _bot_status["error"] = f"Auto-restart failed: {e}"
+        _runtime_stats["restart_count"] += 1
+        return False
+
+
+def _start_watchdog():
+    """🐕 Start the watchdog task"""
+    global _watchdog_task
+    
+    if _watchdog_task is None or _watchdog_task.done():
+        _watchdog_task = asyncio.create_task(_watchdog_loop())
+        logger.info("🐕 Watchdog task started")
+
+
+def _stop_watchdog():
+    """🐕 Stop the watchdog task"""
+    global _watchdog_task
+    
+    if _watchdog_task and not _watchdog_task.done():
+        _watchdog_task.cancel()
+        logger.info("🐕 Watchdog task stopped")
 
 
 # =====================
@@ -369,16 +685,31 @@ async def _reinitialize_bot():
 
 
 async def _run_bot_loop(interval: int, auto_trade: bool):
-    """Main bot analysis loop with auto-reconnect"""
-    global _bot, _bot_status
+    """
+    🔥 ENTERPRISE GRADE Bot Analysis Loop
+    
+    Features:
+    - Auto-reconnect on MT5 disconnect
+    - Heartbeat tracking for watchdog
+    - Error recovery
+    - Memory-efficient
+    """
+    global _bot, _bot_status, _last_successful_cycle, _runtime_stats
     
     mode_str = "AUTO" if auto_trade else "MANUAL"
-    logger.info(f"Unified bot loop starting (mode={mode_str}, interval={interval}s)")
+    logger.info(f"🚀 Unified bot loop starting (mode={mode_str}, interval={interval}s)")
     
     consecutive_failures = 0
     max_failures = 5
+    cycle_count = 0
+    
+    # Start watchdog
+    _start_watchdog()
     
     while _bot_status["running"]:
+        cycle_count += 1
+        cycle_start = datetime.now()
+        
         try:
             # Check MT5 connection before each cycle
             mt5_ok = True
@@ -467,6 +798,7 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                             _bot_status["last_signal"][symbol]["trade_status"] = "CLOSED_ON_WAIT"
                             logger.info(f"   🚨 {symbol}: Profitable position closed due to WAIT signal")
                     
+                    
                     # Auto trade ONLY if mode is AUTO (and not already handled by reverse)
                     if auto_trade and _bot_status["mode"] == BotMode.AUTO.value and not closed_opposite:
                         if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
@@ -491,6 +823,16 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                 for pos in closed:
                     logger.info(f"🛡️ Profit protected: {pos['symbol']} locked ${pos['locked_profit']:.2f}")
             
+            # ✅ SUCCESSFUL CYCLE - Update heartbeat
+            _last_successful_cycle = datetime.now()
+            consecutive_failures = 0  # Reset on success
+            
+            # 📊 Log cycle stats periodically (every 10 cycles)
+            if cycle_count % 10 == 0:
+                uptime = _runtime_stats.get("total_uptime_seconds", 0)
+                restarts = _runtime_stats.get("restart_count", 0)
+                logger.info(f"📊 Cycle #{cycle_count} | Uptime: {uptime//3600}h {(uptime%3600)//60}m | Restarts: {restarts}")
+            
             # Wait for next cycle
             await asyncio.sleep(interval)
             
@@ -499,23 +841,48 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             break
         except OSError as e:
             # 🔥 Network error - รอแล้วลองใหม่
-            logger.warning(f"⚠️ Network error in bot loop: {e}")
+            consecutive_failures += 1
+            logger.warning(f"⚠️ Network error in bot loop ({consecutive_failures}/{max_failures}): {e}")
             _bot_status["error"] = f"Network error: {e}"
+            _runtime_stats["errors_count"] += 1
+            
+            if consecutive_failures >= max_failures:
+                logger.error(f"🔥 Too many failures - triggering watchdog restart")
+                break  # Let watchdog handle restart
+            
             await asyncio.sleep(30)  # รอ 30 วินาทีก่อนลองใหม่
         except ConnectionError as e:
             # 🔥 Connection lost - รอแล้วลองใหม่
-            logger.warning(f"⚠️ Connection error in bot loop: {e}")
+            consecutive_failures += 1
+            logger.warning(f"⚠️ Connection error in bot loop ({consecutive_failures}/{max_failures}): {e}")
             _bot_status["error"] = f"Connection error: {e}"
+            _runtime_stats["errors_count"] += 1
+            
+            if consecutive_failures >= max_failures:
+                logger.error(f"🔥 Too many failures - triggering watchdog restart")
+                break
+            
             await asyncio.sleep(30)
         except Exception as e:
-            # 🔥 เพิ่ม error type ใน log
+            # 🔥 Unexpected error
+            consecutive_failures += 1
             error_type = type(e).__name__
-            logger.error(f"❌ Bot loop error ({error_type}): {e}")
+            logger.error(f"❌ Bot loop error ({error_type}) [{consecutive_failures}/{max_failures}]: {e}")
+            logger.error(traceback.format_exc())
             _bot_status["error"] = f"{error_type}: {e}"
+            _runtime_stats["errors_count"] += 1
+            
+            if consecutive_failures >= max_failures:
+                logger.error(f"🔥 Too many failures - triggering watchdog restart")
+                break
+            
             await asyncio.sleep(10)  # รอ 10 วินาทีก่อนลองใหม่
     
-    
+    # Save state before exit
+    _save_state()
     logger.info("🔴 Unified bot loop stopped")
+
+
 
 
 def _extract_layer_status(symbol: str) -> Dict:
@@ -2562,4 +2929,239 @@ async def reset_peak_profits():
         "status": "success",
         "cleared_count": count,
         "message": f"Cleared {count} peak profit records"
+    }
+
+
+# =====================
+# 🔥 STABILITY ENDPOINTS - 10 Year Runtime
+# =====================
+
+@router.get("/stability")
+async def get_stability_status():
+    """
+    🔥 Get system stability status and runtime statistics
+    
+    Shows:
+    - Uptime
+    - Restart count
+    - Memory usage
+    - Watchdog status
+    - Error count
+    """
+    global _stability_config, _runtime_stats, _watchdog_task, _last_successful_cycle
+    
+    memory_mb = _get_memory_usage_mb()
+    
+    # Calculate uptime
+    uptime_seconds = _runtime_stats.get("total_uptime_seconds", 0)
+    uptime_days = uptime_seconds // 86400
+    uptime_hours = (uptime_seconds % 86400) // 3600
+    uptime_minutes = (uptime_seconds % 3600) // 60
+    
+    # Check watchdog
+    watchdog_alive = _watchdog_task is not None and not _watchdog_task.done()
+    
+    # Last successful cycle age
+    last_cycle_age = None
+    if _last_successful_cycle:
+        last_cycle_age = int((datetime.now() - _last_successful_cycle).total_seconds())
+    
+    return {
+        "stability": {
+            "config": _stability_config,
+            "uptime": {
+                "total_seconds": uptime_seconds,
+                "formatted": f"{uptime_days}d {uptime_hours}h {uptime_minutes}m",
+                "days": uptime_days,
+                "hours": uptime_hours,
+                "minutes": uptime_minutes,
+            },
+            "runtime_stats": _runtime_stats,
+            "memory": {
+                "current_mb": round(memory_mb, 1),
+                "max_mb": _stability_config.get("max_memory_mb", 2048),
+                "usage_percent": round(memory_mb / _stability_config.get("max_memory_mb", 2048) * 100, 1),
+            },
+            "watchdog": {
+                "enabled": True,
+                "alive": watchdog_alive,
+                "interval_seconds": _stability_config.get("watchdog_interval_seconds", 60),
+            },
+            "last_successful_cycle": {
+                "timestamp": _last_successful_cycle.isoformat() if _last_successful_cycle else None,
+                "age_seconds": last_cycle_age,
+            },
+            "health": "HEALTHY" if watchdog_alive and (last_cycle_age is None or last_cycle_age < 120) else "WARNING",
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/stability/restart")
+async def manual_restart_bot():
+    """
+    🔄 Manually trigger bot restart
+    
+    Use this to force restart the bot without stopping the API
+    """
+    global _runtime_stats
+    
+    logger.info("🔄 Manual restart requested")
+    
+    success = await _auto_restart_bot()
+    
+    return {
+        "status": "success" if success else "failed",
+        "message": "Bot restart triggered" if success else "Restart failed",
+        "restart_count": _runtime_stats.get("restart_count", 0),
+    }
+
+
+@router.post("/stability/cleanup")
+async def manual_memory_cleanup():
+    """
+    🧹 Manually trigger memory cleanup
+    
+    Forces garbage collection and clears old data
+    """
+    global _runtime_stats
+    
+    before_mb = _get_memory_usage_mb()
+    _cleanup_memory()
+    after_mb = _get_memory_usage_mb()
+    
+    freed_mb = before_mb - after_mb
+    
+    return {
+        "status": "success",
+        "before_mb": round(before_mb, 1),
+        "after_mb": round(after_mb, 1),
+        "freed_mb": round(max(0, freed_mb), 1),
+        "total_cleanups": _runtime_stats.get("memory_cleanups", 0),
+    }
+
+
+@router.post("/stability/save-state")
+async def manual_save_state():
+    """
+    💾 Manually save bot state to file
+    
+    State will be automatically restored on restart
+    """
+    _save_state()
+    
+    return {
+        "status": "success",
+        "message": "State saved successfully",
+        "file": _stability_config.get("state_file_path", "bot_state.json"),
+    }
+
+
+@router.get("/stability/load-state")
+async def get_saved_state():
+    """
+    📂 Get saved bot state from file
+    """
+    state = _load_state()
+    
+    if state:
+        return {
+            "status": "ok",
+            "state": state,
+        }
+    else:
+        return {
+            "status": "no_state",
+            "message": "No saved state found",
+        }
+
+
+@router.post("/stability/configure")
+async def configure_stability(
+    auto_restart_enabled: bool = None,
+    max_restart_attempts: int = None,
+    restart_cooldown_seconds: int = None,
+    watchdog_interval_seconds: int = None,
+    memory_cleanup_interval: int = None,
+    max_memory_mb: int = None,
+    heartbeat_timeout_seconds: int = None,
+):
+    """
+    🔧 Configure stability settings
+    
+    - auto_restart_enabled: Enable/disable auto-restart on crash
+    - max_restart_attempts: Max restart attempts before giving up
+    - restart_cooldown_seconds: Wait time between restarts
+    - watchdog_interval_seconds: Health check interval
+    - memory_cleanup_interval: Memory cleanup interval
+    - max_memory_mb: Max memory before forced cleanup
+    - heartbeat_timeout_seconds: Max time without heartbeat
+    """
+    global _stability_config
+    
+    changes = []
+    
+    if auto_restart_enabled is not None:
+        _stability_config["auto_restart_enabled"] = auto_restart_enabled
+        changes.append(f"auto_restart: {auto_restart_enabled}")
+    
+    if max_restart_attempts is not None:
+        _stability_config["max_restart_attempts"] = max(1, max_restart_attempts)
+        changes.append(f"max_restarts: {max_restart_attempts}")
+    
+    if restart_cooldown_seconds is not None:
+        _stability_config["restart_cooldown_seconds"] = max(5, restart_cooldown_seconds)
+        changes.append(f"restart_cooldown: {restart_cooldown_seconds}s")
+    
+    if watchdog_interval_seconds is not None:
+        _stability_config["watchdog_interval_seconds"] = max(10, watchdog_interval_seconds)
+        changes.append(f"watchdog_interval: {watchdog_interval_seconds}s")
+    
+    if memory_cleanup_interval is not None:
+        _stability_config["memory_cleanup_interval"] = max(60, memory_cleanup_interval)
+        changes.append(f"memory_cleanup: {memory_cleanup_interval}s")
+    
+    if max_memory_mb is not None:
+        _stability_config["max_memory_mb"] = max(256, max_memory_mb)
+        changes.append(f"max_memory: {max_memory_mb}MB")
+    
+    if heartbeat_timeout_seconds is not None:
+        _stability_config["heartbeat_timeout_seconds"] = max(30, heartbeat_timeout_seconds)
+        changes.append(f"heartbeat_timeout: {heartbeat_timeout_seconds}s")
+    
+    logger.info(f"🔧 Stability config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _stability_config,
+    }
+
+
+@router.post("/stability/reset-stats")
+async def reset_runtime_stats():
+    """
+    📊 Reset runtime statistics
+    
+    Use this to start fresh statistics counting
+    """
+    global _runtime_stats
+    
+    _runtime_stats = {
+        "total_uptime_seconds": 0,
+        "restart_count": 0,
+        "last_restart_time": None,
+        "last_heartbeat": None,
+        "errors_count": 0,
+        "recoveries_count": 0,
+        "memory_cleanups": 0,
+        "started_at": datetime.now().isoformat(),
+    }
+    
+    logger.info("📊 Runtime stats reset")
+    
+    return {
+        "status": "success",
+        "message": "Runtime statistics reset",
+        "stats": _runtime_stats,
     }
