@@ -251,6 +251,21 @@ _aggressive_config = {
     "quick_scalp_mode": False,
 }
 
+# 📈 SMART DCA (Dollar Cost Averaging) - เข้าซ้ำเมื่อราคาย่อ
+# Logic: Position แรกเข้าแล้ว → รอราคาย่อ → รอ stabilize → เข้าซ้ำที่ราคาดีกว่า
+_dca_config = {
+    "enabled": True,                         # ✅ เปิดใช้งาน Smart DCA
+    "max_dca_entries": 2,                    # 🔥 จำนวนครั้งที่เข้าซ้ำสูงสุด (2 = position แรก + 2 DCA = 3 positions)
+    "min_retracement_percent": 0.15,         # 🔥 ราคาต้องย่อ >= 0.15% ก่อนเข้าซ้ำ (Gold ~$8)
+    "wait_for_reversal": True,               # ✅ รอให้ราคากลับตัวก่อนเข้าซ้ำ
+    "reversal_candles": 1,                   # 🔥 รอ 1 candle ที่ราคากลับตัว
+    "signal_must_persist": True,             # ✅ สัญญาณต้องยังคงเป็นทิศทางเดิม
+    "min_time_between_dca": 300,             # 🔥 ห่างกันอย่างน้อย 5 นาที
+    "lot_multiplier": 1.0,                   # 🔥 Lot size เท่าเดิม (1.0x) หรือเพิ่ม (1.5x)
+    "max_total_loss_before_dca": 500,        # 🔥 ถ้าขาดทุนรวม > $500 ไม่เข้าซ้ำ
+}
+_dca_tracking = {}  # {symbol: {"entries": 1, "first_entry_price": 5302, "last_dca_time": datetime, "peak_adverse": 5320}}
+
 # 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
 _profit_protection_config = {
     "enabled": True,
@@ -277,6 +292,7 @@ _max_loss_config = {
 def _save_state():
     """💾 Save bot state to file for recovery after restart"""
     global _bot_status, _stability_config, _runtime_stats
+    
     
     if not _stability_config.get("state_persistence_enabled", True):
         return
@@ -935,13 +951,28 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                                 # Update signal status
                                 _bot_status["last_signal"][symbol]["trade_status"] = "EXECUTED"
                             else:
-                                logger.info(f"   ❌ {symbol}: Trade blocked - {reason}")
-                                _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
+                                # 📈 DCA CHECK - ถ้าไม่สามารถเข้าใหม่ได้ (มี position อยู่แล้ว) → เช็ค DCA
+                                if "Already have open position" in reason:
+                                    current_price = signal_data.get("current_price", 0)
+                                    if current_price > 0:
+                                        dca_executed = await _check_dca_opportunity(symbol, signal_data, current_price)
+                                        if dca_executed:
+                                            _bot_status["last_signal"][symbol]["trade_status"] = "DCA_EXECUTED"
+                                        else:
+                                            _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason} (DCA monitoring)"
+                                    else:
+                                        _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
+                                else:
+                                    logger.info(f"   ❌ {symbol}: Trade blocked - {reason}")
+                                    _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
                         else:
                             _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
                     elif signal_data["signal"] not in ["WAIT", "SKIP"] and not closed_opposite:
                         logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
                         _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
+            
+            # 📈 UPDATE DCA TRACKING - ล้าง tracking ของ symbols ที่ไม่มี position แล้ว
+            await _update_dca_tracking_from_positions()
             
             # 💰 SMART PROFIT PROTECTION - ตรวจสอบทุก cycle
             closed = await _check_profit_protection()
@@ -1673,6 +1704,245 @@ async def _check_open_positions(symbol: str) -> bool:
     except Exception as e:
         logger.warning(f"Failed to check positions: {e}")
         return False  # Assume no position if check fails
+
+
+# =====================
+# 📈 SMART DCA FUNCTIONS - เข้าซ้ำเมื่อราคาย่อ
+# =====================
+
+async def _check_dca_opportunity(symbol: str, signal_data: Dict, current_price: float) -> bool:
+    """
+    📈 SMART DCA - Check if we should add to position (Dollar Cost Averaging)
+    
+    Logic:
+    1. มี position อยู่แล้ว (position แรก)
+    2. ราคาย่อไปจากจุดเข้า >= min_retracement_percent
+    3. ราคาเริ่มกลับตัว (reversal detected)
+    4. สัญญาณยังคงเป็นทิศทางเดิม
+    5. ยังไม่เกิน max_dca_entries
+    
+    Example (SELL):
+    - Position แรก: SELL @ 5302
+    - ราคาขึ้นไป: 5320 (adverse move, track peak)
+    - ราคาเริ่มลง: 5310 (reversal detected!)
+    - เข้าซ้ำ: SELL @ 5310 (ราคาดีกว่าเดิม!)
+    
+    Returns: True if DCA executed, False otherwise
+    """
+    global _bot, _dca_config, _dca_tracking, _bot_status
+    
+    if not _dca_config.get("enabled", False):
+        return False
+    
+    if not _bot or not _bot.trading_engine:
+        return False
+    
+    signal = signal_data.get("signal", "WAIT")
+    if signal not in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+        return False
+    
+    is_buy_signal = "BUY" in signal
+    
+    try:
+        # Get current positions
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return False
+        
+        # Find position for this symbol
+        symbol_position = None
+        total_pnl = 0
+        position_count = 0
+        
+        for pos in positions:
+            if isinstance(pos, dict):
+                pos_symbol = pos.get("symbol", "")
+                pos_side = pos.get("side", "").upper()
+                pos_pnl = float(pos.get("profit", 0) or 0)
+                pos_price = float(pos.get("open_price", 0) or pos.get("price_open", 0) or 0)
+            else:
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_side = getattr(pos, "side", "")
+                if hasattr(pos_side, "value"):
+                    pos_side = pos_side.value.upper()
+                pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                pos_price = float(getattr(pos, "open_price", 0) or getattr(pos, "price_open", 0) or 0)
+            
+            if pos_symbol.upper() == symbol.upper():
+                symbol_position = pos
+                total_pnl += pos_pnl
+                position_count += 1
+                
+                # Store first entry info
+                if symbol not in _dca_tracking:
+                    _dca_tracking[symbol] = {
+                        "entries": position_count,
+                        "first_entry_price": pos_price,
+                        "last_dca_time": None,
+                        "peak_adverse": current_price,
+                        "side": pos_side,
+                    }
+        
+        if not symbol_position:
+            # No position = clear tracking
+            if symbol in _dca_tracking:
+                del _dca_tracking[symbol]
+            return False
+        
+        # Get tracking data
+        tracking = _dca_tracking.get(symbol)
+        if not tracking:
+            return False
+        
+        first_entry_price = tracking.get("first_entry_price", current_price)
+        peak_adverse = tracking.get("peak_adverse", current_price)
+        entries = tracking.get("entries", 1)
+        last_dca_time = tracking.get("last_dca_time")
+        position_side = tracking.get("side", "").upper()
+        
+        # 1. Check max DCA entries
+        max_entries = _dca_config.get("max_dca_entries", 2)
+        if entries > max_entries:
+            return False
+        
+        # 2. Check time between DCA
+        min_time = _dca_config.get("min_time_between_dca", 300)
+        if last_dca_time:
+            elapsed = (datetime.now() - last_dca_time).total_seconds()
+            if elapsed < min_time:
+                return False
+        
+        # 3. Check total loss before DCA
+        max_loss = _dca_config.get("max_total_loss_before_dca", 500)
+        if total_pnl < -max_loss:
+            logger.info(f"📈 DCA BLOCKED: {symbol} total loss ${total_pnl:.2f} > ${max_loss}")
+            return False
+        
+        # 4. Check signal consistency
+        if _dca_config.get("signal_must_persist", True):
+            # Signal must match position direction
+            if position_side == "BUY" and not is_buy_signal:
+                return False
+            if position_side == "SELL" and is_buy_signal:
+                return False
+        
+        # 5. Calculate retracement
+        min_retracement = _dca_config.get("min_retracement_percent", 0.15)
+        
+        if position_side == "BUY":
+            # For BUY: price going DOWN is adverse → track lowest (peak_adverse = lowest)
+            if current_price < peak_adverse:
+                tracking["peak_adverse"] = current_price
+                peak_adverse = current_price
+            
+            # Retracement = how much price dropped from entry
+            retracement_pct = ((first_entry_price - peak_adverse) / first_entry_price) * 100
+            
+            # Check if price is now reversing UP
+            price_reversing = current_price > peak_adverse
+            
+        else:  # SELL
+            # For SELL: price going UP is adverse → track highest (peak_adverse = highest)
+            if current_price > peak_adverse:
+                tracking["peak_adverse"] = current_price
+                peak_adverse = current_price
+            
+            # Retracement = how much price rose from entry
+            retracement_pct = ((peak_adverse - first_entry_price) / first_entry_price) * 100
+            
+            # Check if price is now reversing DOWN
+            price_reversing = current_price < peak_adverse
+        
+        # Check if retracement is enough
+        if retracement_pct < min_retracement:
+            return False
+        
+        # 6. Check reversal
+        if _dca_config.get("wait_for_reversal", True):
+            if not price_reversing:
+                logger.debug(f"📈 DCA WAIT: {symbol} retracement {retracement_pct:.2f}% but no reversal yet")
+                return False
+        
+        # 🎯 ALL CONDITIONS MET - EXECUTE DCA!
+        logger.info(f"📈 DCA OPPORTUNITY: {symbol}")
+        logger.info(f"   Position: {position_side} @ {first_entry_price:.2f}")
+        logger.info(f"   Peak adverse: {peak_adverse:.2f} (retracement: {retracement_pct:.2f}%)")
+        logger.info(f"   Current: {current_price:.2f} (reversing: {price_reversing})")
+        logger.info(f"   Entries: {entries}/{max_entries+1}")
+        
+        # Execute DCA trade
+        lot_multiplier = _dca_config.get("lot_multiplier", 1.0)
+        
+        # Use same analysis with DCA flag
+        analysis = _bot_status["last_analysis"].get(symbol)
+        if not analysis:
+            return False
+        
+        # Mark as DCA trade
+        dca_analysis = analysis.copy()
+        dca_analysis["is_dca"] = True
+        dca_analysis["dca_entry_number"] = entries + 1
+        dca_analysis["lot_multiplier"] = lot_multiplier
+        
+        result = await _bot.execute_trade(dca_analysis)
+        
+        if result and result.get("success"):
+            # Update tracking
+            tracking["entries"] = entries + 1
+            tracking["last_dca_time"] = datetime.now()
+            tracking["peak_adverse"] = current_price  # Reset peak after DCA
+            
+            logger.info(f"✅ DCA #{entries + 1} executed: {symbol} {position_side} @ {current_price:.2f}")
+            _bot_status["daily_stats"]["trades"] += 1
+            
+            return True
+        else:
+            reason = result.get("reason", "Unknown") if result else "No result"
+            logger.warning(f"⚠️ DCA trade failed: {reason}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error checking DCA opportunity: {e}")
+        return False
+
+
+def _reset_dca_tracking(symbol: str):
+    """Reset DCA tracking for a symbol when position is closed"""
+    global _dca_tracking
+    
+    if symbol in _dca_tracking:
+        del _dca_tracking[symbol]
+        logger.info(f"📈 DCA tracking reset for {symbol}")
+
+
+async def _update_dca_tracking_from_positions():
+    """Update DCA tracking based on current MT5 positions"""
+    global _bot, _dca_tracking
+    
+    if not _bot or not _bot.trading_engine:
+        return
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        
+        # Get current symbols with positions
+        current_symbols = set()
+        for pos in (positions or []):
+            if isinstance(pos, dict):
+                symbol = pos.get("symbol", "")
+            else:
+                symbol = getattr(pos, "symbol", "")
+            if symbol:
+                current_symbols.add(symbol.upper())
+        
+        # Clear tracking for symbols without positions
+        for symbol in list(_dca_tracking.keys()):
+            if symbol.upper() not in current_symbols:
+                del _dca_tracking[symbol]
+                logger.info(f"📈 DCA tracking cleared for {symbol} (no position)")
+                
+    except Exception as e:
+        logger.warning(f"Error updating DCA tracking: {e}")
 
 
 # ⚡ SIGNAL MOMENTUM FUNCTIONS
@@ -2954,6 +3224,192 @@ async def set_aggressive_preset(preset: str):
         "config": _aggressive_config,
         "cooldown_seconds": _trade_cooldown_seconds
     }
+
+
+# =====================
+# 📈 SMART DCA (Dollar Cost Averaging)
+# =====================
+
+@router.get("/dca")
+async def get_dca_status():
+    """
+    📈 Get Smart DCA configuration and tracking status
+    
+    Shows:
+    - DCA configuration
+    - Current tracking for each symbol
+    - DCA opportunities
+    """
+    global _dca_config, _dca_tracking, _bot
+    
+    # Get current positions with DCA info
+    positions_info = []
+    try:
+        if _bot and _bot.trading_engine:
+            positions = await _bot.trading_engine.broker.get_positions()
+            if positions:
+                for pos in positions:
+                    if isinstance(pos, dict):
+                        pos_symbol = pos.get("symbol", "")
+                        pos_side = pos.get("side", "")
+                        pos_price = float(pos.get("open_price", 0) or pos.get("price_open", 0) or 0)
+                        pos_pnl = float(pos.get("profit", 0) or 0)
+                    else:
+                        pos_symbol = getattr(pos, "symbol", "")
+                        pos_side = getattr(pos, "side", "")
+                        if hasattr(pos_side, "value"):
+                            pos_side = pos_side.value
+                        pos_price = float(getattr(pos, "open_price", 0) or getattr(pos, "price_open", 0) or 0)
+                        pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                    
+                    tracking = _dca_tracking.get(pos_symbol, {})
+                    max_entries = _dca_config.get("max_dca_entries", 2)
+                    current_entries = tracking.get("entries", 1)
+                    
+                    positions_info.append({
+                        "symbol": pos_symbol,
+                        "side": str(pos_side).upper(),
+                        "entry_price": pos_price,
+                        "current_pnl": pos_pnl,
+                        "dca_entries": current_entries,
+                        "max_entries": max_entries + 1,
+                        "can_dca": current_entries <= max_entries,
+                        "peak_adverse": tracking.get("peak_adverse"),
+                        "last_dca_time": tracking.get("last_dca_time").isoformat() if tracking.get("last_dca_time") else None,
+                    })
+    except Exception as e:
+        logger.warning(f"Error getting positions for DCA: {e}")
+    
+    return {
+        "config": _dca_config,
+        "tracking": {k: {
+            "entries": v.get("entries", 1),
+            "first_entry_price": v.get("first_entry_price"),
+            "peak_adverse": v.get("peak_adverse"),
+            "side": v.get("side"),
+            "last_dca_time": v.get("last_dca_time").isoformat() if v.get("last_dca_time") else None,
+        } for k, v in _dca_tracking.items()},
+        "positions": positions_info,
+        "description": {
+            "max_dca_entries": "จำนวนครั้งเข้าซ้ำสูงสุด",
+            "min_retracement_percent": "ราคาต้องย่อกี่ % ก่อนเข้าซ้ำ",
+            "wait_for_reversal": "รอให้ราคากลับตัวก่อนเข้าซ้ำ",
+            "signal_must_persist": "สัญญาณต้องยังคงเป็นทิศทางเดิม",
+            "min_time_between_dca": "ห่างกันอย่างน้อยกี่วินาที",
+        }
+    }
+
+
+@router.post("/dca/toggle")
+async def toggle_dca(enabled: bool = True):
+    """
+    📈 Enable/Disable Smart DCA
+    
+    - enabled=true: เปิดใช้งาน DCA
+    - enabled=false: ปิดใช้งาน DCA
+    """
+    global _dca_config
+    
+    _dca_config["enabled"] = enabled
+    
+    status = "ENABLED" if enabled else "DISABLED"
+    logger.info(f"📈 Smart DCA: {status}")
+    
+    return {
+        "status": "success",
+        "dca_enabled": enabled,
+        "message": f"Smart DCA {status}"
+    }
+
+
+@router.post("/dca/configure")
+async def configure_dca(
+    max_dca_entries: int = None,
+    min_retracement_percent: float = None,
+    wait_for_reversal: bool = None,
+    reversal_candles: int = None,
+    signal_must_persist: bool = None,
+    min_time_between_dca: int = None,
+    lot_multiplier: float = None,
+    max_total_loss_before_dca: float = None
+):
+    """
+    📈 Configure Smart DCA settings
+    
+    - max_dca_entries: จำนวนครั้งเข้าซ้ำสูงสุด (1-5)
+    - min_retracement_percent: ราคาต้องย่อกี่ % (0.1-2.0)
+    - wait_for_reversal: รอให้ราคากลับตัวก่อน
+    - reversal_candles: รอกี่ candle ที่กลับตัว
+    - signal_must_persist: สัญญาณต้องยังคงเดิม
+    - min_time_between_dca: ห่างกันกี่วินาที
+    - lot_multiplier: Lot size เท่าไหร่ (1.0 = เท่าเดิม)
+    - max_total_loss_before_dca: ถ้าขาดทุนรวมเกินเท่าไหร่ไม่เข้าซ้ำ
+    """
+    global _dca_config
+    
+    changes = []
+    
+    if max_dca_entries is not None:
+        _dca_config["max_dca_entries"] = max(1, min(5, max_dca_entries))
+        changes.append(f"max_dca_entries: {_dca_config['max_dca_entries']}")
+    
+    if min_retracement_percent is not None:
+        _dca_config["min_retracement_percent"] = max(0.05, min(2.0, min_retracement_percent))
+        changes.append(f"min_retracement: {_dca_config['min_retracement_percent']}%")
+    
+    if wait_for_reversal is not None:
+        _dca_config["wait_for_reversal"] = wait_for_reversal
+        changes.append(f"wait_for_reversal: {wait_for_reversal}")
+    
+    if reversal_candles is not None:
+        _dca_config["reversal_candles"] = max(1, min(5, reversal_candles))
+        changes.append(f"reversal_candles: {_dca_config['reversal_candles']}")
+    
+    if signal_must_persist is not None:
+        _dca_config["signal_must_persist"] = signal_must_persist
+        changes.append(f"signal_must_persist: {signal_must_persist}")
+    
+    if min_time_between_dca is not None:
+        _dca_config["min_time_between_dca"] = max(60, min(3600, min_time_between_dca))
+        changes.append(f"min_time_between_dca: {_dca_config['min_time_between_dca']}s")
+    
+    if lot_multiplier is not None:
+        _dca_config["lot_multiplier"] = max(0.5, min(3.0, lot_multiplier))
+        changes.append(f"lot_multiplier: {_dca_config['lot_multiplier']}x")
+    
+    if max_total_loss_before_dca is not None:
+        _dca_config["max_total_loss_before_dca"] = max(100, max_total_loss_before_dca)
+        changes.append(f"max_loss: ${_dca_config['max_total_loss_before_dca']}")
+    
+    logger.info(f"📈 DCA config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _dca_config
+    }
+
+
+@router.post("/dca/reset")
+async def reset_dca_tracking(symbol: str = None):
+    """
+    📈 Reset DCA tracking
+    
+    - symbol: Reset tracking สำหรับ symbol นี้
+    - ถ้าไม่ระบุ: Reset ทั้งหมด
+    """
+    global _dca_tracking
+    
+    if symbol:
+        if symbol in _dca_tracking:
+            del _dca_tracking[symbol]
+            return {"status": "reset", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        count = len(_dca_tracking)
+        _dca_tracking.clear()
+        return {"status": "reset_all", "cleared_count": count}
 
 
 # =====================
