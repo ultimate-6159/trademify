@@ -221,6 +221,86 @@ class ManualTradeRequest(BaseModel):
 # HELPER FUNCTIONS
 # =====================
 
+# 🔄 Track positions for sync detection
+_known_positions = {}  # {ticket: {"symbol": "XAUUSDm", "side": "BUY", "open_price": 5100}}
+
+
+async def _sync_positions_with_mt5():
+    """
+    🔄 SYNC WITH MT5 - ตรวจสอบว่า position ถูกปิดไปแล้วหรือยัง
+    
+    เมื่อ position ถูกปิดด้วย SL/TP (external) → Bot ต้องรู้และ update สถานะ
+    """
+    global _bot, _known_positions, _bot_status, _peak_profit_by_position, _last_traded_signal
+    
+    if not _bot or not _bot.trading_engine:
+        return
+    
+    try:
+        # Get actual positions from MT5
+        positions = await _bot.trading_engine.broker.get_positions()
+        
+        # Build set of current position tickets
+        current_tickets = set()
+        for pos in (positions or []):
+            if isinstance(pos, dict):
+                ticket = pos.get("ticket") or pos.get("id")
+            else:
+                ticket = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+            if ticket:
+                current_tickets.add(str(ticket))
+        
+        # Check for positions that were closed externally
+        closed_externally = []
+        for ticket, info in list(_known_positions.items()):
+            if str(ticket) not in current_tickets:
+                # Position was closed externally (SL/TP hit)
+                closed_externally.append({
+                    "ticket": ticket,
+                    "symbol": info.get("symbol", ""),
+                    "side": info.get("side", ""),
+                })
+                
+                # Clean up tracking
+                del _known_positions[ticket]
+                
+                # Clean up peak profit tracking
+                if ticket in _peak_profit_by_position:
+                    del _peak_profit_by_position[ticket]
+                
+                # Reset cooldown for this symbol so bot can trade again
+                symbol = info.get("symbol", "")
+                if symbol and symbol in _last_traded_signal:
+                    del _last_traded_signal[symbol]
+                    logger.info(f"🔓 Reset cooldown for {symbol} - position closed externally")
+        
+        # Log closed positions
+        for pos in closed_externally:
+            logger.info(f"🔄 SYNC: Position #{pos['ticket']} ({pos['symbol']} {pos['side']}) closed externally (SL/TP hit)")
+        
+        # Update known positions with current positions
+        for pos in (positions or []):
+            if isinstance(pos, dict):
+                ticket = pos.get("ticket") or pos.get("id")
+                symbol = pos.get("symbol", "")
+                side = pos.get("side", "")
+            else:
+                ticket = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                symbol = getattr(pos, "symbol", "")
+                side = getattr(pos, "side", "")
+                if hasattr(side, "value"):
+                    side = side.value
+            
+            if ticket and str(ticket) not in _known_positions:
+                _known_positions[str(ticket)] = {
+                    "symbol": symbol,
+                    "side": str(side).upper(),
+                }
+        
+    except Exception as e:
+        logger.warning(f"Sync with MT5 failed: {e}")
+
+
 def _get_bot_instance():
     """Get or create bot instance"""
     global _bot
@@ -317,6 +397,9 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                             _bot_status["error"] = None
                             logger.info("MT5 reconnected successfully!")
                         consecutive_failures = 0
+            
+            # 🔄 SYNC WITH MT5 - ตรวจสอบว่า position ถูกปิดไปแล้วหรือยัง (SL/TP hit externally)
+            await _sync_positions_with_mt5()
             
             for symbol in _bot_status["symbols"]:
                 # Run analysis
