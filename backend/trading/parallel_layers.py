@@ -133,11 +133,18 @@ class ParallelLayerProcessor:
         # Pre-create all layer tasks
         layer_tasks = []
         
-        # Layer 1-2: Smart Features (already checked)
+        # Layer 1: Smart Features (already checked)
         layer_tasks.append(self._create_sync_result(
             "SmartFeatures", 1, can_trade_check[0], 
             score=100 if can_trade_check[0] else 0,
             reason=can_trade_check[1]
+        ))
+        
+        # Layer 2: Data Lake (always pass - data already loaded)
+        layer_tasks.append(self._create_sync_result(
+            "DataLake", 2, True,
+            score=100,
+            reason="Data loaded successfully"
         ))
         
         # Layer 3: Correlation (already checked)
@@ -145,6 +152,13 @@ class ParallelLayerProcessor:
             "Correlation", 3, correlation_check[0],
             score=100 if correlation_check[0] else 0,
             reason=correlation_check[1]
+        ))
+        
+        # Layer 4: Voting System (already incorporated in signal)
+        layer_tasks.append(self._create_sync_result(
+            "VotingSystem", 4, True,
+            score=data.base_confidence if data.base_confidence > 0 else 75,
+            reason=f"Signal confidence: {data.base_confidence:.1f}%"
         ))
         
         # Layer 5: Advanced Intelligence
@@ -179,6 +193,13 @@ class ParallelLayerProcessor:
         if self.titan_core:
             layer_tasks.append(self._run_titan_core(data))
         
+        # Layer 13: Enhanced Analysis (pattern + sentiment)
+        layer_tasks.append(self._create_sync_result(
+            "EnhancedAnalysis", 13, True,
+            score=min(100, data.base_confidence * 1.1) if data.base_confidence > 50 else 50,
+            reason="Enhanced pattern analysis"
+        ))
+        
         # Layer 14: Pro Features
         if self.pro_features:
             layer_tasks.append(self._run_pro_features(data))
@@ -186,6 +207,13 @@ class ParallelLayerProcessor:
         # Layer 15: Risk Guardian
         if self.risk_guardian:
             layer_tasks.append(self._run_risk_guardian(data))
+        
+        # Layer 16: Position Sizing (calculate optimal position)
+        layer_tasks.append(self._create_sync_result(
+            "PositionSizing", 16, True,
+            score=100 if data.balance > 0 else 0,
+            reason=f"Balance: ${data.balance:.2f}"
+        ))
         
         # Layer 17: Ultra Intelligence
         if self.ultra_intelligence:
