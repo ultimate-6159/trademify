@@ -23,6 +23,51 @@ except ImportError:
     FIREBASE_AVAILABLE = False
     logger.warning("firebase-admin not installed. Firebase features will be disabled.")
 
+# 🔥 NumPy type conversion
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+
+def _convert_to_json_safe(obj):
+    """
+    🔥 Convert numpy types and other non-JSON-serializable objects
+    ป้องกัน: Object of type bool is not JSON serializable
+    """
+    if obj is None:
+        return None
+    
+    # Handle numpy types
+    if NUMPY_AVAILABLE:
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+    
+    # Handle dict recursively
+    if isinstance(obj, dict):
+        return {k: _convert_to_json_safe(v) for k, v in obj.items()}
+    
+    # Handle list/tuple recursively
+    if isinstance(obj, (list, tuple)):
+        return [_convert_to_json_safe(item) for item in obj]
+    
+    # Handle datetime
+    if hasattr(obj, 'isoformat'):
+        return obj.isoformat()
+    
+    # Handle bool (Python native)
+    if isinstance(obj, bool):
+        return obj
+    
+    return obj
+
 
 class FirebaseRESTService:
     """
@@ -57,7 +102,9 @@ class FirebaseRESTService:
         """PUT data to Firebase"""
         try:
             url = self._make_url(path)
-            response = requests.put(url, json=data, timeout=10)
+            # 🔥 Convert numpy types before sending
+            safe_data = _convert_to_json_safe(data)
+            response = requests.put(url, json=safe_data, timeout=10)
             return response.status_code == 200
         except Exception as e:
             logger.error(f"Firebase PUT error: {e}")
@@ -79,7 +126,9 @@ class FirebaseRESTService:
         """POST data to Firebase (creates new key)"""
         try:
             url = self._make_url(path)
-            response = requests.post(url, json=data, timeout=10)
+            # 🔥 Convert numpy types before sending
+            safe_data = _convert_to_json_safe(data)
+            response = requests.post(url, json=safe_data, timeout=10)
             if response.status_code == 200:
                 result = response.json()
                 return result.get("name")  # Returns the generated key
