@@ -116,6 +116,9 @@ _bot_status = {
 
 
 
+
+
+
 # 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
@@ -127,16 +130,19 @@ _open_new_after_close = True           # ✅ ปิดแล้วเปิด�
 _reverse_signal_min_profit = 50        # 🔥 ต้องมีกำไร >= $50 ถึงจะปิดตาม reverse signal
 
 # ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว (ต้องกำไรก่อน!)
+# 🔥 ปิดชั่วคราว! เพราะ trigger บ่อยเกินไปทำให้ระบบไม่เสถียร
 _signal_history = {}  # {symbol: [{"signal": "BUY", "quality": "HIGH", "confidence": 75, "timestamp": datetime}, ...]}
 _signal_weakening_config = {
-    "enabled": True,                        # ✅ เปิด! แต่ต้องกำไรก่อน
+    "enabled": False,                       # 🔥 ปิด! ไม่เสถียร - ใช้ SL/TP แทน
     "history_size": 5,                      # เก็บ signal ย้อนหลัง 5 รายการ
-    "close_on_quality_drop": True,          # ✅ ปิดเมื่อ quality ลดลง 2 ระดับ (ต้องกำไร)
-    "close_on_confidence_drop": True,       # ✅ ปิดเมื่อ confidence ลดลง >= 15%
-    "quality_drop_threshold": 2,            # PREMIUM→MEDIUM = 2 ระดับ
-    "confidence_drop_threshold": 15,        # ปิดเมื่อ confidence ลดลง 15% จาก peak
-    "min_profit_to_exit_early": 100,        # 🔥 ต้องมีกำไร >= $100 ถึงจะ early exit
+    "close_on_quality_drop": False,         # 🔥 ปิด! ไม่เสถียร
+    "close_on_confidence_drop": False,      # 🔥 ปิด! ไม่เสถียร
+    "quality_drop_threshold": 3,            # 🔥 เพิ่มเป็น 3 (PREMIUM→LOW = 3 levels)
+    "confidence_drop_threshold": 25,        # 🔥 เพิ่มเป็น 25%
+    "min_profit_to_exit_early": 500,        # 🔥 เพิ่มเป็น $500 ถึงจะ early exit
 }
+
+
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
 # ❌ ปิดถาวร! ใช้สัญญาณปกติ (BUY=BUY, SELL=SELL)
@@ -491,10 +497,22 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
         except asyncio.CancelledError:
             logger.info("🛑 Bot loop cancelled")
             break
+        except OSError as e:
+            # 🔥 Network error - รอแล้วลองใหม่
+            logger.warning(f"⚠️ Network error in bot loop: {e}")
+            _bot_status["error"] = f"Network error: {e}"
+            await asyncio.sleep(30)  # รอ 30 วินาทีก่อนลองใหม่
+        except ConnectionError as e:
+            # 🔥 Connection lost - รอแล้วลองใหม่
+            logger.warning(f"⚠️ Connection error in bot loop: {e}")
+            _bot_status["error"] = f"Connection error: {e}"
+            await asyncio.sleep(30)
         except Exception as e:
-            logger.error(f"❌ Bot loop error: {e}")
-            _bot_status["error"] = str(e)
-            await asyncio.sleep(5)  # Brief pause on error
+            # 🔥 เพิ่ม error type ใน log
+            error_type = type(e).__name__
+            logger.error(f"❌ Bot loop error ({error_type}): {e}")
+            _bot_status["error"] = f"{error_type}: {e}"
+            await asyncio.sleep(10)  # รอ 10 วินาทีก่อนลองใหม่
     
     
     logger.info("🔴 Unified bot loop stopped")
@@ -1246,10 +1264,14 @@ def _detect_signal_weakening(symbol: str, current_signal: Dict, position_side: s
 async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
     """
     ⚡ Check if any positions should be closed due to weakening signal
-    """
-    global _bot, _signal_weakening_config
     
-    if not _signal_weakening_config.get("enabled", True):
+    🔥 NOTE: ปิดการทำงานชั่วคราว เพราะ trigger บ่อยเกินไปทำให้ไม่เสถียร
+    ใช้ SL/TP ปกติแทน
+    """
+    global _bot, _signal_weakening_config, _bot_status
+    
+    # 🔥 ปิดการทำงานถ้า disabled
+    if not _signal_weakening_config.get("enabled", False):
         return
     
     if not _bot or not _bot.trading_engine:
@@ -1289,8 +1311,8 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
             should_close, reason = _detect_signal_weakening(symbol, signal_data, pos_side)
             
             if should_close:
-                # 🔥 ต้องมีกำไรขั้นต่ำก่อนถึงจะปิด
-                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 100)
+                # 🔥 ต้องมีกำไรขั้นต่ำสูงก่อนถึงจะปิด
+                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 500)
                 
                 # ต้องมีกำไร >= min_profit ถึงจะปิด
                 if pos_pnl >= min_profit:
@@ -1298,49 +1320,26 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
                     logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f} (>= ${min_profit})")
                     logger.warning(f"   ACTION: Closing to LOCK PROFIT!")
                     
-                    # Close position
+                    # 🔥 ใช้ broker interface แทน MT5 โดยตรง - เสถียรกว่า!
                     try:
-                        import MetaTrader5 as mt5
-                        # Get current price for closing
-                        tick = mt5.symbol_info_tick(symbol)
-                        if tick:
-                            close_price = tick.bid if pos_side == "BUY" else tick.ask
-                            
-                            # Prepare close request
-                            close_request = {
-                                "action": mt5.TRADE_ACTION_DEAL,
-                                "symbol": symbol,
-                                "volume": pos.get("volume", 0.01) if isinstance(pos, dict) else getattr(pos, "volume", 0.01),
-                                "type": mt5.ORDER_TYPE_SELL if pos_side == "BUY" else mt5.ORDER_TYPE_BUY,
-                                "position": pos_ticket,
-                                "price": close_price,
-                                "deviation": 20,
-                                "magic": 123456,
-                                "comment": f"Signal Weakening: {reason[:20]}",
-                                "type_time": mt5.ORDER_TIME_GTC,
-                                "type_filling": mt5.ORDER_FILLING_IOC,
-                            }
-                            
-                            result = mt5.order_send(close_request)
-                            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                                logger.info(f"✅ Position closed early: {symbol} | Reason: {reason}")
-                                # Update daily stats
-                                _bot_status["daily_stats"]["trades"] += 1
-                                if pos_pnl > 0:
-                                    _bot_status["daily_stats"]["wins"] += 1
-                                else:
-                                    _bot_status["daily_stats"]["losses"] += 1
-                                _bot_status["daily_stats"]["pnl"] += pos_pnl
+                        result = await _bot.trading_engine.broker.close_position(pos_ticket)
+                        if result:
+                            logger.info(f"✅ Position closed early: {symbol} | Reason: {reason}")
+                            # Update daily stats
+                            _bot_status["daily_stats"]["trades"] += 1
+                            if pos_pnl > 0:
+                                _bot_status["daily_stats"]["wins"] += 1
                             else:
-                                logger.error(f"❌ Failed to close: {result}")
+                                _bot_status["daily_stats"]["losses"] += 1
+                            _bot_status["daily_stats"]["pnl"] += float(pos_pnl)
+                        else:
+                            logger.error(f"❌ Failed to close position #{pos_ticket}")
                     except Exception as e:
                         logger.error(f"Error closing weakening position: {e}")
-                else:
-                    logger.info(f"⚠️ Signal weakening but PnL ${pos_pnl:.2f} < ${min_profit} - holding")
-                    
+                # 🔥 ไม่ต้อง log ทุกครั้ง - ลด noise
+                        
     except Exception as e:
         logger.error(f"Error checking weakening positions: {e}")
-
 
 
 
