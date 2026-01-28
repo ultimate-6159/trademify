@@ -47,7 +47,7 @@ router = APIRouter(prefix="/api/v1/unified", tags=["unified"])
 # =====================
 _stability_config = {
     "auto_restart_enabled": True,           # 🔄 Auto-restart เมื่อ crash
-    "max_restart_attempts": 100,            # ลอง restart ได้ 100 ครั้ง
+    "max_restart_attempts": 0,              # 🔥 0 = UNLIMITED restarts (10 year mode!)
     "restart_cooldown_seconds": 30,         # รอ 30 วินาทีก่อน restart
     "watchdog_interval_seconds": 60,        # ตรวจสอบ health ทุก 60 วินาที
     "memory_cleanup_interval": 300,         # ทำความสะอาด memory ทุก 5 นาที
@@ -56,14 +56,17 @@ _stability_config = {
     "state_file_path": "bot_state.json",    # ไฟล์เก็บ state
     "heartbeat_timeout_seconds": 120,       # ถ้าไม่มี heartbeat 2 นาที = dead
     "auto_start_on_api_init": False,        # เริ่ม bot อัตโนมัติเมื่อ API start
+    "daily_restart_count_reset": True,      # 🔥 Reset restart count ทุกวัน
 }
 
 # 🔥 RUNTIME STATISTICS
 _runtime_stats = {
     "total_uptime_seconds": 0,
     "restart_count": 0,
+    "restart_count_today": 0,               # 🔥 Restart count วันนี้
     "last_restart_time": None,
     "last_heartbeat": None,
+    "last_daily_reset": None,               # 🔥 วันที่ reset ล่าสุด
     "errors_count": 0,
     "recoveries_count": 0,
     "memory_cleanups": 0,
@@ -393,6 +396,9 @@ async def _watchdog_loop():
                     _runtime_stats["errors_count"] += 1
                     await _auto_restart_bot()
             
+            # 6. 🔥 Daily restart count reset
+            _check_daily_restart_reset()
+            
             # Update uptime
             started = _runtime_stats.get("started_at")
             if started:
@@ -410,20 +416,46 @@ async def _watchdog_loop():
             await asyncio.sleep(10)
 
 
+def _check_daily_restart_reset():
+    """🔥 Reset restart count ทุกวัน (เที่ยงคืน)"""
+    global _runtime_stats, _stability_config
+    
+    if not _stability_config.get("daily_restart_count_reset", True):
+        return
+    
+    today = datetime.now().date().isoformat()
+    last_reset = _runtime_stats.get("last_daily_reset")
+    
+    if last_reset != today:
+        old_count = _runtime_stats.get("restart_count_today", 0)
+        _runtime_stats["restart_count_today"] = 0
+        _runtime_stats["last_daily_reset"] = today
+        if old_count > 0:
+            logger.info(f"🔄 Daily reset: Cleared {old_count} restart count for new day")
+
+
 async def _auto_restart_bot():
     """
     🔄 AUTO-RESTART - เปิด bot ใหม่อัตโนมัติเมื่อ crash
+    
+    🔥 UNLIMITED MODE: max_restart_attempts = 0 หมายถึงไม่จำกัด
     """
     global _bot, _bot_task, _bot_status, _runtime_stats, _stability_config
     
-    max_attempts = _stability_config.get("max_restart_attempts", 100)
+    max_attempts = _stability_config.get("max_restart_attempts", 0)
     cooldown = _stability_config.get("restart_cooldown_seconds", 30)
     
-    if _runtime_stats["restart_count"] >= max_attempts:
+    # 🔥 UNLIMITED MODE: 0 = no limit
+    if max_attempts > 0 and _runtime_stats["restart_count"] >= max_attempts:
         logger.error(f"🔄 AUTO-RESTART: Max attempts ({max_attempts}) reached - giving up")
         return False
     
-    logger.info(f"🔄 AUTO-RESTART: Attempt {_runtime_stats['restart_count'] + 1}/{max_attempts}")
+    # Show restart info
+    if max_attempts == 0:
+        logger.info(f"🔄 AUTO-RESTART: Attempt #{_runtime_stats['restart_count'] + 1} (UNLIMITED mode)")
+    else:
+        logger.info(f"🔄 AUTO-RESTART: Attempt {_runtime_stats['restart_count'] + 1}/{max_attempts}")
+    
     
     # Wait cooldown
     logger.info(f"🔄 Waiting {cooldown}s before restart...")
@@ -456,6 +488,7 @@ async def _auto_restart_bot():
         }
         quality_enum = quality_map.get(quality.upper(), SignalQuality.MEDIUM)
         
+        
         _bot = AITradingBot(
             symbols=symbols,
             timeframe=timeframe,
@@ -476,10 +509,11 @@ async def _auto_restart_bot():
         _bot_status["error"] = None
         
         _runtime_stats["restart_count"] += 1
+        _runtime_stats["restart_count_today"] = _runtime_stats.get("restart_count_today", 0) + 1
         _runtime_stats["last_restart_time"] = datetime.now().isoformat()
         _runtime_stats["recoveries_count"] += 1
         
-        logger.info(f"✅ AUTO-RESTART successful! (Total restarts: {_runtime_stats['restart_count']})")
+        logger.info(f"✅ AUTO-RESTART successful! (Total: {_runtime_stats['restart_count']}, Today: {_runtime_stats['restart_count_today']})")
         
         # Save state
         _save_state()
@@ -490,6 +524,7 @@ async def _auto_restart_bot():
         logger.error(f"❌ AUTO-RESTART failed: {e}")
         _bot_status["error"] = f"Auto-restart failed: {e}"
         _runtime_stats["restart_count"] += 1
+        _runtime_stats["restart_count_today"] = _runtime_stats.get("restart_count_today", 0) + 1
         return False
 
 
