@@ -114,7 +114,6 @@ class BotMode(str, Enum):
 
 
 
-
 # =====================
 # SINGLE BOT INSTANCE
 # =====================
@@ -137,11 +136,37 @@ _bot_status = {
         "trades": 0,
         "wins": 0,
         "losses": 0,
-        "pnl": 0.0
+        "pnl": 0.0,
+        "last_reset_date": None     # 🔥 Track when stats were last reset
     },
     "error": None,
     "started_at": None
 }
+
+
+def _check_and_reset_daily_stats():
+    """🔥 Reset daily_stats ทุกวันใหม่ (เที่ยงคืน)"""
+    global _bot_status
+    
+    today = datetime.now().date().isoformat()
+    last_reset = _bot_status["daily_stats"].get("last_reset_date")
+    
+    if last_reset != today:
+        old_stats = dict(_bot_status["daily_stats"])
+        _bot_status["daily_stats"] = {
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "pnl": 0.0,
+            "last_reset_date": today
+        }
+        if last_reset:  # ไม่ใช่ครั้งแรก
+            logger.info(f"📊 DAILY RESET: Cleared stats for new day")
+            logger.info(f"   Yesterday: {old_stats['trades']} trades, W:{old_stats['wins']} L:{old_stats['losses']}, PnL:${old_stats['pnl']:.2f}")
+
+
+
+
 
 
 
@@ -674,6 +699,22 @@ async def _sync_positions_with_mt5():
             if orphan_symbol.upper() in _last_traded_signal:
                 del _last_traded_signal[orphan_symbol.upper()]
         
+        # 🔥 CRITICAL FIX: If MT5 has 0 positions, clear ALL tracking data
+        if len(positions or []) == 0 and len(_known_positions) > 0:
+            logger.warning(f"🧹 MT5 has 0 positions but _known_positions has {len(_known_positions)} - CLEARING ALL!")
+            
+            # Clear all known positions
+            _known_positions.clear()
+            
+            # Clear all cooldowns so bot can trade
+            cleared_symbols = list(_last_traded_signal.keys())
+            _last_traded_signal.clear()
+            
+            # Clear peak profits
+            _peak_profit_by_position.clear()
+            
+            logger.info(f"✅ Cleared tracking data: known_positions, cooldowns ({cleared_symbols}), peak_profits")
+        
         # Update known positions with current positions
         for pos in (positions or []):
             if isinstance(pos, dict):
@@ -786,6 +827,9 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
         cycle_start = datetime.now()
         
         try:
+            # 🔥 CHECK DAILY RESET - Reset stats ทุกวันใหม่
+            _check_and_reset_daily_stats()
+            
             # Check MT5 connection before each cycle
             mt5_ok = True
             if _bot and _bot.trading_engine and _bot.trading_engine.broker:
@@ -3414,4 +3458,88 @@ async def get_positions_debug():
         } for k, v in _last_traded_signal.items()},
         "peak_profits": dict(_peak_profit_by_position),
         "sync_status": "OK" if len(mt5_positions) == len(_known_positions) else "MISMATCH",
+    }
+
+
+@router.post("/reset-all-tracking")
+async def reset_all_tracking_data():
+    """
+    🧹 EMERGENCY RESET - ล้างข้อมูล tracking ทั้งหมด
+    
+    ใช้เมื่อ:
+    - Bot คิดว่ามี position แต่ MT5 ไม่มี
+    - Cooldown ติด แต่อยากเทรดใหม่
+    - daily_stats ผิดปกติ
+    
+    WARNING: ข้อมูลทั้งหมดจะถูกล้าง!
+    """
+    global _known_positions, _last_traded_signal, _peak_profit_by_position, _bot_status, _pending_signals
+    
+    # Count before clearing
+    counts = {
+        "known_positions": len(_known_positions),
+        "cooldowns": len(_last_traded_signal),
+        "peak_profits": len(_peak_profit_by_position),
+        "pending_signals": len(_pending_signals),
+    }
+    
+    # Clear all tracking
+    _known_positions.clear()
+    _last_traded_signal.clear()
+    _peak_profit_by_position.clear()
+    _pending_signals.clear()
+    
+    # Reset daily stats
+    today = datetime.now().date().isoformat()
+    old_stats = dict(_bot_status["daily_stats"])
+    _bot_status["daily_stats"] = {
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "pnl": 0.0,
+        "last_reset_date": today
+    }
+    
+    logger.warning(f"🧹 EMERGENCY RESET executed!")
+    logger.warning(f"   Cleared: positions={counts['known_positions']}, cooldowns={counts['cooldowns']}, peaks={counts['peak_profits']}, pending={counts['pending_signals']}")
+    logger.warning(f"   Old stats: trades={old_stats.get('trades', 0)}, pnl=${old_stats.get('pnl', 0):.2f}")
+    
+    return {
+        "status": "success",
+        "message": "All tracking data cleared!",
+        "cleared": counts,
+        "old_daily_stats": old_stats,
+        "new_daily_stats": _bot_status["daily_stats"],
+        "note": "Bot can now trade fresh"
+    }
+
+
+@router.post("/reset-daily-stats")
+async def reset_daily_stats_only():
+    """
+    📊 Reset daily_stats only
+    
+    ใช้เมื่อ P&L แสดงผิด หรืออยากเริ่มนับใหม่
+    """
+    global _bot_status
+    
+    today = datetime.now().date().isoformat()
+    old_stats = dict(_bot_status["daily_stats"])
+    
+    _bot_status["daily_stats"] = {
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "pnl": 0.0,
+        "last_reset_date": today
+    }
+    
+    logger.info(f"📊 Daily stats manually reset")
+    logger.info(f"   Old: trades={old_stats.get('trades', 0)}, W:{old_stats.get('wins', 0)} L:{old_stats.get('losses', 0)}, PnL:${old_stats.get('pnl', 0):.2f}")
+    
+    return {
+        "status": "success",
+        "message": "Daily stats reset!",
+        "old_stats": old_stats,
+        "new_stats": _bot_status["daily_stats"]
     }
