@@ -252,19 +252,26 @@ _aggressive_config = {
 }
 
 # 📈 SMART DCA (Dollar Cost Averaging) - เข้าซ้ำเมื่อราคาย่อ
-# Logic: Position แรกเข้าแล้ว → รอราคาย่อ → รอ stabilize → เข้าซ้ำที่ราคาดีกว่า
+# 🚨 ปิดชั่วคราว! เสี่ยงเกินไป - เข้าซ้ำตอนสัญญาณเปลี่ยน = ขาดทุนหนัก
 _dca_config = {
-    "enabled": True,                         # ✅ เปิดใช้งาน Smart DCA
-    "max_dca_entries": 2,                    # 🔥 จำนวนครั้งที่เข้าซ้ำสูงสุด (2 = position แรก + 2 DCA = 3 positions)
-    "min_retracement_percent": 0.15,         # 🔥 ราคาต้องย่อ >= 0.15% ก่อนเข้าซ้ำ (Gold ~$8)
+    "enabled": False,                        # 🚨 ปิด! เสี่ยงเกินไป - DCA ตอนสัญญาณเปลี่ยน = ขาดทุน
+    "max_dca_entries": 1,                    # 🔥 ลดเหลือ 1 (รวม 2 positions เท่านั้น)
+    "min_retracement_percent": 0.30,         # 🔥 เพิ่มเป็น 0.30% (~$15 Gold) ต้องย่อเยอะกว่านี้
     "wait_for_reversal": True,               # ✅ รอให้ราคากลับตัวก่อนเข้าซ้ำ
-    "reversal_candles": 1,                   # 🔥 รอ 1 candle ที่ราคากลับตัว
+    "reversal_candles": 2,                   # 🔥 เพิ่มเป็น 2 candles (รอให้แน่ใจกว่า)
     "signal_must_persist": True,             # ✅ สัญญาณต้องยังคงเป็นทิศทางเดิม
-    "min_time_between_dca": 300,             # 🔥 ห่างกันอย่างน้อย 5 นาที
-    "lot_multiplier": 1.0,                   # 🔥 Lot size เท่าเดิม (1.0x) หรือเพิ่ม (1.5x)
-    "max_total_loss_before_dca": 500,        # 🔥 ถ้าขาดทุนรวม > $500 ไม่เข้าซ้ำ
+    "min_time_between_dca": 600,             # 🔥 เพิ่มเป็น 10 นาที (รอนานขึ้น)
+    "lot_multiplier": 0.5,                   # 🔥 ลดเป็น 0.5x (Lot น้อยลง ลด risk)
+    "max_total_loss_before_dca": 200,        # 🔥 ลดเหลือ $200 (ขาดทุนน้อยกว่านี้ถึงจะ DCA)
+    "require_strong_signal": True,           # 🆕 ต้องเป็น signal แข็งแรง (HIGH+, 80%+)
+    "min_confidence_for_dca": 80,            # 🆕 confidence ต้อง >= 80%
+    "check_signal_trend": True,              # 🆕 ตรวจสอบว่า signal ไม่ได้อ่อนตัว
 }
 _dca_tracking = {}  # {symbol: {"entries": 1, "first_entry_price": 5302, "last_dca_time": datetime, "peak_adverse": 5320}}
+
+# 📊 SIGNAL STRENGTH TRACKER - ตรวจสอบความแข็งแรงของสัญญาณ
+# ใช้ตรวจจับว่าสัญญาณกำลังอ่อนตัวหรือเปลี่ยนทิศทาง
+_signal_strength_tracker = {}  # {symbol: {"confidence_history": [80, 78, 75], "quality_history": ["HIGH", "HIGH", "MEDIUM"], "direction_changes": 0}}
 
 # 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
 _profit_protection_config = {
@@ -908,6 +915,14 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                     
                     # ⚡ TRACK SIGNAL HISTORY for momentum detection
                     _track_signal_history(symbol, signal_data)
+                    
+                    # 📊 TRACK SIGNAL STRENGTH for DCA safety
+                    _track_signal_strength(symbol, signal_data)
+                    
+                    # 📊 LOG SIGNAL STRENGTH SCORE
+                    strength = _get_signal_strength_score(symbol, signal_data)
+                    if strength["score"] < 50:
+                        logger.warning(f"⚠️ {symbol}: WEAK SIGNAL! Score={strength['score']}/100 - {strength['recommendation']}")
                     
                     # ⚡ CHECK SIGNAL WEAKENING - ปิด position ก่อนสัญญาณกลับทิศ
                     await _check_and_close_weakening_positions(symbol, signal_data)
@@ -1707,6 +1722,234 @@ async def _check_open_positions(symbol: str) -> bool:
 
 
 # =====================
+# 📊 SIGNAL STRENGTH DETECTION - ตรวจจับสัญญาณกำลังเปลี่ยน
+# =====================
+
+def _track_signal_strength(symbol: str, signal_data: Dict):
+    """
+    📊 Track signal strength over time
+    
+    เก็บ history ของ confidence และ quality เพื่อตรวจจับว่าสัญญาณกำลังอ่อนตัว
+    """
+    global _signal_strength_tracker
+    
+    if symbol not in _signal_strength_tracker:
+        _signal_strength_tracker[symbol] = {
+            "confidence_history": [],
+            "quality_history": [],
+            "signal_history": [],
+            "direction_changes": 0,
+            "last_signal": None,
+        }
+    
+    tracker = _signal_strength_tracker[symbol]
+    current_signal = signal_data.get("signal", "WAIT")
+    current_confidence = signal_data.get("confidence", 0)
+    current_quality = signal_data.get("quality", "SKIP")
+    
+    # Track direction changes
+    if tracker["last_signal"]:
+        last_is_buy = "BUY" in tracker["last_signal"]
+        current_is_buy = "BUY" in current_signal
+        last_is_sell = "SELL" in tracker["last_signal"]
+        current_is_sell = "SELL" in current_signal
+        
+        if (last_is_buy and current_is_sell) or (last_is_sell and current_is_buy):
+            tracker["direction_changes"] += 1
+            logger.warning(f"📊 SIGNAL DIRECTION CHANGE: {symbol} {tracker['last_signal']} → {current_signal} (changes: {tracker['direction_changes']})")
+    
+    # Add to history (keep last 10)
+    tracker["confidence_history"].append(current_confidence)
+    tracker["quality_history"].append(current_quality)
+    tracker["signal_history"].append(current_signal)
+    tracker["last_signal"] = current_signal
+    
+    # Keep only last 10
+    if len(tracker["confidence_history"]) > 10:
+        tracker["confidence_history"] = tracker["confidence_history"][-10:]
+        tracker["quality_history"] = tracker["quality_history"][-10:]
+        tracker["signal_history"] = tracker["signal_history"][-10:]
+
+
+def _check_signal_weakening_for_dca(symbol: str, signal_data: Dict) -> bool:
+    """
+    📊 Check if signal is weakening (should NOT DCA)
+    
+    Detects:
+    1. Confidence dropping consistently
+    2. Quality dropping
+    3. Signal direction becoming unstable
+    4. Moving toward WAIT
+    
+    Returns: True if signal is weakening (DO NOT DCA), False if signal is strong
+    """
+    global _signal_strength_tracker
+    
+    tracker = _signal_strength_tracker.get(symbol)
+    if not tracker:
+        return False  # No history = assume OK
+    
+    conf_history = tracker.get("confidence_history", [])
+    quality_history = tracker.get("quality_history", [])
+    signal_history = tracker.get("signal_history", [])
+    
+    # Need at least 3 data points
+    if len(conf_history) < 3:
+        return False
+    
+    current_signal = signal_data.get("signal", "WAIT")
+    current_confidence = signal_data.get("confidence", 0)
+    current_quality = signal_data.get("quality", "SKIP")
+    
+    quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+    
+    # 1. CHECK: Confidence dropping consistently
+    recent_conf = conf_history[-3:]
+    if len(recent_conf) >= 3:
+        # Check if confidence has been dropping
+        if recent_conf[-1] < recent_conf[-2] < recent_conf[-3]:
+            drop = recent_conf[-3] - recent_conf[-1]
+            if drop >= 10:  # Dropped 10%+ in last 3 checks
+                logger.warning(f"📊 WEAKENING: {symbol} confidence dropping! {recent_conf[-3]:.1f}% → {recent_conf[-1]:.1f}% (-{drop:.1f}%)")
+                return True
+    
+    # 2. CHECK: Quality dropped
+    recent_quality = quality_history[-3:]
+    if len(recent_quality) >= 3:
+        peak_quality = max(quality_order.get(q, 0) for q in recent_quality)
+        current_quality_idx = quality_order.get(current_quality, 0)
+        if peak_quality - current_quality_idx >= 2:  # Dropped 2+ levels (e.g., PREMIUM → MEDIUM)
+            peak_name = [k for k, v in quality_order.items() if v == peak_quality][0]
+            logger.warning(f"📊 WEAKENING: {symbol} quality dropped! {peak_name} → {current_quality}")
+            return True
+    
+    # 3. CHECK: Signal direction unstable (multiple changes)
+    if tracker.get("direction_changes", 0) >= 2:
+        logger.warning(f"📊 WEAKENING: {symbol} direction unstable! {tracker['direction_changes']} changes")
+        return True
+    
+    # 4. CHECK: Mixed signals (BUY and SELL in recent history)
+    recent_signals = signal_history[-5:]
+    has_buy = any("BUY" in s for s in recent_signals)
+    has_sell = any("SELL" in s for s in recent_signals)
+    has_wait = any(s in ["WAIT", "SKIP"] for s in recent_signals)
+    
+    if has_buy and has_sell:
+        logger.warning(f"📊 WEAKENING: {symbol} mixed signals! BUY and SELL both in recent history")
+        return True
+    
+    if has_wait and (has_buy or has_sell):
+        # Had a direction but now seeing WAIT = weakening
+        wait_count = sum(1 for s in recent_signals if s in ["WAIT", "SKIP"])
+        if wait_count >= 2:
+            logger.warning(f"📊 WEAKENING: {symbol} fading to WAIT! ({wait_count}/5 signals are WAIT)")
+            return True
+    
+    # 5. CHECK: Low confidence in general
+    avg_conf = sum(conf_history[-5:]) / min(5, len(conf_history))
+    if avg_conf < 70:
+        logger.info(f"📊 WEAKENING: {symbol} avg confidence {avg_conf:.1f}% < 70%")
+        return True
+    
+    return False
+
+
+def _get_signal_strength_score(symbol: str, signal_data: Dict) -> Dict:
+    """
+    📊 Get signal strength score
+    
+    Returns a score 0-100 indicating how strong/stable the signal is
+    """
+    global _signal_strength_tracker
+    
+    tracker = _signal_strength_tracker.get(symbol, {})
+    conf_history = tracker.get("confidence_history", [])
+    quality_history = tracker.get("quality_history", [])
+    
+    current_confidence = signal_data.get("confidence", 0)
+    current_quality = signal_data.get("quality", "SKIP")
+    current_signal = signal_data.get("signal", "WAIT")
+    
+    score = 50  # Start at neutral
+    reasons = []
+    
+    # 1. Base confidence score
+    if current_confidence >= 85:
+        score += 20
+        reasons.append("High confidence (85%+)")
+    elif current_confidence >= 75:
+        score += 10
+        reasons.append("Good confidence (75%+)")
+    elif current_confidence < 65:
+        score -= 20
+        reasons.append("Low confidence (<65%)")
+    
+    # 2. Quality score
+    quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+    q_idx = quality_order.get(current_quality, 0)
+    if q_idx >= 4:
+        score += 15
+        reasons.append("PREMIUM quality")
+    elif q_idx >= 3:
+        score += 10
+        reasons.append("HIGH quality")
+    elif q_idx <= 1:
+        score -= 15
+        reasons.append("LOW/SKIP quality")
+    
+    # 3. Confidence trend
+    if len(conf_history) >= 3:
+        recent = conf_history[-3:]
+        if recent[-1] > recent[-2] > recent[-3]:
+            score += 10
+            reasons.append("Confidence rising")
+        elif recent[-1] < recent[-2] < recent[-3]:
+            score -= 15
+            reasons.append("Confidence dropping!")
+    
+    # 4. Direction stability
+    direction_changes = tracker.get("direction_changes", 0)
+    if direction_changes == 0:
+        score += 10
+        reasons.append("Direction stable")
+    elif direction_changes >= 2:
+        score -= 20
+        reasons.append("Direction unstable!")
+    
+    # 5. Signal type
+    if "STRONG" in current_signal:
+        score += 10
+        reasons.append("STRONG signal")
+    elif current_signal in ["WAIT", "SKIP"]:
+        score -= 20
+        reasons.append("No direction")
+    
+    # Clamp score
+    score = max(0, min(100, score))
+    
+    # Determine recommendation
+    if score >= 80:
+        recommendation = "STRONG - Safe to trade/DCA"
+    elif score >= 60:
+        recommendation = "OK - Proceed with caution"
+    elif score >= 40:
+        recommendation = "WEAK - Avoid DCA, consider closing"
+    else:
+        recommendation = "DANGER - Do not trade, consider exit"
+    
+    return {
+        "score": score,
+        "recommendation": recommendation,
+        "reasons": reasons,
+        "confidence": current_confidence,
+        "quality": current_quality,
+        "signal": current_signal,
+        "direction_changes": direction_changes,
+    }
+
+
+
+# =====================
 # 📈 SMART DCA FUNCTIONS - เข้าซ้ำเมื่อราคาย่อ
 # =====================
 
@@ -1714,22 +1957,15 @@ async def _check_dca_opportunity(symbol: str, signal_data: Dict, current_price: 
     """
     📈 SMART DCA - Check if we should add to position (Dollar Cost Averaging)
     
-    Logic:
-    1. มี position อยู่แล้ว (position แรก)
-    2. ราคาย่อไปจากจุดเข้า >= min_retracement_percent
-    3. ราคาเริ่มกลับตัว (reversal detected)
-    4. สัญญาณยังคงเป็นทิศทางเดิม
-    5. ยังไม่เกิน max_dca_entries
-    
-    Example (SELL):
-    - Position แรก: SELL @ 5302
-    - ราคาขึ้นไป: 5320 (adverse move, track peak)
-    - ราคาเริ่มลง: 5310 (reversal detected!)
-    - เข้าซ้ำ: SELL @ 5310 (ราคาดีกว่าเดิม!)
+    🚨 SAFETY CHECKS ADDED:
+    - ตรวจสอบว่าสัญญาณไม่ได้อ่อนตัว
+    - ตรวจสอบ confidence ยังสูง
+    - ตรวจสอบว่าไม่มี reversal signals
     
     Returns: True if DCA executed, False otherwise
     """
-    global _bot, _dca_config, _dca_tracking, _bot_status
+    global _bot, _dca_config, _dca_tracking, _bot_status, _signal_strength_tracker
+    
     
     if not _dca_config.get("enabled", False):
         return False
@@ -1738,8 +1974,30 @@ async def _check_dca_opportunity(symbol: str, signal_data: Dict, current_price: 
         return False
     
     signal = signal_data.get("signal", "WAIT")
+    confidence = signal_data.get("confidence", 0)
+    quality = signal_data.get("quality", "SKIP")
+    
     if signal not in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
         return False
+    
+    # 🆕 SIGNAL STRENGTH CHECK - ต้องเป็น signal แข็งแรง
+    if _dca_config.get("require_strong_signal", True):
+        min_conf = _dca_config.get("min_confidence_for_dca", 80)
+        if confidence < min_conf:
+            logger.info(f"📈 DCA BLOCKED: {symbol} confidence {confidence:.1f}% < {min_conf}%")
+            return False
+        
+        quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+        if quality_order.get(quality, 0) < quality_order.get("HIGH", 3):
+            logger.info(f"📈 DCA BLOCKED: {symbol} quality {quality} < HIGH")
+            return False
+    
+    # 🆕 SIGNAL TREND CHECK - ตรวจสอบว่าสัญญาณไม่ได้อ่อนตัว
+    if _dca_config.get("check_signal_trend", True):
+        is_weakening = _check_signal_weakening_for_dca(symbol, signal_data)
+        if is_weakening:
+            logger.warning(f"📈 DCA BLOCKED: {symbol} signal is WEAKENING - DO NOT ADD!")
+            return False
     
     is_buy_signal = "BUY" in signal
     
@@ -3062,6 +3320,7 @@ async def toggle_reverse_signal_close(enabled: bool = True):
     """
     global _enable_reverse_signal_close
     
+    
     _enable_reverse_signal_close = enabled
     
     status = "enabled" if enabled else "disabled"
@@ -3072,6 +3331,106 @@ async def toggle_reverse_signal_close(enabled: bool = True):
         "reverse_signal_close": enabled,
         "message": f"Reverse signal close {status}"
     }
+
+
+# =====================
+# 📊 SIGNAL STRENGTH ENDPOINTS
+# =====================
+
+@router.get("/signal-strength/{symbol}")
+async def get_signal_strength(symbol: str):
+    """
+    📊 Get Signal Strength for a symbol
+    
+    Shows:
+    - Strength score (0-100)
+    - Recommendation (STRONG/OK/WEAK/DANGER)
+    - Trend analysis (rising/falling/stable)
+    - Direction changes
+    
+    Use this to determine if it's safe to trade/DCA
+    """
+    global _bot_status, _signal_strength_tracker
+    
+    signal = _bot_status.get("last_signal", {}).get(symbol)
+    
+    if not signal:
+        return {
+            "status": "no_signal",
+            "symbol": symbol,
+            "message": "No signal data available. Start bot first."
+        }
+    
+    # Get strength score
+    strength = _get_signal_strength_score(symbol, signal)
+    
+    # Get tracker data
+    tracker = _signal_strength_tracker.get(symbol, {})
+    
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "strength": strength,
+        "history": {
+            "confidence": tracker.get("confidence_history", [])[-10:],
+            "quality": tracker.get("quality_history", [])[-10:],
+            "signals": tracker.get("signal_history", [])[-10:],
+            "direction_changes": tracker.get("direction_changes", 0),
+        },
+        "is_weakening": _check_signal_weakening_for_dca(symbol, signal),
+        "safe_to_dca": strength["score"] >= 70 and not _check_signal_weakening_for_dca(symbol, signal),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/signal-strength")
+async def get_all_signal_strengths():
+    """
+    📊 Get Signal Strength for all tracked symbols
+    """
+    global _bot_status, _signal_strength_tracker
+    
+    results = {}
+    
+    for symbol in _bot_status.get("symbols", []):
+        signal = _bot_status.get("last_signal", {}).get(symbol)
+        if signal:
+            strength = _get_signal_strength_score(symbol, signal)
+            is_weakening = _check_signal_weakening_for_dca(symbol, signal)
+            results[symbol] = {
+                "score": strength["score"],
+                "recommendation": strength["recommendation"],
+                "signal": signal.get("signal", "WAIT"),
+                "confidence": signal.get("confidence", 0),
+                "quality": signal.get("quality", "SKIP"),
+                "is_weakening": is_weakening,
+                "safe_to_dca": strength["score"] >= 70 and not is_weakening,
+            }
+    
+    return {
+        "status": "ok",
+        "symbols": results,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/signal-strength/reset/{symbol}")
+async def reset_signal_strength_tracking(symbol: str = None):
+    """
+    📊 Reset signal strength tracking
+    """
+    global _signal_strength_tracker
+    
+    if symbol:
+        if symbol in _signal_strength_tracker:
+            del _signal_strength_tracker[symbol]
+            return {"status": "reset", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        count = len(_signal_strength_tracker)
+        _signal_strength_tracker.clear()
+        return {"status": "reset_all", "cleared_count": count}
 
 
 # =====================
