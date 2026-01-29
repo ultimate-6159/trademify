@@ -230,17 +230,26 @@ _contrarian_mode = {
 }
 
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
-# สัญญาณมา → รอราคา pullback → รอนิ่ง → ค่อยเข้า
+# 🔥 ปิดไว้ก่อน! สัญญาณหมดอายุบ่อยเกินไป
 _pullback_config = {
-    "enabled": True,                         # ✅ เปิดใช้งาน
-    "min_pullback_percent": 0.10,            # 🔥 ลดเหลือ 0.10% (Gold = ~$5)
-    "max_pullback_percent": 0.50,            # 🔥 ลดเหลือ 0.50% (Gold = ~$25) ถ้าเกินนี้ = สัญญาณผิด
-    "wait_for_stabilization": True,          # รอให้ราคานิ่งก่อน
-    "stabilization_candles": 1,              # 🔥 ลดเหลือ 1 รอบ (เร็วขึ้น)
-    "max_wait_minutes": 15,                  # 🔥 ลดเหลือ 15 นาที
-    "require_signal_still_valid": True,      # สัญญาณต้องยังคงอยู่
+    "enabled": False,                        # 🔥 ปิด! ทำให้พลาดสัญญาณเยอะ
+    "min_pullback_percent": 0.05,            # 🔥 ลดเหลือ 0.05% (Gold = ~$3)
+    "max_pullback_percent": 0.30,            # 🔥 ลดเหลือ 0.30% (Gold = ~$15)
+    "wait_for_stabilization": False,         # 🔥 ปิด! ไม่รอนิ่ง
+    "stabilization_candles": 1,
+    "max_wait_minutes": 5,                   # 🔥 ลดเหลือ 5 นาที
+    "require_signal_still_valid": True,
 }
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
+
+# 📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
+_trailing_stop_config = {
+    "enabled": True,                         # ✅ เปิด! ยก SL อัตโนมัติ
+    "trigger_profit_usd": 100,               # เริ่ม trail เมื่อกำไร >= $100
+    "trail_distance_usd": 50,                # ยก SL ห่างจากราคา $50
+    "step_size_usd": 10,                     # ยก SL ทีละ $10 ขึ้นไป
+    "lock_profit_at_usd": 200,               # ล็อกกำไรเมื่อ >= $200 (ยก SL เข้ามากำไร)
+}
 
 # 🎯 SMART TRADING CONFIG - เทรดบ่อย + แม่นยำ
 _aggressive_config = {
@@ -1121,6 +1130,9 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # 📈 UPDATE DCA TRACKING - ล้าง tracking ของ symbols ที่ไม่มี position แล้ว
             await _update_dca_tracking_from_positions()
             
+            # 📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
+            await _auto_trailing_stop()
+            
             # 💰 SMART PROFIT PROTECTION - ตรวจสอบทุก cycle
             closed = await _check_profit_protection()
             if closed:
@@ -1386,11 +1398,157 @@ async def _check_profit_protection() -> List[Dict]:
                     except Exception as e:
                         logger.error(f"❌ Error closing position #{pos_id}: {e}")
         
+        
         return closed_positions
         
     except Exception as e:
         logger.error(f"Error in profit protection check: {e}")
         return []
+
+
+# Track last SL position for each position (to avoid moving SL backwards)
+_last_trailing_sl = {}  # {position_id: last_sl_price}
+
+
+async def _auto_trailing_stop():
+    """
+    📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
+    
+    Logic:
+    1. เมื่อกำไร >= trigger_profit_usd → เริ่ม trail
+    2. ยก SL ให้ห่างจากราคาปัจจุบัน trail_distance_usd
+    3. ยกทีละ step_size_usd (ไม่ยกย้อนกลับ!)
+    4. เมื่อกำไร >= lock_profit_at_usd → ยก SL เข้ามากำไร (lock profit)
+    
+    🔥 GOLD Example:
+    - trigger: $100, distance: $50, step: $10, lock: $200
+    - Entry BUY @ 5500, SL @ 5400
+    - Price → 5600 (กำไร $100) → SL ยกเป็น 5550 (ห่าง $50)
+    - Price → 5650 (กำไร $150) → SL ยกเป็น 5600 (ห่าง $50)
+    - Price → 5700 (กำไร $200) → SL ยกเป็น 5650 (lock กำไร $150!)
+    """
+    global _bot, _trailing_stop_config, _last_trailing_sl
+    
+    if not _trailing_stop_config.get("enabled", False):
+        return
+    
+    if not _bot or not _bot.trading_engine:
+        return
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return
+        
+        trigger_profit = _trailing_stop_config.get("trigger_profit_usd", 100)
+        trail_distance = _trailing_stop_config.get("trail_distance_usd", 50)
+        step_size = _trailing_stop_config.get("step_size_usd", 10)
+        lock_profit_at = _trailing_stop_config.get("lock_profit_at_usd", 200)
+        
+        for pos in positions:
+            try:
+                # Extract position info
+                if isinstance(pos, dict):
+                    pos_id = pos.get("ticket") or pos.get("id")
+                    pos_symbol = pos.get("symbol", "")
+                    pos_side = pos.get("side", "").upper()
+                    pos_pnl = float(pos.get("profit", 0) or 0)
+                    pos_sl = float(pos.get("sl", 0) or 0)
+                    pos_entry = float(pos.get("open_price", 0) or pos.get("price_open", 0) or 0)
+                    current_price = float(pos.get("price_current", 0) or 0)
+                else:
+                    pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                    pos_symbol = getattr(pos, "symbol", "")
+                    pos_side = getattr(pos, "side", "")
+                    if hasattr(pos_side, "value"):
+                        pos_side = pos_side.value.upper()
+                    pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                    pos_sl = float(getattr(pos, "sl", 0) or 0)
+                    pos_entry = float(getattr(pos, "open_price", 0) or getattr(pos, "price_open", 0) or 0)
+                    current_price = float(getattr(pos, "price_current", 0) or 0)
+                
+                if not pos_id or not pos_symbol or pos_pnl <= 0:
+                    continue
+                
+                # Skip if profit not enough to trigger
+                if pos_pnl < trigger_profit:
+                    continue
+                
+                # Get current price from MT5 if not in position
+                if current_price <= 0:
+                    current_price = await _bot.trading_engine.broker.get_current_price(pos_symbol)
+                    if current_price <= 0:
+                        continue
+                
+                # Determine point value for this symbol (Gold = ~$1 per point)
+                point_value = 1.0  # Default
+                if 'XAU' in pos_symbol.upper() or 'GOLD' in pos_symbol.upper():
+                    point_value = 1.0  # Gold: $1 per point (0.01 lot = $0.01)
+                
+                # Calculate new SL based on trailing distance
+                distance_points = trail_distance / point_value
+                
+                if pos_side == "BUY":
+                    # BUY: SL ต่ำกว่าราคาปัจจุบัน
+                    new_sl = current_price - distance_points
+                    
+                    # ถ้ากำไร >= lock_profit_at → ยก SL เข้ามากำไร
+                    if pos_pnl >= lock_profit_at:
+                        # Lock กำไรขั้นต่ำ 50% ของ lock_profit_at
+                        min_lock_profit = lock_profit_at * 0.5 / point_value
+                        new_sl = max(new_sl, pos_entry + min_lock_profit)
+                    
+                    # ไม่ยก SL ย้อนกลับ!
+                    last_sl = _last_trailing_sl.get(pos_id, 0)
+                    if new_sl <= last_sl + step_size:
+                        continue  # ยังไม่ถึง step size
+                    
+                    # ต้องยกขึ้นเท่านั้น (ไม่ลง)
+                    if pos_sl > 0 and new_sl <= pos_sl:
+                        continue
+                    
+                else:  # SELL
+                    # SELL: SL สูงกว่าราคาปัจจุบัน
+                    new_sl = current_price + distance_points
+                    
+                    # ถ้ากำไร >= lock_profit_at → ยก SL เข้ามากำไร
+                    if pos_pnl >= lock_profit_at:
+                        min_lock_profit = lock_profit_at * 0.5 / point_value
+                        new_sl = min(new_sl, pos_entry - min_lock_profit)
+                    
+                    # ไม่ยก SL ย้อนกลับ!
+                    last_sl = _last_trailing_sl.get(pos_id, float('inf'))
+                    if new_sl >= last_sl - step_size:
+                        continue  # ยังไม่ถึง step size
+                    
+                    # ต้องยกลงเท่านั้น (ไม่ขึ้น)
+                    if pos_sl > 0 and new_sl >= pos_sl:
+                        continue
+                
+                # Round SL to proper precision
+                new_sl = round(new_sl, 2)
+                
+                # Modify position
+                logger.info(f"📈 TRAILING STOP: {pos_symbol} #{pos_id} | Profit: ${pos_pnl:.2f}")
+                logger.info(f"   Current SL: {pos_sl:.2f} → New SL: {new_sl:.2f} | Price: {current_price:.2f}")
+                
+                result = await _bot.trading_engine.broker.modify_position(
+                    str(pos_id),
+                    stop_loss=new_sl
+                )
+                
+                if result and result.success:
+                    _last_trailing_sl[pos_id] = new_sl
+                    logger.info(f"✅ SL moved: {pos_symbol} #{pos_id} → SL={new_sl:.2f}")
+                else:
+                    error = result.error if result else "Unknown"
+                    logger.warning(f"⚠️ Failed to move SL: {error}")
+                    
+            except Exception as e:
+                logger.warning(f"Error trailing position {pos_id}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error in auto trailing stop: {e}")
 
 
 async def _close_profitable_on_wait_signal(symbol: str) -> bool:
@@ -4514,6 +4672,94 @@ async def reset_daily_stats_only():
         "message": "Daily stats reset!",
         "old_stats": old_stats,
         "new_stats": _bot_status["daily_stats"]
+    }
+
+
+# =====================
+# 📊 TRADE HISTORY - ประวัติเทรดที่แม่นยำ
+# =====================
+# 📈 AUTO TRAILING STOP - ยก SL อัตโนมัติ
+# =====================
+
+@router.get("/trailing-stop")
+async def get_trailing_stop_config():
+    """
+    📈 Get Auto Trailing Stop configuration
+    """
+    global _trailing_stop_config, _last_trailing_sl
+    
+    return {
+        "config": _trailing_stop_config,
+        "active_trails": _last_trailing_sl,
+        "description": {
+            "trigger_profit_usd": "เริ่ม trail เมื่อกำไร >= $X",
+            "trail_distance_usd": "SL ห่างจากราคาปัจจุบัน $X",
+            "step_size_usd": "ยก SL ทีละ $X",
+            "lock_profit_at_usd": "เมื่อกำไร >= $X ยก SL เข้ามาล็อกกำไร",
+        }
+    }
+
+
+@router.post("/trailing-stop/toggle")
+async def toggle_trailing_stop(enabled: bool = True):
+    """
+    📈 Enable/Disable Auto Trailing Stop
+    """
+    global _trailing_stop_config
+    
+    _trailing_stop_config["enabled"] = enabled
+    
+    status = "ENABLED ✅" if enabled else "DISABLED ❌"
+    logger.info(f"📈 Auto Trailing Stop: {status}")
+    
+    return {
+        "status": "success",
+        "trailing_stop_enabled": enabled,
+        "message": f"Auto Trailing Stop {status}"
+    }
+
+
+@router.post("/trailing-stop/configure")
+async def configure_trailing_stop(
+    trigger_profit_usd: float = None,
+    trail_distance_usd: float = None,
+    step_size_usd: float = None,
+    lock_profit_at_usd: float = None
+):
+    """
+    📈 Configure Auto Trailing Stop
+    
+    - trigger_profit_usd: เริ่ม trail เมื่อกำไร >= $X (default: 100)
+    - trail_distance_usd: SL ห่างจากราคาปัจจุบัน $X (default: 50)
+    - step_size_usd: ยก SL ทีละ $X (default: 10)
+    - lock_profit_at_usd: ล็อกกำไรเมื่อ >= $X (default: 200)
+    """
+    global _trailing_stop_config
+    
+    changes = []
+    
+    if trigger_profit_usd is not None:
+        _trailing_stop_config["trigger_profit_usd"] = max(20, trigger_profit_usd)
+        changes.append(f"trigger: ${_trailing_stop_config['trigger_profit_usd']}")
+    
+    if trail_distance_usd is not None:
+        _trailing_stop_config["trail_distance_usd"] = max(10, trail_distance_usd)
+        changes.append(f"distance: ${_trailing_stop_config['trail_distance_usd']}")
+    
+    if step_size_usd is not None:
+        _trailing_stop_config["step_size_usd"] = max(5, step_size_usd)
+        changes.append(f"step: ${_trailing_stop_config['step_size_usd']}")
+    
+    if lock_profit_at_usd is not None:
+        _trailing_stop_config["lock_profit_at_usd"] = max(50, lock_profit_at_usd)
+        changes.append(f"lock_at: ${_trailing_stop_config['lock_profit_at_usd']}")
+    
+    logger.info(f"📈 Trailing stop configured: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _trailing_stop_config
     }
 
 
