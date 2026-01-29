@@ -265,9 +265,9 @@ _contrarian_mode = {
 }
 
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
-# ✅ เปิด! เข้าเทรดเมื่อราคาย่อตัวแล้วเด้งกลับ = Entry ที่ดีกว่า!
+# ❌ ปิดชั่วคราว! เพราะทำให้พลาดโอกาสเทรด - ราคาพุ่งตรงๆ ไม่ pullback
 _pullback_config = {
-    "enabled": True,                         # ✅ เปิด! รอ pullback ก่อนเข้า
+    "enabled": False,                        # ❌ ปิด! เข้าเทรดทันทีเมื่อมีสัญญาณ
     "min_pullback_percent": 0.03,            # 🔥 Gold: ราคาต้องย่อ >= 0.03% (~$2)
     "max_pullback_percent": 0.20,            # 🔥 Gold: ย่อไม่เกิน 0.20% (~$12)
     "wait_for_stabilization": True,          # ✅ รอให้ราคานิ่งก่อนเข้า
