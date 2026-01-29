@@ -439,12 +439,16 @@ class ConfidenceCalibrator:
         
         if conf_key in self.calibration_curve:
             actual_accuracy = self.calibration_curve[conf_key]
+            # Apply calibration adjustment
+            adjustment_factor = actual_accuracy / max(raw_confidence, 1)
+            calibrated = raw_confidence * adjustment_factor
         else:
-            # Interpolate or use default
-            actual_accuracy = raw_confidence * 0.85  # Conservative by default
+            # 🔧 FIX: No calibration data - use raw confidence directly
+            # Don't penalize confidence when we don't have historical data
+            actual_accuracy = raw_confidence
+            adjustment_factor = 1.0
+            calibrated = raw_confidence  # Use raw confidence as-is
         
-        adjustment_factor = actual_accuracy / max(raw_confidence, 1)
-        calibrated = raw_confidence * adjustment_factor
         calibrated = np.clip(calibrated, 0, 95)
         
         # Calculate historical accuracy from outcomes
