@@ -265,15 +265,15 @@ _contrarian_mode = {
 }
 
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
-# 🔥 ปิดไว้ก่อน! สัญญาณหมดอายุบ่อยเกินไป
+# ✅ เปิด! เข้าเทรดเมื่อราคาย่อตัวแล้วเด้งกลับ = Entry ที่ดีกว่า!
 _pullback_config = {
-    "enabled": False,                        # 🔥 ปิด! ทำให้พลาดสัญญาณเยอะ
-    "min_pullback_percent": 0.05,            # 🔥 ลดเหลือ 0.05% (Gold = ~$3)
-    "max_pullback_percent": 0.30,            # 🔥 ลดเหลือ 0.30% (Gold = ~$15)
-    "wait_for_stabilization": False,         # 🔥 ปิด! ไม่รอนิ่ง
-    "stabilization_candles": 1,
-    "max_wait_minutes": 5,                   # 🔥 ลดเหลือ 5 นาที
-    "require_signal_still_valid": True,
+    "enabled": True,                         # ✅ เปิด! รอ pullback ก่อนเข้า
+    "min_pullback_percent": 0.03,            # 🔥 Gold: ราคาต้องย่อ >= 0.03% (~$2)
+    "max_pullback_percent": 0.20,            # 🔥 Gold: ย่อไม่เกิน 0.20% (~$12)
+    "wait_for_stabilization": True,          # ✅ รอให้ราคานิ่งก่อนเข้า
+    "stabilization_candles": 1,              # 🔥 รอ 1 แท่งเด้งกลับ
+    "max_wait_minutes": 10,                  # 🔥 รอสูงสุด 10 นาที (ไม่รอนานเกิน)
+    "require_signal_still_valid": True,      # ✅ Signal ต้องยังเป็นทิศทางเดิม
 }
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
 
@@ -3756,6 +3756,158 @@ async def toggle_reverse_signal_close(enabled: bool = True):
         "reverse_signal_close": enabled,
         "message": f"Reverse signal close {status}"
     }
+
+
+# =====================
+# 🎯 PULLBACK ENTRY STRATEGY
+# =====================
+
+@router.get("/pullback")
+async def get_pullback_status():
+    """
+    🎯 Get Pullback Entry configuration and pending signals
+    
+    Pullback = รอให้ราคาย่อตัวก่อนเข้าเทรด
+    - BUY signal มา → รอราคาลงก่อน → เด้งกลับ → เข้า BUY
+    - SELL signal มา → รอราคาขึ้นก่อน → กลับลง → เข้า SELL
+    """
+    global _pullback_config, _pending_signals
+    
+    # Format pending signals for display
+    pending_display = {}
+    for symbol, data in _pending_signals.items():
+        pending_display[symbol] = {
+            "signal": data.get("signal"),
+            "price_at_signal": data.get("price_at_signal"),
+            "lowest_price": data.get("lowest_price"),
+            "highest_price": data.get("highest_price"),
+            "pullback_detected": data.get("pullback_detected", False),
+            "stable_count": data.get("stable_count", 0),
+            "timestamp": data.get("timestamp").isoformat() if data.get("timestamp") else None,
+            "age_seconds": int((datetime.now() - data.get("timestamp")).total_seconds()) if data.get("timestamp") else 0,
+        }
+    
+    return {
+        "config": _pullback_config,
+        "pending_signals": pending_display,
+        "description": {
+            "enabled": "เปิด/ปิด pullback entry",
+            "min_pullback_percent": "ราคาต้องย่อขั้นต่ำ X% ก่อนเข้า",
+            "max_pullback_percent": "ถ้าย่อเกิน X% = signal ผิด ยกเลิก",
+            "wait_for_stabilization": "รอให้ราคานิ่งก่อนเข้า",
+            "stabilization_candles": "จำนวนแท่งที่ต้องเด้งกลับ",
+            "max_wait_minutes": "รอสูงสุดกี่นาที",
+        },
+        "gold_example": {
+            "price": 3300,
+            "min_pullback": f"${3300 * 0.03 / 100:.2f} (0.03%)",
+            "max_pullback": f"${3300 * 0.20 / 100:.2f} (0.20%)",
+        }
+    }
+
+
+@router.post("/pullback/toggle")
+async def toggle_pullback_entry(enabled: bool = True):
+    """
+    🎯 Enable/Disable Pullback Entry Strategy
+    
+    - enabled=true: รอ pullback ก่อนเข้าเทรด (Entry ดีกว่า!)
+    - enabled=false: เข้าเทรดทันทีเมื่อมีสัญญาณ
+    """
+    global _pullback_config, _pending_signals
+    
+    _pullback_config["enabled"] = enabled
+    
+    # Clear pending signals when disabled
+    if not enabled:
+        cleared = len(_pending_signals)
+        _pending_signals.clear()
+        logger.info(f"🎯 Pullback disabled - cleared {cleared} pending signals")
+    
+    status = "ENABLED ✅" if enabled else "DISABLED ❌"
+    logger.info(f"🎯 Pullback Entry: {status}")
+    
+    return {
+        "status": "success",
+        "pullback_enabled": enabled,
+        "message": f"Pullback Entry {status}",
+        "note": "รอ pullback = Entry ที่ราคาดีกว่า!" if enabled else "เข้าเทรดทันทีเมื่อมีสัญญาณ"
+    }
+
+
+@router.post("/pullback/configure")
+async def configure_pullback(
+    min_pullback_percent: float = None,
+    max_pullback_percent: float = None,
+    wait_for_stabilization: bool = None,
+    stabilization_candles: int = None,
+    max_wait_minutes: int = None
+):
+    """
+    🎯 Configure Pullback Entry Strategy
+    
+    - min_pullback_percent: ราคาต้องย่อขั้นต่ำ X% (default: 0.03 = ~$1 Gold)
+    - max_pullback_percent: ย่อเกิน X% = ยกเลิก signal (default: 0.20 = ~$7 Gold)
+    - wait_for_stabilization: รอให้ราคานิ่งก่อนเข้า
+    - stabilization_candles: จำนวนแท่งที่ต้องเด้งกลับ (1-3)
+    - max_wait_minutes: รอสูงสุดกี่นาที (5-30)
+    """
+    global _pullback_config
+    
+    changes = []
+    
+    if min_pullback_percent is not None:
+        _pullback_config["min_pullback_percent"] = max(0.01, min(0.5, min_pullback_percent))
+        changes.append(f"min_pullback: {_pullback_config['min_pullback_percent']}%")
+    
+    if max_pullback_percent is not None:
+        _pullback_config["max_pullback_percent"] = max(0.1, min(2.0, max_pullback_percent))
+        changes.append(f"max_pullback: {_pullback_config['max_pullback_percent']}%")
+    
+    if wait_for_stabilization is not None:
+        _pullback_config["wait_for_stabilization"] = wait_for_stabilization
+        changes.append(f"wait_for_stabilization: {wait_for_stabilization}")
+    
+    if stabilization_candles is not None:
+        _pullback_config["stabilization_candles"] = max(1, min(5, stabilization_candles))
+        changes.append(f"stabilization_candles: {_pullback_config['stabilization_candles']}")
+    
+    if max_wait_minutes is not None:
+        _pullback_config["max_wait_minutes"] = max(3, min(60, max_wait_minutes))
+        changes.append(f"max_wait_minutes: {_pullback_config['max_wait_minutes']}")
+    
+    logger.info(f"🎯 Pullback config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _pullback_config
+    }
+
+
+@router.post("/pullback/clear")
+async def clear_pending_signals(symbol: str = None):
+    """
+    🎯 Clear pending pullback signals
+    
+    - symbol: Clear เฉพาะ symbol นี้
+    - ไม่ระบุ: Clear ทั้งหมด
+    """
+    global _pending_signals
+    
+    if symbol:
+        if symbol in _pending_signals:
+            del _pending_signals[symbol]
+            return {"status": "cleared", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        count = len(_pending_signals)
+        _pending_signals.clear()
+        return {"status": "cleared_all", "count": count}
+
+
+
 
 
 # =====================
