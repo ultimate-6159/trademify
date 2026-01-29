@@ -1187,17 +1187,23 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                     # Extract signal - try multiple confidence fields
                     raw_confidence = analysis.get("enhanced_confidence", 0) or analysis.get("base_confidence", 0) or analysis.get("confidence", 0)
                     
+                    # 🔥 Get current_price from analysis or market_data
+                    current_price = analysis.get("current_price", 0)
+                    if current_price == 0 and "market_data" in analysis:
+                        current_price = analysis["market_data"].get("close", 0)
+                    
                     signal_data = {
                         "symbol": symbol,
                         "signal": analysis.get("signal", "WAIT"),
                         "confidence": raw_confidence,
                         "quality": analysis.get("quality", "SKIP"),
-                        "current_price": analysis.get("current_price", 0),
+                        "current_price": current_price,
                         "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
                         "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
                         "scores": analysis.get("scores", {}),
                         "indicators": analysis.get("indicators", {}),
                         "market_regime": analysis.get("market_regime", "UNKNOWN"),
+                        "market_data": analysis.get("market_data", {}),
                         "timestamp": datetime.now().isoformat()
                     }
                     _bot_status["last_signal"][symbol] = signal_data

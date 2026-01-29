@@ -868,6 +868,9 @@ class AITradingBot:
                 if is_gold and gold_no_trade:
                     allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
                     logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, weekend={is_weekend_risk}, allow_all={allow_all}")
+                    logger.info(f"      📊 EMA Status: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}, trend={ema_trend:.2f}")
+                    logger.info(f"      📊 Trend Check: uptrend={has_uptrend}, downtrend={has_downtrend}, strong_up={strong_uptrend}, strong_down={strong_downtrend}")
+                    logger.info(f"      📊 Scores: Buy={buy_score}/12, Sell={sell_score}/12 (need 6)")
                     return None
                 
                 # 💱 FOREX: Check forex_no_trade filter
@@ -2039,7 +2042,16 @@ class AITradingBot:
             
             if tech_signal is None:
                 logger.info(f"   ⏸️ {symbol}: No technical signal generated")
-                default_response["factors"]["skip_reasons"] = ["Technical conditions not met"]
+                # 🔥 FIX: Return default response WITH current_price and market data
+                default_response["current_price"] = current_price
+                default_response["market_data"] = {
+                    "open": float(df['open'].iloc[-1]),
+                    "high": float(df['high'].iloc[-1]),
+                    "low": float(df['low'].iloc[-1]),
+                    "close": current_price,
+                    "volume": float(df['volume'].iloc[-1]),
+                }
+                default_response["factors"]["skip_reasons"] = ["Technical conditions not met - waiting for clear trend"]
                 return default_response
             
             # Build result from technical signal
