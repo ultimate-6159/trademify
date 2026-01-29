@@ -89,11 +89,11 @@ class MT5Config:
     server: str = ""
     path: str = ""  # Path to terminal64.exe
     timeout: int = 60000
-    # 🔥 Auto-reconnect settings - UNLIMITED MODE
-    heartbeat_interval: int = 15  # 🔄 ลดเหลือ 15 วินาที (เช็คบ่อยขึ้น)
-    max_reconnect_attempts: int = 0  # 🔥 0 = UNLIMITED! ลองเชื่อมต่อไม่หยุด
-    reconnect_delay: int = 3  # 🔄 ลดเหลือ 3 วินาที (เร็วขึ้น)
-    reconnect_backoff_max: int = 60  # 🆕 Max backoff delay (วินาที)
+    # 🔥 ULTRA STABILITY - Auto-reconnect settings
+    heartbeat_interval: int = 10  # 🔄 เช็คทุก 10 วินาที
+    max_reconnect_attempts: int = 0  # 🔥 0 = UNLIMITED!
+    reconnect_delay: int = 2  # 🔄 เริ่มที่ 2 วินาที
+    reconnect_backoff_max: int = 30  # 🆕 Max backoff 30 วินาที
 
 
 @dataclass

@@ -43,18 +43,18 @@ router = APIRouter(prefix="/api/v1/unified", tags=["unified"])
 
 
 # =====================
-# 🔥 STABILITY CONFIG - 10 Year Runtime (ENHANCED!)
+# 🔥 ULTRA STABILITY CONFIG - 10 Year Runtime
 # =====================
 _stability_config = {
     "auto_restart_enabled": True,           # 🔄 Auto-restart เมื่อ crash
     "max_restart_attempts": 0,              # 🔥 0 = UNLIMITED restarts (10 year mode!)
-    "restart_cooldown_seconds": 10,         # 🔄 ลดเหลือ 10 วินาที (เร็วขึ้น!)
-    "watchdog_interval_seconds": 30,        # 🔄 ลดเหลือ 30 วินาที (เช็คบ่อยขึ้น!)
+    "restart_cooldown_seconds": 5,          # 🔄 ลดเหลือ 5 วินาที (เร็วสุด!)
+    "watchdog_interval_seconds": 15,        # 🔄 ลดเหลือ 15 วินาที (เช็คบ่อยสุด!)
     "memory_cleanup_interval": 300,         # ทำความสะอาด memory ทุก 5 นาที
     "max_memory_mb": 2048,                  # ถ้า memory > 2GB ให้ cleanup
     "state_persistence_enabled": True,      # เก็บ state เพื่อ restore
     "state_file_path": "bot_state.json",    # ไฟล์เก็บ state
-    "heartbeat_timeout_seconds": 90,        # 🔄 ลดเหลือ 90 วินาที (ตรวจจับเร็วขึ้น!)
+    "heartbeat_timeout_seconds": 60,        # 🔄 ลดเหลือ 60 วินาที (ตรวจจับเร็วสุด!)
     "auto_start_on_api_init": True,         # 🔥 เปิด! เริ่ม bot อัตโนมัติเมื่อ API start
     "daily_restart_count_reset": True,      # 🔥 Reset restart count ทุกวัน
     "auto_start_symbols": "XAUUSDm",        # 🆕 Symbols ที่จะ auto-start
@@ -72,12 +72,25 @@ _runtime_stats = {
     "errors_count": 0,
     "recoveries_count": 0,
     "memory_cleanups": 0,
+    "network_errors": 0,                    # 🆕 Track network errors
+    "mt5_reconnects": 0,                    # 🆕 Track MT5 reconnects
     "started_at": datetime.now().isoformat(),
 }
 
 # 🔥 WATCHDOG STATE
 _watchdog_task = None
 _last_successful_cycle = None
+
+# 🆕 CIRCUIT BREAKER - ป้องกันระบบพัง
+_circuit_breaker = {
+    "state": "CLOSED",                      # CLOSED (ปกติ), OPEN (หยุด), HALF_OPEN (ทดสอบ)
+    "failure_count": 0,
+    "failure_threshold": 5,                 # 5 failures = เปิด circuit
+    "success_count": 0,
+    "success_threshold": 3,                 # 3 successes = ปิด circuit
+    "last_failure_time": None,
+    "cooldown_seconds": 30,                 # รอ 30 วินาทีก่อน half-open
+}
 
 
 # =====================
@@ -315,6 +328,73 @@ _profit_protection_config = {
     "trailing_stop_distance": 100,          # trailing stop ห่าง $100
 }
 _peak_profit_by_position = {}
+
+
+# =====================
+# 🔌 CIRCUIT BREAKER FUNCTIONS
+# =====================
+
+def _circuit_breaker_record_failure():
+    """บันทึก failure - เพิ่ม failure count"""
+    global _circuit_breaker
+    
+    _circuit_breaker["failure_count"] += 1
+    _circuit_breaker["last_failure_time"] = datetime.now()
+    _circuit_breaker["success_count"] = 0
+    
+    # Check if should open circuit
+    if _circuit_breaker["failure_count"] >= _circuit_breaker["failure_threshold"]:
+        if _circuit_breaker["state"] != "OPEN":
+            _circuit_breaker["state"] = "OPEN"
+            logger.warning(f"⚡ CIRCUIT BREAKER OPEN! Failures: {_circuit_breaker['failure_count']}")
+
+
+def _circuit_breaker_record_success():
+    """บันทึก success - รีเซ็ต failure count"""
+    global _circuit_breaker
+    
+    if _circuit_breaker["state"] == "HALF_OPEN":
+        _circuit_breaker["success_count"] += 1
+        
+        if _circuit_breaker["success_count"] >= _circuit_breaker["success_threshold"]:
+            _circuit_breaker["state"] = "CLOSED"
+            _circuit_breaker["failure_count"] = 0
+            logger.info("✅ CIRCUIT BREAKER CLOSED - System recovered!")
+    else:
+        _circuit_breaker["failure_count"] = 0
+        _circuit_breaker["success_count"] = 0
+
+
+def _circuit_breaker_can_proceed() -> bool:
+    """ตรวจสอบว่าสามารถทำงานต่อได้หรือไม่"""
+    global _circuit_breaker
+    
+    if _circuit_breaker["state"] == "CLOSED":
+        return True
+    
+    if _circuit_breaker["state"] == "OPEN":
+        # Check if cooldown passed
+        last_failure = _circuit_breaker["last_failure_time"]
+        if last_failure:
+            elapsed = (datetime.now() - last_failure).total_seconds()
+            if elapsed >= _circuit_breaker["cooldown_seconds"]:
+                _circuit_breaker["state"] = "HALF_OPEN"
+                logger.info(f"⚡ CIRCUIT BREAKER HALF-OPEN - Testing connection...")
+                return True
+        return False
+    
+    # HALF_OPEN - allow request to test
+    return True
+
+
+def _get_circuit_breaker_status() -> Dict:
+    """Get circuit breaker status"""
+    return {
+        "state": _circuit_breaker["state"],
+        "failure_count": _circuit_breaker["failure_count"],
+        "success_count": _circuit_breaker["success_count"],
+        "last_failure": _circuit_breaker["last_failure_time"].isoformat() if _circuit_breaker["last_failure_time"] else None,
+    }
 
 # 🚨 MAX LOSS PROTECTION - บังคับปิดเมื่อขาดทุนเกินกำหนด
 _max_loss_config = {
@@ -1164,12 +1244,14 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # ✅ SUCCESSFUL CYCLE - Update heartbeat
             _last_successful_cycle = datetime.now()
             consecutive_failures = 0  # Reset on success
+            _circuit_breaker_record_success()  # 🆕 Circuit breaker success
             
             # 📊 Log cycle stats periodically (every 10 cycles)
             if cycle_count % 10 == 0:
                 uptime = _runtime_stats.get("total_uptime_seconds", 0)
                 restarts = _runtime_stats.get("restart_count", 0)
-                logger.info(f"📊 Cycle #{cycle_count} | Uptime: {uptime//3600}h {(uptime%3600)//60}m | Restarts: {restarts}")
+                cb_state = _circuit_breaker.get("state", "CLOSED")
+                logger.info(f"📊 Cycle #{cycle_count} | Uptime: {uptime//3600}h {(uptime%3600)//60}m | Restarts: {restarts} | Circuit: {cb_state}")
             
             # Wait for next cycle
             await asyncio.sleep(interval)
@@ -1180,19 +1262,27 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
         except OSError as e:
             # 🔥 Network error - รอแล้วลองใหม่
             consecutive_failures += 1
-            logger.warning(f"⚠️ Network error in bot loop ({consecutive_failures}/{max_failures}): {e}")
+            _runtime_stats["network_errors"] = _runtime_stats.get("network_errors", 0) + 1
+            _circuit_breaker_record_failure()  # 🆕 Circuit breaker
+            
+            logger.warning(f"⚠️ Network error ({consecutive_failures}/{max_failures}): {e}")
             _bot_status["error"] = f"Network error: {e}"
             _runtime_stats["errors_count"] += 1
             
             if consecutive_failures >= max_failures:
                 logger.error(f"🔥 Too many failures - triggering watchdog restart")
-                break  # Let watchdog handle restart
+                break
             
-            await asyncio.sleep(30)  # รอ 30 วินาทีก่อนลองใหม่
+            # 🆕 Smart wait: ถ้า circuit open รอนานกว่า
+            wait_time = 10 if _circuit_breaker_can_proceed() else 30
+            await asyncio.sleep(wait_time)
+            
         except ConnectionError as e:
             # 🔥 Connection lost - รอแล้วลองใหม่
             consecutive_failures += 1
-            logger.warning(f"⚠️ Connection error in bot loop ({consecutive_failures}/{max_failures}): {e}")
+            _circuit_breaker_record_failure()  # 🆕 Circuit breaker
+            
+            logger.warning(f"⚠️ Connection error ({consecutive_failures}/{max_failures}): {e}")
             _bot_status["error"] = f"Connection error: {e}"
             _runtime_stats["errors_count"] += 1
             
@@ -1200,11 +1290,15 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                 logger.error(f"🔥 Too many failures - triggering watchdog restart")
                 break
             
-            await asyncio.sleep(30)
+            wait_time = 10 if _circuit_breaker_can_proceed() else 30
+            await asyncio.sleep(wait_time)
+            
         except Exception as e:
             # 🔥 Unexpected error
             consecutive_failures += 1
             error_type = type(e).__name__
+            _circuit_breaker_record_failure()  # 🆕 Circuit breaker
+            
             logger.error(f"❌ Bot loop error ({error_type}) [{consecutive_failures}/{max_failures}]: {e}")
             logger.error(traceback.format_exc())
             _bot_status["error"] = f"{error_type}: {e}"
@@ -1214,7 +1308,8 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
                 logger.error(f"🔥 Too many failures - triggering watchdog restart")
                 break
             
-            await asyncio.sleep(10)  # รอ 10 วินาทีก่อนลองใหม่
+            wait_time = 5 if _circuit_breaker_can_proceed() else 15
+            await asyncio.sleep(wait_time)
     
     # Save state before exit
     _save_state()
