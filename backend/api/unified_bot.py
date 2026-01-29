@@ -277,23 +277,32 @@ _pullback_config = {
 }
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
 
-# 📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
+# =====================
+# 🎯 UNIVERSAL DYNAMIC CONFIG - รองรับ $100 ถึง $200,000,000!
+# =====================
+# ใช้ % แทน $ เพื่อ scale อัตโนมัติตามขนาด port
+
+def _calc_dynamic(balance: float, percent: float, min_val: float = 1.0) -> float:
+    """คำนวณค่า dynamic จาก % ของ balance"""
+    return max(balance * (percent / 100.0), min_val)
+
+# 📈 AUTO TRAILING STOP - PERCENT BASED!
 _trailing_stop_config = {
-    "enabled": True,                         # ✅ เปิด! ยก SL อัตโนมัติ
-    "trigger_profit_usd": 100,               # เริ่ม trail เมื่อกำไร >= $100
-    "trail_distance_usd": 50,                # ยก SL ห่างจากราคา $50
-    "step_size_usd": 10,                     # ยก SL ทีละ $10 ขึ้นไป
-    "lock_profit_at_usd": 200,               # ล็อกกำไรเมื่อ >= $200 (ยก SL เข้ามากำไร)
+    "enabled": True,
+    "trigger_profit_percent": 5.0,           # 🎯 เริ่ม trail เมื่อกำไร >= 5% ของ balance
+    "trail_distance_percent": 2.5,           # 🎯 ยก SL ห่าง 2.5% ของ balance
+    "step_size_percent": 0.5,                # 🎯 ยก SL ทีละ 0.5%
+    "lock_profit_percent": 10.0,             # 🎯 ล็อกกำไรเมื่อ >= 10%
 }
 
-# 🎯 SMART TRADING CONFIG - เทรดบ่อย + แม่นยำ
+# 🎯 SMART TRADING CONFIG - PERCENT BASED!
 _aggressive_config = {
     "enabled": True,
-    "min_confidence_to_trade": 75,          # 🔥 เพิ่มเป็น 75% (Conservative)
-    "min_quality": "HIGH",                  # 🔥 ต้อง HIGH ขึ้นไป
-    "signal_window_minutes": 5,             # Signal ID window 5 นาที
-    "allow_same_direction_reentry": True,   # ✅ เปิด re-entry ทิศทางเดียวกัน
-    "min_profit_for_wait_close": 200,       # ✅ ปิดเมื่อ WAIT + กำไร >= $200 (ไม่รอนาน)
+    "min_confidence_to_trade": 75,
+    "min_quality": "HIGH",
+    "signal_window_minutes": 5,
+    "allow_same_direction_reentry": True,
+    "min_profit_for_wait_close_percent": 5.0,  # 🎯 ปิดเมื่อ WAIT + กำไร >= 5% ของ balance
     "quick_scalp_mode": False,
 }
 
@@ -308,26 +317,63 @@ _dca_config = {
     "signal_must_persist": True,             # ✅ สัญญาณต้องยังคงเป็นทิศทางเดิม (สำคัญมาก!)
     "min_time_between_dca": 300,             # 🔥 ห่างกัน 5 นาที
     "lot_multiplier": 0.5,                   # 🔥 Lot size 0.5x (ลด risk)
-    "max_total_loss_before_dca": 300,        # 🔥 ถ้าขาดทุน > $300 ไม่เข้าซ้ำ
-    "require_strong_signal": True,           # ✅ ต้องเป็น signal แข็งแรง
-    "min_confidence_for_dca": 75,            # ✅ confidence >= 75%
-    "check_signal_trend": True,              # ✅ ตรวจสอบว่า signal ไม่ได้อ่อนตัว
+    "max_loss_percent_before_dca": 5.0,      # 🎯 ถ้าขาดทุน > 5% ของ balance ไม่เข้าซ้ำ
+    "require_strong_signal": True,
+    "min_confidence_for_dca": 75,
+    "check_signal_trend": True,
+    "min_balance_for_dca": 500,              # 🔧 ต้องมี >= $500 ถึงจะ DCA ได้
 }
-_dca_tracking = {}  # {symbol: {"entries": 1, "first_entry_price": 5302, "last_dca_time": datetime, "peak_adverse": 5320}}
+_dca_tracking = {}
 
 # 📊 SIGNAL STRENGTH TRACKER - ตรวจสอบความแข็งแรงของสัญญาณ
 # ใช้ตรวจจับว่าสัญญาณกำลังอ่อนตัวหรือเปลี่ยนทิศทาง
 _signal_strength_tracker = {}  # {symbol: {"confidence_history": [80, 78, 75], "quality_history": ["HIGH", "HIGH", "MEDIUM"], "direction_changes": 0}}
 
-# 💰 SMART PROFIT PROTECTION - ล็อกกำไรอัตโนมัติ
+# 💰 SMART PROFIT PROTECTION - PERCENT BASED!
 _profit_protection_config = {
     "enabled": True,
-    "profit_drawdown_percent": 25,          # ✅ ปิดเมื่อกำไรลดลง 25% จาก peak
-    "min_profit_to_protect": 50,            # ✅ เริ่ม protect เมื่อกำไร >= $50
-    "trailing_stop_trigger": 300,           # เริ่ม trailing เมื่อกำไร >= $300
-    "trailing_stop_distance": 100,          # trailing stop ห่าง $100
+    "profit_drawdown_percent": 25,           # ปิดเมื่อกำไรลดลง 25% จาก peak
+    "min_profit_to_protect_percent": 2.0,    # 🎯 เริ่ม protect เมื่อกำไร >= 2% ของ balance
+    "trailing_trigger_percent": 5.0,         # 🎯 เริ่ม trailing เมื่อกำไร >= 5%
+    "trailing_distance_percent": 2.0,        # 🎯 trailing stop ห่าง 2%
 }
 _peak_profit_by_position = {}
+
+# 🛡️ SMALL ACCOUNT PROTECTION
+_small_account_config = {
+    "enabled": True,
+    "min_balance_warning": 100,              # ⚠️ แจ้งเตือนเมื่อ balance < $100
+    "min_balance_stop_trading": 50,          # 🛑 หยุดเทรดเมื่อ balance < $50
+    "disable_dca_below": 500,                # ปิด DCA ถ้า balance < $500
+}
+
+# 🧮 DYNAMIC VALUE HELPERS
+def _get_trailing_trigger(balance: float) -> float:
+    return _calc_dynamic(balance, _trailing_stop_config["trigger_profit_percent"], 5)
+
+def _get_trailing_distance(balance: float) -> float:
+    return _calc_dynamic(balance, _trailing_stop_config["trail_distance_percent"], 2)
+
+def _get_trailing_step(balance: float) -> float:
+    return _calc_dynamic(balance, _trailing_stop_config["step_size_percent"], 1)
+
+def _get_trailing_lock(balance: float) -> float:
+    return _calc_dynamic(balance, _trailing_stop_config["lock_profit_percent"], 10)
+
+def _get_wait_close_profit(balance: float) -> float:
+    return _calc_dynamic(balance, _aggressive_config["min_profit_for_wait_close_percent"], 5)
+
+def _get_max_dca_loss(balance: float) -> float:
+    return _calc_dynamic(balance, _dca_config["max_loss_percent_before_dca"], 10)
+
+def _get_min_profit_to_protect(balance: float) -> float:
+    return _calc_dynamic(balance, _profit_protection_config["min_profit_to_protect_percent"], 2)
+
+def _should_allow_dca(balance: float) -> bool:
+    return balance >= _dca_config.get("min_balance_for_dca", 500)
+
+def _should_stop_trading(balance: float) -> bool:
+    return balance < _small_account_config.get("min_balance_stop_trading", 50)
 
 
 # =====================
@@ -1432,12 +1478,19 @@ async def _check_profit_protection() -> List[Dict]:
     if not _profit_protection_config.get("enabled", False):
         return []
     
+    
     if not _bot or not _bot.trading_engine:
         return []
     
     closed_positions = []
-    min_profit = _profit_protection_config.get("min_profit_to_protect", 100)
     drawdown_pct = _profit_protection_config.get("profit_drawdown_percent", 30)
+    
+    # 🔥 DYNAMIC: Get balance for dynamic min_profit
+    try:
+        balance = await _bot.trading_engine.broker.get_balance() or 1000
+    except:
+        balance = 1000
+    min_profit = _get_min_profit_to_protect(balance)
     
     try:
         positions = await _bot.trading_engine.broker.get_positions()
@@ -1557,10 +1610,16 @@ async def _auto_trailing_stop():
         if not positions:
             return
         
-        trigger_profit = _trailing_stop_config.get("trigger_profit_usd", 100)
-        trail_distance = _trailing_stop_config.get("trail_distance_usd", 50)
-        step_size = _trailing_stop_config.get("step_size_usd", 10)
-        lock_profit_at = _trailing_stop_config.get("lock_profit_at_usd", 200)
+        # 🔥 DYNAMIC: Get balance for dynamic values
+        try:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+        except:
+            balance = 1000
+        
+        trigger_profit = _get_trailing_trigger(balance)
+        trail_distance = _get_trailing_distance(balance)
+        step_size = _get_trailing_step(balance)
+        lock_profit_at = _get_trailing_lock(balance)
         
         for pos in positions:
             try:
@@ -1712,8 +1771,12 @@ async def _close_profitable_on_wait_signal(symbol: str) -> bool:
             if pos_symbol.upper() != symbol.upper():
                 continue
             
-            # 🔥 AGGRESSIVE: Only close if profit >= min_profit_for_wait_close
-            min_profit_for_wait = _aggressive_config.get("min_profit_for_wait_close", 500)
+            # 🔥 DYNAMIC: Get balance and calculate min profit
+            try:
+                balance = await _bot.trading_engine.broker.get_balance() or 1000
+            except:
+                balance = 1000
+            min_profit_for_wait = _get_wait_close_profit(balance)
             
             # Only close if profitable AND profit >= minimum
             if pos_pnl <= 0:
@@ -1721,11 +1784,11 @@ async def _close_profitable_on_wait_signal(symbol: str) -> bool:
                 continue
             
             if pos_pnl < min_profit_for_wait:
-                logger.info(f"🚨 WAIT SIGNAL: {symbol} {pos_side} PnL=${pos_pnl:.2f} < ${min_profit_for_wait} → NOT closing (let it run)")
+                logger.info(f"🚨 WAIT SIGNAL: {symbol} {pos_side} PnL=${pos_pnl:.2f} < ${min_profit_for_wait:.0f} (5% of ${balance:.0f}) → NOT closing")
                 continue
             
             # Close profitable position only if >= minimum
-            logger.warning(f"🚨 WAIT SIGNAL CLOSE: {symbol} #{pos_id} | {pos_side} | Profit: ${pos_pnl:.2f} >= ${min_profit_for_wait}")
+            logger.warning(f"🚨 WAIT SIGNAL CLOSE: {symbol} #{pos_id} | {pos_side} | Profit: ${pos_pnl:.2f} >= ${min_profit_for_wait:.0f}")
             logger.warning(f"   Signal changed to WAIT + High profit → Closing to lock!")
             
             try:
@@ -2477,10 +2540,20 @@ async def _check_dca_opportunity(symbol: str, signal_data: Dict, current_price: 
             if elapsed < min_time:
                 return False
         
-        # 3. Check total loss before DCA
-        max_loss = _dca_config.get("max_total_loss_before_dca", 500)
+        # 3. Check total loss before DCA (DYNAMIC)
+        try:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+        except:
+            balance = 1000
+        
+        # 🔥 Check if balance allows DCA
+        if not _should_allow_dca(balance):
+            logger.info(f"📈 DCA BLOCKED: Balance ${balance:.0f} < ${_dca_config.get('min_balance_for_dca', 500)} minimum")
+            return False
+        
+        max_loss = _get_max_dca_loss(balance)
         if total_pnl < -max_loss:
-            logger.info(f"📈 DCA BLOCKED: {symbol} total loss ${total_pnl:.2f} > ${max_loss}")
+            logger.info(f"📈 DCA BLOCKED: {symbol} total loss ${total_pnl:.2f} > ${max_loss:.0f} (5% of ${balance:.0f})")
             return False
         
         # 4. Check signal consistency
@@ -4267,10 +4340,11 @@ async def configure_dca(
     signal_must_persist: bool = None,
     min_time_between_dca: int = None,
     lot_multiplier: float = None,
-    max_total_loss_before_dca: float = None
+    max_loss_percent_before_dca: float = None,
+    min_balance_for_dca: float = None
 ):
     """
-    📈 Configure Smart DCA settings
+    📈 Configure Smart DCA settings (PERCENT BASED)
     
     - max_dca_entries: จำนวนครั้งเข้าซ้ำสูงสุด (1-5)
     - min_retracement_percent: ราคาต้องย่อกี่ % (0.1-2.0)
@@ -4279,7 +4353,8 @@ async def configure_dca(
     - signal_must_persist: สัญญาณต้องยังคงเดิม
     - min_time_between_dca: ห่างกันกี่วินาที
     - lot_multiplier: Lot size เท่าไหร่ (1.0 = เท่าเดิม)
-    - max_total_loss_before_dca: ถ้าขาดทุนรวมเกินเท่าไหร่ไม่เข้าซ้ำ
+    - max_loss_percent_before_dca: % ขาดทุนสูงสุดก่อน DCA (default: 5%)
+    - min_balance_for_dca: Balance ขั้นต่ำสำหรับ DCA (default: $500)
     """
     global _dca_config
     
@@ -4313,9 +4388,13 @@ async def configure_dca(
         _dca_config["lot_multiplier"] = max(0.5, min(3.0, lot_multiplier))
         changes.append(f"lot_multiplier: {_dca_config['lot_multiplier']}x")
     
-    if max_total_loss_before_dca is not None:
-        _dca_config["max_total_loss_before_dca"] = max(100, max_total_loss_before_dca)
-        changes.append(f"max_loss: ${_dca_config['max_total_loss_before_dca']}")
+    if max_loss_percent_before_dca is not None:
+        _dca_config["max_loss_percent_before_dca"] = max(1, min(20, max_loss_percent_before_dca))
+        changes.append(f"max_loss_percent: {_dca_config['max_loss_percent_before_dca']}%")
+    
+    if min_balance_for_dca is not None:
+        _dca_config["min_balance_for_dca"] = max(100, min_balance_for_dca)
+        changes.append(f"min_balance: ${_dca_config['min_balance_for_dca']}")
     
     logger.info(f"📈 DCA config updated: {changes}")
     
@@ -4971,18 +5050,39 @@ async def reset_daily_stats_only():
 @router.get("/trailing-stop")
 async def get_trailing_stop_config():
     """
-    📈 Get Auto Trailing Stop configuration
+    📈 Get Auto Trailing Stop configuration (PERCENT BASED)
     """
-    global _trailing_stop_config, _last_trailing_sl
+    global _trailing_stop_config, _last_trailing_sl, _bot
+    
+    # Get current balance for example values
+    balance = 1000
+    try:
+        if _bot and _bot.trading_engine:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+    except:
+        pass
     
     return {
         "config": _trailing_stop_config,
         "active_trails": _last_trailing_sl,
+        "current_balance": balance,
+        "current_values": {
+            "trigger_profit": f"${_get_trailing_trigger(balance):.2f}",
+            "trail_distance": f"${_get_trailing_distance(balance):.2f}",
+            "step_size": f"${_get_trailing_step(balance):.2f}",
+            "lock_profit": f"${_get_trailing_lock(balance):.2f}",
+        },
         "description": {
-            "trigger_profit_usd": "เริ่ม trail เมื่อกำไร >= $X",
-            "trail_distance_usd": "SL ห่างจากราคาปัจจุบัน $X",
-            "step_size_usd": "ยก SL ทีละ $X",
-            "lock_profit_at_usd": "เมื่อกำไร >= $X ยก SL เข้ามาล็อกกำไร",
+            "trigger_profit_percent": f"เริ่ม trail เมื่อกำไร >= X% ของ balance",
+            "trail_distance_percent": f"SL ห่างจากราคา X% ของ balance",
+            "step_size_percent": f"ยก SL ทีละ X% ของ balance",
+            "lock_profit_percent": f"เมื่อกำไร >= X% ยก SL เข้ามาล็อกกำไร",
+        },
+        "examples": {
+            "$100 port": f"trigger: ${_get_trailing_trigger(100):.0f}, lock: ${_get_trailing_lock(100):.0f}",
+            "$1,000 port": f"trigger: ${_get_trailing_trigger(1000):.0f}, lock: ${_get_trailing_lock(1000):.0f}",
+            "$10,000 port": f"trigger: ${_get_trailing_trigger(10000):.0f}, lock: ${_get_trailing_lock(10000):.0f}",
+            "$100,000 port": f"trigger: ${_get_trailing_trigger(100000):.0f}, lock: ${_get_trailing_lock(100000):.0f}",
         }
     }
 
@@ -5008,45 +5108,56 @@ async def toggle_trailing_stop(enabled: bool = True):
 
 @router.post("/trailing-stop/configure")
 async def configure_trailing_stop(
-    trigger_profit_usd: float = None,
-    trail_distance_usd: float = None,
-    step_size_usd: float = None,
-    lock_profit_at_usd: float = None
+    trigger_profit_percent: float = None,
+    trail_distance_percent: float = None,
+    step_size_percent: float = None,
+    lock_profit_percent: float = None
 ):
     """
-    📈 Configure Auto Trailing Stop
+    📈 Configure Auto Trailing Stop (PERCENT BASED)
     
-    - trigger_profit_usd: เริ่ม trail เมื่อกำไร >= $X (default: 100)
-    - trail_distance_usd: SL ห่างจากราคาปัจจุบัน $X (default: 50)
-    - step_size_usd: ยก SL ทีละ $X (default: 10)
-    - lock_profit_at_usd: ล็อกกำไรเมื่อ >= $X (default: 200)
+    ค่าทั้งหมดเป็น % ของ balance - ทำงานกับทุกขนาด port!
+    
+    - trigger_profit_percent: เริ่ม trail เมื่อกำไร >= X% (default: 5%)
+    - trail_distance_percent: SL ห่าง X% ของ balance (default: 2.5%)
+    - step_size_percent: ยก SL ทีละ X% (default: 0.5%)
+    - lock_profit_percent: ล็อกกำไรเมื่อ >= X% (default: 10%)
+    
+    Examples ($1000 balance):
+    - trigger 5% = $50
+    - lock 10% = $100
     """
     global _trailing_stop_config
     
     changes = []
     
-    if trigger_profit_usd is not None:
-        _trailing_stop_config["trigger_profit_usd"] = max(20, trigger_profit_usd)
-        changes.append(f"trigger: ${_trailing_stop_config['trigger_profit_usd']}")
+    if trigger_profit_percent is not None:
+        _trailing_stop_config["trigger_profit_percent"] = max(1, min(20, trigger_profit_percent))
+        changes.append(f"trigger: {_trailing_stop_config['trigger_profit_percent']}%")
     
-    if trail_distance_usd is not None:
-        _trailing_stop_config["trail_distance_usd"] = max(10, trail_distance_usd)
-        changes.append(f"distance: ${_trailing_stop_config['trail_distance_usd']}")
+    if trail_distance_percent is not None:
+        _trailing_stop_config["trail_distance_percent"] = max(0.5, min(10, trail_distance_percent))
+        changes.append(f"distance: {_trailing_stop_config['trail_distance_percent']}%")
     
-    if step_size_usd is not None:
-        _trailing_stop_config["step_size_usd"] = max(5, step_size_usd)
-        changes.append(f"step: ${_trailing_stop_config['step_size_usd']}")
+    if step_size_percent is not None:
+        _trailing_stop_config["step_size_percent"] = max(0.1, min(5, step_size_percent))
+        changes.append(f"step: {_trailing_stop_config['step_size_percent']}%")
     
-    if lock_profit_at_usd is not None:
-        _trailing_stop_config["lock_profit_at_usd"] = max(50, lock_profit_at_usd)
-        changes.append(f"lock_at: ${_trailing_stop_config['lock_profit_at_usd']}")
+    if lock_profit_percent is not None:
+        _trailing_stop_config["lock_profit_percent"] = max(2, min(50, lock_profit_percent))
+        changes.append(f"lock: {_trailing_stop_config['lock_profit_percent']}%")
     
     logger.info(f"📈 Trailing stop configured: {changes}")
     
     return {
         "status": "success",
         "changes": changes,
-        "config": _trailing_stop_config
+        "config": _trailing_stop_config,
+        "example_values": {
+            "$200 port": f"trigger: ${_get_trailing_trigger(200):.0f}, lock: ${_get_trailing_lock(200):.0f}",
+            "$1,000 port": f"trigger: ${_get_trailing_trigger(1000):.0f}, lock: ${_get_trailing_lock(1000):.0f}",
+            "$10,000 port": f"trigger: ${_get_trailing_trigger(10000):.0f}, lock: ${_get_trailing_lock(10000):.0f}",
+        }
     }
 
 
