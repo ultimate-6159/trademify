@@ -89,10 +89,11 @@ class MT5Config:
     server: str = ""
     path: str = ""  # Path to terminal64.exe
     timeout: int = 60000
-    # Auto-reconnect settings
-    heartbeat_interval: int = 30  # วินาที
-    max_reconnect_attempts: int = 5
-    reconnect_delay: int = 5  # วินาที
+    # 🔥 Auto-reconnect settings - UNLIMITED MODE
+    heartbeat_interval: int = 15  # 🔄 ลดเหลือ 15 วินาที (เช็คบ่อยขึ้น)
+    max_reconnect_attempts: int = 0  # 🔥 0 = UNLIMITED! ลองเชื่อมต่อไม่หยุด
+    reconnect_delay: int = 3  # 🔄 ลดเหลือ 3 วินาที (เร็วขึ้น)
+    reconnect_backoff_max: int = 60  # 🆕 Max backoff delay (วินาที)
 
 
 @dataclass
@@ -266,15 +267,34 @@ class MT5Broker(BaseBroker):
                 return False
     
     def _attempt_reconnect(self):
-        """พยายาม reconnect กับ MT5"""
+        """
+        🔥 UNLIMITED RECONNECT - พยายามเชื่อมต่อไม่หยุด!
+        
+        Features:
+        - Exponential backoff: รอนานขึ้นเรื่อยๆ ถ้าล้มเหลว
+        - No max limit: ลองจนกว่าจะสำเร็จ
+        - Smart delay: ไม่ spam MT5 server
+        """
         with self._connection_lock:
-            if self._reconnect_count >= self.config.max_reconnect_attempts:
-                logger.error(f"❌ Max reconnect attempts ({self.config.max_reconnect_attempts}) reached!")
+            self._reconnect_count += 1
+            
+            # 🔥 UNLIMITED MODE: max_reconnect_attempts = 0 means no limit
+            max_attempts = self.config.max_reconnect_attempts
+            if max_attempts > 0 and self._reconnect_count > max_attempts:
+                logger.error(f"❌ Max reconnect attempts ({max_attempts}) reached!")
                 self._connected = False
                 return
             
-            self._reconnect_count += 1
-            logger.info(f"🔄 Reconnect attempt {self._reconnect_count}/{self.config.max_reconnect_attempts}...")
+            # 🔄 Exponential backoff: 3, 6, 12, 24, 48, 60 (max) seconds
+            backoff_delay = min(
+                self.config.reconnect_delay * (2 ** min(self._reconnect_count - 1, 4)),
+                self.config.reconnect_backoff_max if hasattr(self.config, 'reconnect_backoff_max') else 60
+            )
+            
+            if max_attempts == 0:
+                logger.info(f"🔄 Reconnect attempt #{self._reconnect_count} (UNLIMITED mode) - waiting {backoff_delay}s...")
+            else:
+                logger.info(f"🔄 Reconnect attempt {self._reconnect_count}/{max_attempts} - waiting {backoff_delay}s...")
             
             try:
                 # Try shutdown first
@@ -283,12 +303,13 @@ class MT5Broker(BaseBroker):
                 except:
                     pass
                 
-                # Wait before reconnect
-                time.sleep(self.config.reconnect_delay)
+                # Wait with backoff
+                time.sleep(backoff_delay)
                 
                 # Reinitialize
                 if not self._mt5.initialize():
-                    logger.error(f"Reconnect failed: MT5 initialize error")
+                    error = self._mt5.last_error() if hasattr(self._mt5, 'last_error') else 'Unknown'
+                    logger.error(f"Reconnect failed: MT5 initialize error - {error}")
                     return
                 
                 # Check if connected
@@ -298,13 +319,14 @@ class MT5Broker(BaseBroker):
                     if account:
                         self._connected = True
                         logger.info(f"✅ MT5 Reconnected successfully! Account: {account.login}")
-                        self._reconnect_count = 0
+                        logger.info(f"   Total reconnect attempts this session: {self._reconnect_count}")
+                        self._reconnect_count = 0  # Reset on success
                         return
                 
-                logger.warning(f"Reconnect attempt {self._reconnect_count} failed")
+                logger.warning(f"Reconnect attempt #{self._reconnect_count} failed - will retry...")
                 
             except Exception as e:
-                logger.error(f"Reconnect error: {e}")
+                logger.error(f"Reconnect error: {e} - will retry...")
     
     def ensure_connected(self) -> bool:
         """ตรวจสอบและ reconnect ถ้าจำเป็น - เรียกก่อนทำ operation"""

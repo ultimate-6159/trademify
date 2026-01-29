@@ -43,20 +43,22 @@ router = APIRouter(prefix="/api/v1/unified", tags=["unified"])
 
 
 # =====================
-# 🔥 STABILITY CONFIG - 10 Year Runtime
+# 🔥 STABILITY CONFIG - 10 Year Runtime (ENHANCED!)
 # =====================
 _stability_config = {
     "auto_restart_enabled": True,           # 🔄 Auto-restart เมื่อ crash
     "max_restart_attempts": 0,              # 🔥 0 = UNLIMITED restarts (10 year mode!)
-    "restart_cooldown_seconds": 30,         # รอ 30 วินาทีก่อน restart
-    "watchdog_interval_seconds": 60,        # ตรวจสอบ health ทุก 60 วินาที
+    "restart_cooldown_seconds": 10,         # 🔄 ลดเหลือ 10 วินาที (เร็วขึ้น!)
+    "watchdog_interval_seconds": 30,        # 🔄 ลดเหลือ 30 วินาที (เช็คบ่อยขึ้น!)
     "memory_cleanup_interval": 300,         # ทำความสะอาด memory ทุก 5 นาที
     "max_memory_mb": 2048,                  # ถ้า memory > 2GB ให้ cleanup
     "state_persistence_enabled": True,      # เก็บ state เพื่อ restore
     "state_file_path": "bot_state.json",    # ไฟล์เก็บ state
-    "heartbeat_timeout_seconds": 120,       # ถ้าไม่มี heartbeat 2 นาที = dead
-    "auto_start_on_api_init": False,        # เริ่ม bot อัตโนมัติเมื่อ API start
+    "heartbeat_timeout_seconds": 90,        # 🔄 ลดเหลือ 90 วินาที (ตรวจจับเร็วขึ้น!)
+    "auto_start_on_api_init": True,         # 🔥 เปิด! เริ่ม bot อัตโนมัติเมื่อ API start
     "daily_restart_count_reset": True,      # 🔥 Reset restart count ทุกวัน
+    "auto_start_symbols": "XAUUSDm",        # 🆕 Symbols ที่จะ auto-start
+    "auto_start_mode": "auto",              # 🆕 Mode: auto หรือ manual
 }
 
 # 🔥 RUNTIME STATISTICS
@@ -634,18 +636,102 @@ class ManualTradeRequest(BaseModel):
 # =====================
 
 # 🔄 Track positions for sync detection
-_known_positions = {}  # {ticket: {"symbol": "XAUUSDm", "side": "BUY", "open_price": 5100}}
+_known_positions = {}  # {ticket: {"symbol": "XAUUSDm", "side": "BUY", "open_price": 5100, "open_time": datetime}}
+
+# 📊 Trade history for accurate tracking
+_trade_history = []  # [{"ticket": 123, "symbol": "XAUUSDm", "side": "BUY", "pnl": 150.0, "close_time": datetime, "close_reason": "TP"}]
+
+
+async def _get_closed_deal_pnl(ticket: int) -> Optional[Dict]:
+    """
+    📊 ดึง PnL ของ deal ที่ปิดไปแล้วจาก MT5 history
+    
+    Returns: {"pnl": 150.0, "close_price": 5320, "close_reason": "TP/SL"}
+    """
+    global _bot
+    
+    if not _bot or not _bot.trading_engine or not _bot.trading_engine.broker:
+        return None
+    
+    try:
+        broker = _bot.trading_engine.broker
+        if not hasattr(broker, '_mt5') or not broker._mt5:
+            return None
+        
+        mt5 = broker._mt5
+        
+        # Get deals from history (last 24 hours)
+        from datetime import timedelta
+        from_date = datetime.now() - timedelta(days=1)
+        to_date = datetime.now() + timedelta(hours=1)
+        
+        deals = mt5.history_deals_get(from_date, to_date, position=ticket)
+        
+        if not deals:
+            # Try getting by ticket directly
+            deals = mt5.history_deals_get(from_date, to_date)
+            if deals:
+                deals = [d for d in deals if d.position_id == ticket]
+        
+        if not deals:
+            return None
+        
+        # Find the closing deal (entry=0 for open, entry=1 for close)
+        close_deals = [d for d in deals if d.entry == 1]  # 1 = Deal out (close)
+        
+        if close_deals:
+            close_deal = close_deals[-1]  # Latest close deal
+            
+            # Determine close reason
+            close_reason = "UNKNOWN"
+            comment = close_deal.comment.lower() if close_deal.comment else ""
+            
+            if "tp" in comment or "take profit" in comment:
+                close_reason = "TP"
+            elif "sl" in comment or "stop loss" in comment:
+                close_reason = "SL"
+            elif "close" in comment:
+                close_reason = "MANUAL"
+            else:
+                close_reason = "EXTERNAL"
+            
+            return {
+                "pnl": close_deal.profit,
+                "close_price": close_deal.price,
+                "close_reason": close_reason,
+                "commission": close_deal.commission,
+                "swap": close_deal.swap,
+                "close_time": datetime.fromtimestamp(close_deal.time),
+            }
+        
+        # If no close deal found, sum up all deals for this position
+        total_pnl = sum(d.profit for d in deals)
+        return {
+            "pnl": total_pnl,
+            "close_price": deals[-1].price if deals else 0,
+            "close_reason": "CALCULATED",
+            "close_time": datetime.now(),
+        }
+        
+    except Exception as e:
+        logger.warning(f"Error getting deal PnL for ticket {ticket}: {e}")
+        return None
 
 
 async def _sync_positions_with_mt5():
     """
     🔄 SYNC WITH MT5 - ตรวจสอบว่า position ถูกปิดไปแล้วหรือยัง
     
-    เมื่อ position ถูกปิดด้วย SL/TP (external) → Bot ต้องรู้และ update สถานะ
+    🔥 ENHANCED: ดึง PnL จริงจาก MT5 history เพื่อ track win/loss อย่างแม่นยำ!
     
-    🔥 CRITICAL: ต้องเรียก MT5 positions ใหม่ทุกครั้ง เพื่อให้ได้ข้อมูลล่าสุด
+    Logic:
+    - SL hit แต่ได้กำไร (trailing stop) → WIN ✅
+    - TP hit → WIN ✅
+    - SL hit และขาดทุน → LOSS ❌
+    - Manual close กำไร → WIN ✅
+    - Manual close ขาดทุน → LOSS ❌
     """
-    global _bot, _known_positions, _bot_status, _peak_profit_by_position, _last_traded_signal
+    global _bot, _known_positions, _bot_status, _peak_profit_by_position, _last_traded_signal, _trade_history
     
     if not _bot or not _bot.trading_engine:
         return
@@ -682,10 +768,53 @@ async def _sync_positions_with_mt5():
                 closed_symbol = info.get("symbol", "")
                 closed_side = info.get("side", "")
                 
+                # 🔥 NEW: Get actual PnL from MT5 history!
+                deal_info = await _get_closed_deal_pnl(int(ticket))
+                actual_pnl = 0.0
+                close_reason = "EXTERNAL"
+                
+                if deal_info:
+                    actual_pnl = deal_info.get("pnl", 0)
+                    close_reason = deal_info.get("close_reason", "EXTERNAL")
+                    
+                    # 📊 UPDATE DAILY STATS BASED ON PnL (NOT SL/TP!)
+                    _bot_status["daily_stats"]["trades"] += 1
+                    _bot_status["daily_stats"]["pnl"] += actual_pnl
+                    
+                    # ✅ WIN = กำไร (ไม่ว่าจะปิดด้วยอะไร!)
+                    # ❌ LOSS = ขาดทุน
+                    if actual_pnl > 0:
+                        _bot_status["daily_stats"]["wins"] += 1
+                        logger.info(f"✅ WIN: #{ticket} {closed_symbol} {closed_side} | PnL: +${actual_pnl:.2f} | Reason: {close_reason}")
+                    elif actual_pnl < 0:
+                        _bot_status["daily_stats"]["losses"] += 1
+                        logger.info(f"❌ LOSS: #{ticket} {closed_symbol} {closed_side} | PnL: ${actual_pnl:.2f} | Reason: {close_reason}")
+                    else:
+                        logger.info(f"➖ BREAKEVEN: #{ticket} {closed_symbol} {closed_side} | PnL: $0.00 | Reason: {close_reason}")
+                    
+                    # 📝 Save to trade history
+                    _trade_history.append({
+                        "ticket": ticket,
+                        "symbol": closed_symbol,
+                        "side": closed_side,
+                        "pnl": actual_pnl,
+                        "close_reason": close_reason,
+                        "close_time": deal_info.get("close_time", datetime.now()).isoformat(),
+                        "is_win": actual_pnl > 0,
+                    })
+                    
+                    # Keep only last 100 trades
+                    if len(_trade_history) > 100:
+                        _trade_history.pop(0)
+                else:
+                    logger.warning(f"⚠️ Could not get PnL for closed position #{ticket} - stats not updated")
+                
                 closed_externally.append({
                     "ticket": ticket,
                     "symbol": closed_symbol,
                     "side": closed_side,
+                    "pnl": actual_pnl,
+                    "close_reason": close_reason,
                 })
                 
                 # Clean up tracking
@@ -704,9 +833,12 @@ async def _sync_positions_with_mt5():
                 if closed_symbol and closed_symbol.upper() in _last_traded_signal:
                     del _last_traded_signal[closed_symbol.upper()]
         
-        # Log closed positions
-        for pos in closed_externally:
-            logger.warning(f"📢 POSITION CLOSED EXTERNALLY: #{pos['ticket']} ({pos['symbol']} {pos['side']}) - SL/TP hit!")
+        # Log summary of closed positions
+        if closed_externally:
+            total_pnl = sum(p.get("pnl", 0) for p in closed_externally)
+            wins = sum(1 for p in closed_externally if p.get("pnl", 0) > 0)
+            losses = sum(1 for p in closed_externally if p.get("pnl", 0) < 0)
+            logger.info(f"📊 SYNC SUMMARY: {len(closed_externally)} positions closed | W:{wins} L:{losses} | PnL: ${total_pnl:.2f}")
         
         # 🔥 NEW: Also check if _known_positions has symbols that MT5 doesn't have
         # This catches cases where position was opened by bot but closed externally
@@ -4382,6 +4514,99 @@ async def reset_daily_stats_only():
         "message": "Daily stats reset!",
         "old_stats": old_stats,
         "new_stats": _bot_status["daily_stats"]
+    }
+
+
+# =====================
+# 📊 TRADE HISTORY - ประวัติเทรดที่แม่นยำ
+# =====================
+
+@router.get("/trade-history")
+async def get_trade_history(limit: int = 50):
+    """
+    📊 Get Trade History with accurate Win/Loss tracking
+    
+    Features:
+    - PnL-based win/loss (not SL/TP based!)
+    - SL hit but profit → WIN ✅ (trailing stop)
+    - TP hit → WIN ✅
+    - Shows close reason (SL/TP/MANUAL)
+    """
+    global _trade_history, _bot_status
+    
+    # Calculate stats from history
+    trades = _trade_history[-limit:] if limit > 0 else _trade_history
+    
+    total_pnl = sum(t.get("pnl", 0) for t in trades)
+    wins = sum(1 for t in trades if t.get("pnl", 0) > 0)
+    losses = sum(1 for t in trades if t.get("pnl", 0) < 0)
+    breakeven = sum(1 for t in trades if t.get("pnl", 0) == 0)
+    
+    win_rate = (wins / len(trades) * 100) if trades else 0
+    
+    # Group by symbol
+    by_symbol = {}
+    for t in trades:
+        sym = t.get("symbol", "UNKNOWN")
+        if sym not in by_symbol:
+            by_symbol[sym] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0}
+        by_symbol[sym]["trades"] += 1
+        by_symbol[sym]["pnl"] += t.get("pnl", 0)
+        if t.get("pnl", 0) > 0:
+            by_symbol[sym]["wins"] += 1
+        elif t.get("pnl", 0) < 0:
+            by_symbol[sym]["losses"] += 1
+    
+    # Calculate per-symbol win rate
+    for sym in by_symbol:
+        total = by_symbol[sym]["trades"]
+        by_symbol[sym]["win_rate"] = (by_symbol[sym]["wins"] / total * 100) if total > 0 else 0
+    
+    return {
+        "trades": list(reversed(trades)),  # Newest first
+        "count": len(trades),
+        "stats": {
+            "total_trades": len(trades),
+            "wins": wins,
+            "losses": losses,
+            "breakeven": breakeven,
+            "win_rate": round(win_rate, 1),
+            "total_pnl": round(total_pnl, 2),
+            "average_pnl": round(total_pnl / len(trades), 2) if trades else 0,
+        },
+        "by_symbol": by_symbol,
+        "daily_stats": _bot_status.get("daily_stats", {}),
+        "note": "Win/Loss based on PnL (SL hit with profit = WIN!)",
+    }
+
+
+@router.get("/trade-history/today")
+async def get_today_trade_history():
+    """
+    📊 Get Today's Trade History only
+    """
+    global _trade_history
+    
+    today = datetime.now().date().isoformat()
+    
+    today_trades = []
+    for t in _trade_history:
+        close_time = t.get("close_time", "")
+        if isinstance(close_time, str) and close_time.startswith(today):
+            today_trades.append(t)
+    
+    total_pnl = sum(t.get("pnl", 0) for t in today_trades)
+    wins = sum(1 for t in today_trades if t.get("pnl", 0) > 0)
+    losses = sum(1 for t in today_trades if t.get("pnl", 0) < 0)
+    
+    return {
+        "date": today,
+        "trades": list(reversed(today_trades)),
+        "count": len(today_trades),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / len(today_trades) * 100, 1) if today_trades else 0,
+        "total_pnl": round(total_pnl, 2),
     }
 
 

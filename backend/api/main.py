@@ -146,6 +146,54 @@ async def lifespan(app: FastAPI):
     # Startup: Auto-start bot if settings exist
     logger.info("🚀 Trademify API starting...")
     
+    # 🔥 NEW: Try to auto-start unified bot first
+    try:
+        from api.unified_bot import _stability_config, _load_state
+        if _stability_config.get("auto_start_on_api_init", False):
+            logger.info("🔥 AUTO-START ENABLED: Starting unified bot...")
+            
+            # Try to load previous state
+            saved_state = _load_state()
+            
+            # Import and start
+            from api.unified_bot import start_unified_bot, StartBotRequest
+            
+            if saved_state and saved_state.get("bot_status", {}).get("mode") != "stopped":
+                # Restore from saved state
+                bot_state = saved_state.get("bot_status", {})
+                req = StartBotRequest(
+                    mode=bot_state.get("mode", "auto"),
+                    symbols=",".join(bot_state.get("symbols", ["XAUUSDm"])),
+                    timeframe=bot_state.get("timeframe", "H1"),
+                    signal_mode=bot_state.get("signal_mode", "technical"),
+                    quality=bot_state.get("quality", "MEDIUM"),
+                    interval=bot_state.get("interval", 60)
+                )
+                logger.info(f"📂 Restoring bot from saved state: {req.symbols} @ {req.timeframe}")
+            else:
+                # Use default settings
+                auto_symbols = _stability_config.get("auto_start_symbols", "XAUUSDm")
+                auto_mode = _stability_config.get("auto_start_mode", "auto")
+                req = StartBotRequest(
+                    mode=auto_mode,
+                    symbols=auto_symbols,
+                    timeframe="H1",
+                    signal_mode="technical",
+                    quality="MEDIUM",
+                    interval=60
+                )
+                logger.info(f"🆕 Starting bot with default settings: {auto_symbols}")
+            
+            from fastapi import BackgroundTasks
+            bg = BackgroundTasks()
+            await start_unified_bot(req, bg)
+            logger.info("✅ Unified bot auto-started successfully!")
+    except Exception as e:
+        logger.error(f"Failed to auto-start unified bot: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
+    # Fallback: Try legacy auto-start
     settings = load_bot_settings()
     if settings and settings.get('auto_start', False):
         logger.info("🤖 Auto-starting bot with saved settings...")
@@ -158,6 +206,16 @@ async def lifespan(app: FastAPI):
     
     # Shutdown: Stop bot gracefully
     logger.info("🛑 Shutting down...")
+    
+    # 🔥 Stop unified bot first
+    try:
+        from api.unified_bot import stop_unified_bot, _save_state
+        _save_state()  # Save state before shutdown
+        await stop_unified_bot()
+        logger.info("✅ Unified bot stopped gracefully")
+    except Exception as e:
+        logger.warning(f"Error stopping unified bot: {e}")
+    
     global _auto_bot, _bot_task
     if _auto_bot:
         await _auto_bot.stop()
