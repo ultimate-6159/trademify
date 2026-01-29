@@ -167,26 +167,48 @@ def _check_and_reset_daily_stats():
             logger.info(f"   Yesterday: {old_stats['trades']} trades, W:{old_stats['wins']} L:{old_stats['losses']}, PnL:${old_stats['pnl']:.2f}")
 
 
+# 🔒 TRADE LOCK - ป้องกัน Race Condition!
+_trade_locks = {}  # {symbol: timestamp} - เวลาที่เริ่มเทรด
+_trade_lock_timeout = 10  # 10 วินาที timeout
 
 
+def _acquire_trade_lock(symbol: str) -> bool:
+    """
+    🔒 ขอ lock ก่อนเทรด - ป้องกัน duplicate orders!
+    
+    Returns: True if lock acquired, False if already locked
+    """
+    global _trade_locks, _trade_lock_timeout
+    
+    now = datetime.now()
+    symbol_upper = symbol.upper()
+    
+    # Check if lock exists and not expired
+    if symbol_upper in _trade_locks:
+        lock_time = _trade_locks[symbol_upper]
+        elapsed = (now - lock_time).total_seconds()
+        
+        if elapsed < _trade_lock_timeout:
+            logger.warning(f"🔒 TRADE LOCKED: {symbol} (locked {elapsed:.1f}s ago)")
+            return False
+        else:
+            # Lock expired, release it
+            logger.info(f"🔓 Lock expired for {symbol}, acquiring new lock")
+    
+    # Acquire lock
+    _trade_locks[symbol_upper] = now
+    logger.debug(f"🔒 Lock acquired for {symbol}")
+    return True
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def _release_trade_lock(symbol: str):
+    """🔓 ปล่อย lock หลังเทรดเสร็จ"""
+    global _trade_locks
+    
+    symbol_upper = symbol.upper()
+    if symbol_upper in _trade_locks:
+        del _trade_locks[symbol_upper]
+        logger.debug(f"🔓 Lock released for {symbol}")
 
 
 # 🔓 DUPLICATE TRADE PREVENTION
@@ -2769,6 +2791,10 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
 
 
 
+
+
+
+
 async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_check: bool = False):
     """Execute trade based on signal with duplicate prevention
     
@@ -2779,27 +2805,38 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
     """
     global _bot, _bot_status, _last_traded_signal, _pullback_config
     
-    # Double check - only execute in AUTO mode
-    if _bot_status["mode"] != BotMode.AUTO.value:
-        logger.warning(f"⛔ Trade blocked - not in AUTO mode")
+    # 🔒 ACQUIRE TRADE LOCK FIRST - ป้องกัน race condition!
+    if not _acquire_trade_lock(symbol):
+        logger.warning(f"⛔ Trade blocked for {symbol}: Another trade in progress (LOCKED)")
         return
     
-    # 🎯 PULLBACK CHECK - ต้องเช็คเสมอ! (ไม่ว่า skip_position_check จะเป็นอะไร)
-    current_price = signal_data.get("current_price", 0)
-    if _pullback_config.get("enabled", True) and current_price > 0:
-        can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
-        if not can_enter_pullback:
-            logger.info(f"⏳ PULLBACK WAIT: {symbol} - {pullback_reason}")
-            return  # ❌ ไม่เข้าเทรด - รอ pullback
-    
-    # 🔥 DUPLICATE PREVENTION CHECK (can skip if coming from reverse signal close)
-    if not skip_position_check:
-        can_trade, reason = await _can_trade_signal(symbol, signal_data)
-        if not can_trade:
-            logger.info(f"⛔ Trade blocked for {symbol}: {reason}")
-            return  # ✅ Fix: return inside if block
-    
     try:
+        # Double check - only execute in AUTO mode
+        if _bot_status["mode"] != BotMode.AUTO.value:
+            logger.warning(f"⛔ Trade blocked - not in AUTO mode")
+            return
+        
+        # 🎯 PULLBACK CHECK - ต้องเช็คเสมอ! (ไม่ว่า skip_position_check จะเป็นอะไร)
+        current_price = signal_data.get("current_price", 0)
+        if _pullback_config.get("enabled", True) and current_price > 0:
+            can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
+            if not can_enter_pullback:
+                logger.info(f"⏳ PULLBACK WAIT: {symbol} - {pullback_reason}")
+                return  # ❌ ไม่เข้าเทรด - รอ pullback
+        
+        # 🔥 DUPLICATE PREVENTION CHECK (can skip if coming from reverse signal close)
+        if not skip_position_check:
+            can_trade, reason = await _can_trade_signal(symbol, signal_data)
+            if not can_trade:
+                logger.info(f"⛔ Trade blocked for {symbol}: {reason}")
+                return
+        
+        # 🔒 DOUBLE CHECK: ตรวจสอบ position อีกครั้งก่อนเปิด (ป้องกัน race condition)
+        has_position = await _check_open_positions(symbol)
+        if has_position and not skip_position_check:
+            logger.warning(f"⛔ Trade blocked for {symbol}: Position already exists (DOUBLE CHECK)")
+            return
+        
         if _bot and _bot.trading_engine:
             original_signal = signal_data["signal"]
             
@@ -2850,6 +2887,9 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
                 
     except Exception as e:
         logger.error(f"❌ Trade execution error: {e}")
+    finally:
+        # 🔓 ALWAYS release lock after trade attempt
+        _release_trade_lock(symbol)
 
 
 async def _stop_bot_internal():
