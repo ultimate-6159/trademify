@@ -653,10 +653,10 @@ _aggressive_config = {
 }
 
 # 📈 SMART DCA (Dollar Cost Averaging) - เข้าซ้ำเมื่อราคาย่อ
-# ✅ เปิดใช้งาน! มี Safety Checks ป้องกันการเข้าซ้ำตอนสัญญาณเปลี่ยน
+# ❌ ปิดถาวร! DCA เสี่ยงเกินไปสำหรับพอร์ตเล็ก
 _dca_config = {
-    "enabled": True,                         # ✅ เปิด! มี safety checks แล้ว
-    "max_dca_entries": 1,                    # 🔥 จำกัด 1 ครั้ง (รวม 2 positions)
+    "enabled": False,                        # ❌ ปิดถาวร! DCA เพิ่ม risk
+    "max_dca_entries": 0,                    # ❌ ไม่อนุญาต DCA
     "min_retracement_percent": 0.20,         # 🔥 ราคาต้องย่อ >= 0.20% (~$10 Gold)
     "wait_for_reversal": True,               # ✅ รอให้ราคากลับตัวก่อนเข้าซ้ำ
     "reversal_candles": 1,                   # 🔥 รอ 1 candle ที่กลับตัว
@@ -667,7 +667,7 @@ _dca_config = {
     "require_strong_signal": True,
     "min_confidence_for_dca": 75,
     "check_signal_trend": True,
-    "min_balance_for_dca": 500,              # 🔧 ต้องมี >= $500 ถึงจะ DCA ได้
+    "min_balance_for_dca": 999999,           # ❌ ตั้งสูงมากเพื่อ block DCA ทุกกรณี
 }
 _dca_tracking = {}
 
