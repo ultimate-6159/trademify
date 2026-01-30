@@ -2394,13 +2394,21 @@ class AITradingBot:
             # Layer 5: Advanced Intelligence (self.intelligence)
             if self.intelligence and len(prices) >= 50:
                 try:
+                    # 🐛 FIX: Pass all required parameters
                     intel_result = self.intelligence.analyze(
                         signal_side=side_str,
                         pattern_confidence=70,
                         h1_data=h1_data,
+                        win_rate=0.5,  # Default values
+                        avg_win=1.0,
+                        avg_loss=1.0,
+                        total_trades=0,
                     )
                     can_trade = intel_result.can_trade if intel_result else True
+                    # 🐛 FIX: Get actual confidence score
                     score = float(intel_result.confidence) if intel_result and hasattr(intel_result, 'confidence') else 70
+                    if intel_result and hasattr(intel_result, 'regime') and intel_result.regime:
+                        score = max(score, intel_result.regime.confidence if hasattr(intel_result.regime, 'confidence') else score)
                     self._last_intel_result_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 5 error: {e}")
@@ -2415,7 +2423,13 @@ class AITradingBot:
                 try:
                     smart_decision = self.smart_brain.evaluate_entry(symbol, side_str)
                     can_trade = smart_decision.can_trade if smart_decision else True
-                    score = 70 if can_trade else 30
+                    # 🐛 FIX: Get actual score from decision instead of hardcoded
+                    if smart_decision and hasattr(smart_decision, 'risk_multiplier'):
+                        score = min(100, smart_decision.risk_multiplier * 70)  # Convert multiplier to score
+                    elif smart_decision and hasattr(smart_decision, 'confidence'):
+                        score = float(smart_decision.confidence)
+                    else:
+                        score = 70 if can_trade else 30
                     self._last_smart_result_by_symbol[symbol] = {"score": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 6 error: {e}")
@@ -2542,7 +2556,49 @@ class AITradingBot:
             if self.titan_core and len(prices) >= 50:
                 try:
                     from trading.titan_core import ModuleSignal
+                    # 🐛 FIX: Build actual module_signals from previous layer results
                     module_signals = []
+                    
+                    # Add signals from layers that already ran
+                    if symbol in self._last_alpha_result_by_symbol:
+                        alpha_data = self._last_alpha_result_by_symbol[symbol]
+                        module_signals.append(ModuleSignal(
+                            module_name="AlphaEngine",
+                            should_trade=alpha_data.get("can_trade", True),
+                            direction=side_str,
+                            confidence=alpha_data.get("confidence", 60),
+                            multiplier=1.0,
+                            score=alpha_data.get("confidence", 60),
+                            reasons=[],
+                            warnings=[]
+                        ))
+                    
+                    if symbol in self._last_omega_result_by_symbol:
+                        omega_data = self._last_omega_result_by_symbol[symbol]
+                        module_signals.append(ModuleSignal(
+                            module_name="OmegaBrain",
+                            should_trade=omega_data.get("can_trade", True),
+                            direction=side_str,
+                            confidence=omega_data.get("confidence", 60),
+                            multiplier=1.0,
+                            score=omega_data.get("confidence", 60),
+                            reasons=[],
+                            warnings=[]
+                        ))
+                    
+                    if symbol in self._last_quantum_result_by_symbol:
+                        quantum_data = self._last_quantum_result_by_symbol[symbol]
+                        module_signals.append(ModuleSignal(
+                            module_name="QuantumStrategy",
+                            should_trade=quantum_data.get("can_trade", True),
+                            direction=side_str,
+                            confidence=quantum_data.get("confidence", 60),
+                            multiplier=1.0,
+                            score=quantum_data.get("confidence", 60),
+                            reasons=[],
+                            warnings=[]
+                        ))
+                    
                     titan_result = self.titan_core.synthesize(
                         symbol=symbol,
                         signal_direction=side_str,
@@ -2555,6 +2611,9 @@ class AITradingBot:
                     )
                     can_trade = titan_result.should_trade if titan_result else True
                     score = float(titan_result.confidence) if titan_result and hasattr(titan_result, 'confidence') else 60
+                    # Also get titan_score if available
+                    if titan_result and hasattr(titan_result, 'titan_score'):
+                        score = max(score, float(titan_result.titan_score))
                     self._last_titan_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 12 error: {e}")
@@ -2583,13 +2642,27 @@ class AITradingBot:
             # Layer 14: Risk Guardian
             if self.risk_guardian:
                 try:
+                    # 🐛 FIX: Get actual open positions from trading engine
+                    open_positions = []
+                    if self.trading_engine and self.trading_engine.positions:
+                        open_positions = [
+                            {"symbol": p.symbol, "side": p.side.value if hasattr(p.side, 'value') else str(p.side)}
+                            for p in self.trading_engine.positions.values()
+                        ]
+                    
                     risk_assessment = self.risk_guardian.assess_risk(
                         current_balance=balance,
-                        open_positions=[],
+                        open_positions=open_positions,  # 🐛 FIX: Pass actual positions
                         proposed_trade={"symbol": symbol, "side": side_str}
                     )
                     can_trade = risk_assessment.can_trade if risk_assessment else True
-                    score = 80 if can_trade else 20
+                    # 🐛 FIX: Get score from risk level
+                    if risk_assessment and hasattr(risk_assessment, 'level'):
+                        risk_level_scores = {"SAFE": 90, "WARNING": 60, "DANGER": 30, "CRITICAL": 10}
+                        level_str = risk_assessment.level.value if hasattr(risk_assessment.level, 'value') else str(risk_assessment.level)
+                        score = risk_level_scores.get(level_str, 50)
+                    else:
+                        score = 80 if can_trade else 20
                 except Exception as e:
                     logger.debug(f"Layer 14 error: {e}")
                     can_trade, score = True, 50
