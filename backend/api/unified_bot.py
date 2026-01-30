@@ -3424,6 +3424,24 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
             modified_analysis["original_signal"] = original_signal
             modified_analysis["contrarian_applied"] = (original_signal != final_signal)
             
+            # 🆕 UNIFIED LOT SIZING: Calculate safe lot and pass to ai_trading_bot
+            # This ensures unified_bot's config is used!
+            try:
+                balance = await _bot.trading_engine.broker.get_balance() or 300
+                current_price = signal_data.get("current_price", 0)
+                sl_price = signal_data.get("stop_loss", 0)
+                
+                if current_price > 0 and sl_price > 0:
+                    sl_distance = abs(current_price - sl_price)
+                else:
+                    sl_distance = 0
+                
+                safe_lot = _calculate_safe_lot_size(balance, symbol, sl_distance, current_price)
+                modified_analysis["override_lot_size"] = safe_lot
+                logger.info(f"🛡️ UNIFIED LOT: Passing safe_lot={safe_lot} to ai_trading_bot")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not calculate safe lot: {e}")
+            
             result = await _bot.execute_trade(modified_analysis)
             
             if result and result.get("success"):

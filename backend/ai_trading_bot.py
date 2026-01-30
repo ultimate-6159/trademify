@@ -4418,6 +4418,7 @@ class AITradingBot:
                     stop_loss = current_price + sl_distance_price
                 logger.info(f"🛡️ SL capped: {sl_distance_points:.0f} pts → {max_sl_points} pts (${max_sl_points/10:.0f})")
         
+        
         if self.risk_guardian:
             quantity, calc_details = self.risk_guardian.calculate_position_size(
                 balance=balance,
@@ -4436,6 +4437,13 @@ class AITradingBot:
             quantity = risk_amount / stop_distance if stop_distance > 0 else 0.001
         
         quantity = round(max(0.01, quantity), 2)  # Min 0.01 lot
+        
+        # 🆕 CHECK: If unified_bot passed override_lot_size, use it!
+        # This allows unified_bot's _calculate_safe_lot_size() to take precedence
+        override_lot = analysis.get("override_lot_size")
+        if override_lot and override_lot > 0:
+            logger.info(f"🛡️ Using override lot size from unified_bot: {override_lot} (was {quantity})")
+            quantity = override_lot
         
         # =====================================================
         # 🛡️ UNIVERSAL LOT SIZING - $200 to $2,000,000,000!
