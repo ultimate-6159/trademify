@@ -630,10 +630,17 @@ class AITradingBot:
             moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
             moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
             
+            # 🔥 NEW: Price-based trend detection (ราคาต่ำ/สูงกว่า EMA slow มาก = trend)
+            # ถ้าราคาต่ำกว่า slow EMA 1% = bearish, สูงกว่า 1% = bullish
+            price_vs_slow_pct = ((current_price - ema_slow) / ema_slow) * 100
+            price_bearish_trend = price_vs_slow_pct < -0.5  # ราคาต่ำกว่า slow 0.5%
+            price_bullish_trend = price_vs_slow_pct > 0.5   # ราคาสูงกว่า slow 0.5%
+            
             # 🥇 GOLD SPECIFIC: Require stronger trend confirmation
+            # 🔥 FIXED: เพิ่ม price-based trend detection
             if is_gold:
-                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
-                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
+                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow) or price_bullish_trend
+                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow) or price_bearish_trend
             else:
                 has_uptrend = strong_uptrend or moderate_uptrend
                 has_downtrend = strong_downtrend or moderate_downtrend
@@ -869,6 +876,7 @@ class AITradingBot:
                     allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
                     logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, weekend={is_weekend_risk}, allow_all={allow_all}")
                     logger.info(f"      📊 EMA Status: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}, trend={ema_trend:.2f}")
+                    logger.info(f"      📊 Price vs Slow: {price_vs_slow_pct:.2f}% (bearish={price_bearish_trend}, bullish={price_bullish_trend})")
                     logger.info(f"      📊 Trend Check: uptrend={has_uptrend}, downtrend={has_downtrend}, strong_up={strong_uptrend}, strong_down={strong_downtrend}")
                     logger.info(f"      📊 Scores: Buy={buy_score}/12, Sell={sell_score}/12 (need 6)")
                     return None
