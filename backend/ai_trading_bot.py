@@ -4578,15 +4578,15 @@ class AITradingBot:
             await self._broadcast_update("trade", trade_record)
             
             logger.info(f"✅ Trade executed!")
-            return {"action": "EXECUTED", "order": order.to_dict(), "result": str(result)}
+            return {"success": True, "action": "EXECUTED", "order": order.to_dict(), "result": str(result), "ticket": order.id}
         elif result:
             # Result exists but not success
             logger.warning(f"❌ Trade failed: {result.error if result.error else result.message}")
-            return {"action": "FAILED", "reason": result.error or result.message or "Unknown error"}
+            return {"success": False, "action": "FAILED", "reason": result.error or result.message or "Unknown error"}
         else:
             # Result is None - trading engine might be disabled
             logger.warning("❌ Trade failed: execute_order returned None (trading engine disabled?)")
-            return {"action": "SKIP", "reason": "Trading engine returned None"}
+            return {"success": False, "action": "SKIP", "reason": "Trading engine returned None"}
     
 
 

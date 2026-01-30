@@ -1654,6 +1654,9 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # 🔄 SYNC WITH MT5 - ตรวจสอบว่า position ถูกปิดไปแล้วหรือยัง (SL/TP hit externally)
             await _sync_positions_with_mt5()
             
+            # 🔥 VALIDATE TRACKING DATA - ตรวจสอบว่า tracking ตรงกับ MT5 จริง
+            await _validate_and_cleanup_tracking()
+            
             # 🚀 PARALLEL ANALYSIS - วิเคราะห์ทุก symbol พร้อมกัน!
             analysis_tasks = [
                 _analyze_single_symbol(symbol, auto_trade) 
@@ -1845,6 +1848,77 @@ def _extract_layer_status(symbol: str) -> Dict:
         "total": total,
         "pass_rate": (passed / total * 100) if total > 0 else 0
     }
+
+
+async def _validate_and_cleanup_tracking():
+    """
+    🔥 VALIDATE & CLEANUP TRACKING DATA
+    
+    ตรวจสอบและ cleanup tracking data ให้ตรงกับ MT5 จริง:
+    1. ลบ cooldown สำหรับ symbol ที่ไม่มี position
+    2. ลบ known_positions ที่ไม่มีใน MT5
+    3. Reset ข้อมูลที่ไม่ตรงกัน
+    
+    เรียกทุก cycle เพื่อให้ระบบ sync ตลอดเวลา
+    """
+    global _bot, _known_positions, _last_traded_signal, _peak_profit_by_position
+    
+    if not _bot or not _bot.trading_engine:
+        return
+    
+    try:
+        # Get fresh positions from MT5
+        positions = await _bot.trading_engine.broker.get_positions()
+        
+        # Build set of current MT5 data
+        mt5_tickets = set()
+        mt5_symbols = set()
+        
+        for pos in (positions or []):
+            if isinstance(pos, dict):
+                ticket = pos.get("ticket") or pos.get("id")
+                symbol = pos.get("symbol", "")
+            else:
+                ticket = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                symbol = getattr(pos, "symbol", "")
+            
+            if ticket:
+                mt5_tickets.add(str(ticket))
+            if symbol:
+                mt5_symbols.add(symbol.upper())
+        
+        # 1. Clean up known_positions not in MT5
+        orphan_tickets = []
+        for ticket in list(_known_positions.keys()):
+            if str(ticket) not in mt5_tickets:
+                orphan_tickets.append(ticket)
+                symbol = _known_positions[ticket].get("symbol", "")
+                del _known_positions[ticket]
+                logger.info(f"🧹 Cleaned orphan position #{ticket} ({symbol})")
+        
+        # 2. Clean up cooldowns for symbols without positions
+        # Only if we're checking symbols that have no MT5 positions
+        for symbol in list(_last_traded_signal.keys()):
+            if symbol.upper() not in mt5_symbols:
+                # Check if cooldown has expired (allow 60s buffer after position close)
+                last_time = _last_traded_signal[symbol].get("timestamp")
+                if last_time:
+                    elapsed = (datetime.now() - last_time).total_seconds()
+                    if elapsed > 120:  # 2 minutes after position close
+                        del _last_traded_signal[symbol]
+                        logger.info(f"🧹 Cleaned expired cooldown for {symbol} (no MT5 position)")
+        
+        # 3. Clean up peak profits for closed positions
+        for ticket in list(_peak_profit_by_position.keys()):
+            if str(ticket) not in mt5_tickets:
+                del _peak_profit_by_position[ticket]
+        
+        # Log if we did any cleanup
+        if orphan_tickets:
+            logger.info(f"🔄 MT5 SYNC: Cleaned {len(orphan_tickets)} orphan tracking entries")
+            
+    except Exception as e:
+        logger.warning(f"Validation error (non-critical): {e}")
 
 
 async def _check_profit_protection() -> List[Dict]:
@@ -3467,7 +3541,13 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
             
             result = await _bot.execute_trade(modified_analysis)
             
-            if result and result.get("success"):
+            # 🔥 FIX: Check result properly - ai_trading_bot returns {"success": True/False, "action": "EXECUTED/FAILED", ...}
+            trade_success = False
+            if result:
+                # Check both "success" key and "action" key for backwards compatibility
+                trade_success = result.get("success", False) or result.get("action") == "EXECUTED"
+            
+            if trade_success:
                 # ✅ Record successful trade to prevent duplicates
                 _last_traded_signal[symbol] = {
                     "signal": final_signal,
@@ -3479,12 +3559,26 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
                     "contrarian": (original_signal != final_signal)
                 }
                 
+                # 🆕 Also track the position for sync
+                ticket = result.get("ticket") or result.get("order", {}).get("id")
+                if ticket:
+                    _known_positions[str(ticket)] = {
+                        "symbol": symbol,
+                        "side": side,
+                        "opened_at": datetime.now().isoformat()
+                    }
+                    logger.info(f"📍 Position tracked: #{ticket} {symbol} {side}")
+                
                 contrarian_tag = " [CONTRARIAN]" if original_signal != final_signal else ""
                 logger.info(f"✅ Trade executed: {symbol} {side}{contrarian_tag} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
                 _bot_status["daily_stats"]["trades"] += 1
+                
+                # 🔄 Force sync with MT5 after trade
+                await _sync_positions_with_mt5()
             else:
                 reason = result.get("reason", "Unknown") if result else "No result"
-                logger.warning(f"⚠️ Trade not executed: {reason}")
+                action = result.get("action", "UNKNOWN") if result else "NO_RESULT"
+                logger.warning(f"⚠️ Trade not executed: {action} - {reason}")
                 
     except Exception as e:
         logger.error(f"❌ Trade execution error: {e}")
