@@ -265,11 +265,11 @@ _contrarian_mode = {
 }
 
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
-# ✅ เปิดใช้งาน! Multi-timeframe pullback confirmation
+# ❌ ปิดชั่วคราว! ทำให้พลาดโอกาสเทรดเมื่อราคาพุ่งตรงๆ
 _pullback_config = {
-    "enabled": True,                         # ✅ เปิด! รอ pullback ก่อนเข้า (ป้องกันล้างพอร์ต!)
-    "min_pullback_percent": 0.05,            # 🔥 Gold: ราคาต้องย่อ >= 0.05% (~$2.5)
-    "max_pullback_percent": 0.30,            # 🔥 Gold: ย่อไม่เกิน 0.30% (~$15)
+    "enabled": False,                        # ❌ ปิด! เข้าเทรดทันทีเมื่อมีสัญญาณ
+    "min_pullback_percent": 0.03,            # 🔥 Gold: ราคาต้องย่อ >= 0.03% (~$1.5)
+    "max_pullback_percent": 0.50,            # 🔥 Gold: ย่อไม่เกิน 0.50% (~$25) - เพิ่มจาก 0.30%!
     "wait_for_stabilization": True,          # ✅ รอให้ราคานิ่งก่อนเข้า
     "stabilization_candles": 2,              # 🔥 รอ 2 แท่งเด้งกลับ (M5)
     "max_wait_minutes": 15,                  # 🔥 รอสูงสุด 15 นาที
@@ -3173,12 +3173,13 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
         logger.warning(f"🛡️ ANTI-WIPEOUT: {symbol} - {trend_reason}")
         return False, trend_reason
     
-    # 5. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า
-    current_price = signal_data.get("current_price", 0)
-    if current_price > 0:
-        can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
-        if not can_enter_pullback:
-            return False, f"PULLBACK: {pullback_reason}"
+    # 5. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า (ถ้าเปิดใช้งาน)
+    if _pullback_config.get("enabled", False):
+        current_price = signal_data.get("current_price", 0)
+        if current_price > 0:
+            can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
+            if not can_enter_pullback:
+                return False, f"PULLBACK: {pullback_reason}"
     
     # 6. Check for open positions
     has_position = await _check_open_positions(symbol)
@@ -3235,9 +3236,10 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
             logger.warning(f"⛔ Trade blocked - not in AUTO mode")
             return
         
-        # 🎯 PULLBACK CHECK - ต้องเช็คเสมอ! (ไม่ว่า skip_position_check จะเป็นอะไร)
+        
+        # 🎯 PULLBACK CHECK - เฉพาะเมื่อเปิดใช้งาน
         current_price = signal_data.get("current_price", 0)
-        if _pullback_config.get("enabled", True) and current_price > 0:
+        if _pullback_config.get("enabled", False) and current_price > 0:
             can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
             if not can_enter_pullback:
                 logger.info(f"⏳ PULLBACK WAIT: {symbol} - {pullback_reason}")
