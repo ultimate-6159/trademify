@@ -518,6 +518,27 @@ def _calc_dynamic(balance: float, percent: float, min_val: float = 1.0) -> float
     """คำนวณค่า dynamic จาก % ของ balance"""
     return max(balance * (percent / 100.0), min_val)
 
+def _is_micro_account(balance: float) -> bool:
+    """🆕 ตรวจสอบว่าเป็นบัญชีเล็กมากหรือไม่ ($100-$300)"""
+    threshold = _small_account_config.get("micro_account_threshold", 300)
+    return balance < threshold
+
+def _get_adjusted_lot_for_micro(balance: float, base_lot: float) -> float:
+    """🆕 ปรับ lot size สำหรับบัญชีเล็กมาก"""
+    if not _is_micro_account(balance):
+        return base_lot
+    
+    max_lot = _small_account_config.get("micro_account_max_lot", 0.01)
+    return min(base_lot, max_lot)
+
+def _get_adjusted_sl_for_micro(balance: float, sl_percent: float) -> float:
+    """🆕 ปรับ SL ให้กว้างขึ้นสำหรับบัญชีเล็กมาก (ลด risk)"""
+    if not _is_micro_account(balance):
+        return sl_percent
+    
+    multiplier = _small_account_config.get("micro_account_sl_multiplier", 1.5)
+    return sl_percent * multiplier
+
 # 📈 AUTO TRAILING STOP - PERCENT BASED!
 _trailing_stop_config = {
     "enabled": True,
@@ -571,12 +592,15 @@ _profit_protection_config = {
 }
 _peak_profit_by_position = {}
 
-# 🛡️ SMALL ACCOUNT PROTECTION
+# 🛡️ SMALL ACCOUNT PROTECTION - รองรับ $100-$500!
 _small_account_config = {
     "enabled": True,
     "min_balance_warning": 100,              # ⚠️ แจ้งเตือนเมื่อ balance < $100
     "min_balance_stop_trading": 50,          # 🛑 หยุดเทรดเมื่อ balance < $50
     "disable_dca_below": 500,                # ปิด DCA ถ้า balance < $500
+    "micro_account_threshold": 300,          # 🆕 บัญชีเล็กมาก < $300
+    "micro_account_max_lot": 0.01,           # 🆕 Lot สูงสุดสำหรับบัญชีเล็ก
+    "micro_account_sl_multiplier": 1.5,      # 🆕 SL กว้างขึ้น 1.5x สำหรับบัญชีเล็ก
 }
 
 # 🧮 DYNAMIC VALUE HELPERS
@@ -2821,6 +2845,11 @@ async def _check_dca_opportunity(symbol: str, signal_data: Dict, current_price: 
         
         # 5. Calculate retracement
         min_retracement = _dca_config.get("min_retracement_percent", 0.15)
+        
+        # 🔥 FIX: Prevent division by zero
+        if first_entry_price <= 0:
+            logger.warning(f"📈 DCA BLOCKED: {symbol} first_entry_price is 0 or negative")
+            return False
         
         if position_side == "BUY":
             # For BUY: price going DOWN is adverse → track lowest (peak_adverse = lowest)
