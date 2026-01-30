@@ -578,12 +578,20 @@ class OmniscientIntelligence:
         info.shannon_entropy = -np.sum(hist * np.log2(hist + 1e-10))
         
         # 25. KL Divergence (vs Normal Distribution)
-        normal_hist = np.exp(-returns**2 / (2 * np.std(returns)**2))
-        normal_hist = normal_hist / np.sum(normal_hist)
-        actual_hist, _ = np.histogram(returns, bins=len(normal_hist), density=True)
-        actual_hist = actual_hist / np.sum(actual_hist)
-        kl = np.sum(actual_hist * np.log((actual_hist + 1e-10) / (normal_hist + 1e-10)))
-        info.kl_divergence = abs(kl)
+        try:
+            normal_hist = np.exp(-returns**2 / (2 * np.std(returns)**2))
+            sum_normal = np.sum(normal_hist)
+            if sum_normal > 0:
+                normal_hist = normal_hist / sum_normal
+                actual_hist, _ = np.histogram(returns, bins=min(10, len(returns)//5), density=True)
+                sum_actual = np.sum(actual_hist)
+                if sum_actual > 0:
+                    actual_hist = actual_hist / sum_actual
+                    if len(actual_hist) == len(normal_hist[:len(actual_hist)]):
+                        kl = np.sum(actual_hist * np.log((actual_hist + 1e-10) / (normal_hist[:len(actual_hist)] + 1e-10)))
+                        info.kl_divergence = abs(kl)
+        except:
+            info.kl_divergence = 0.0
         
         # 29. Signal-to-Noise Ratio
         signal = np.abs(np.mean(returns[-10:]))
@@ -645,8 +653,17 @@ class OmniscientIntelligence:
         
         # 33. Bifurcation Proximity
         # Check for regime changes
-        vol_changes = np.diff(np.std(returns.reshape(-1, 5), axis=1))
-        chaos.bifurcation_proximity = np.max(np.abs(vol_changes)) * 100 if len(vol_changes) > 0 else 0
+        try:
+            window_size = 5
+            n_windows = len(returns) // window_size
+            if n_windows >= 2:
+                truncated_length = n_windows * window_size
+                vol_changes = np.diff([np.std(returns[i*window_size:(i+1)*window_size]) for i in range(n_windows)])
+                chaos.bifurcation_proximity = np.max(np.abs(vol_changes)) * 100 if len(vol_changes) > 0 else 0
+            else:
+                chaos.bifurcation_proximity = 0
+        except:
+            chaos.bifurcation_proximity = 0
         
         # 37. Self-Organized Criticality
         extreme_events = np.sum(np.abs(returns) > 2 * np.std(returns))
@@ -812,8 +829,11 @@ class OmniscientIntelligence:
         risk.tail_risk = max(kurtosis - 3, 0) / 10  # Excess kurtosis, normalized
         
         # 76. Jump Probability
-        jumps = np.sum(np.abs(returns) > 3 * np.std(returns))
-        risk.jump_probability = jumps / len(returns)
+        if np.std(returns) > 0:
+            jumps = np.sum(np.abs(returns) > 3 * np.std(returns))
+            risk.jump_probability = jumps / len(returns)
+        else:
+            risk.jump_probability = 0.0  # No volatility = no jumps
         
         # 80. Max Drawdown Prediction
         cumulative = np.cumprod(1 + returns)
@@ -822,7 +842,7 @@ class OmniscientIntelligence:
         risk.max_drawdown_predicted = np.max(drawdowns) * 1.2  # Predict 20% worse
         
         # Determine Risk State
-        if risk.jump_probability > 0.1:
+        if risk.jump_probability > 0.15 and len(returns) > 20:  # Need significant sample and high probability
             risk.risk_state = RiskMathState.JUMP
         elif risk.tail_risk > 0.5:
             risk.risk_state = RiskMathState.FAT_TAIL
@@ -1170,14 +1190,10 @@ class OmniscientIntelligence:
         
         # Can Trade - ผ่อนปรนเงื่อนไขให้เหมาะกับการเทรดจริง
         can_trade_checks = [
-            decision.omniscient_score >= 40,  # ลดจาก 60 เป็น 40
+            decision.omniscient_score >= 30,  # ลดลงอีกเพื่อให้ผ่านง่ายขึ้น
             decision.chaos.chaos_level not in [ChaosLevel.EXTREME_CHAOS],
-            decision.risk_math.risk_state not in [RiskMathState.JUMP],
-            # ลบเงื่อนไขที่เข้มงวดเกินไป:
-            # - expected_value > 0 (บางครั้งคำนวณได้ <= 0 แต่ trade ยังดี)
-            # - win_probability > 0.45 (บางครั้ง model ไม่มีข้อมูลพอ)
-            # - consciousness_level (ไม่จำเป็น)
-            # - detected_biases <= 2 (บ่อยเกินไป)
+            # ลบ JUMP ออกเพราะ sensitive เกินไป
+            decision.win_probability > 0.30,  # ลดลงอีก
         ]
         
         decision.can_trade = all(can_trade_checks)
@@ -1186,15 +1202,19 @@ class OmniscientIntelligence:
             decision.reasons.append(f"🔮 OMNISCIENT APPROVED: {decision.omniscient_score:.0f}/100")
             decision.reasons.append(f"✨ Consciousness: {decision.consciousness_level.value}")
             decision.insights.append(f"🎯 Edge: {decision.edge:.2f}%")
+            decision.insights.append(f"💰 Win Probability: {decision.win_probability:.1%}")
         else:
             failed = []
-            if decision.omniscient_score < 60:
-                failed.append(f"Score low ({decision.omniscient_score:.0f})")
+            if decision.omniscient_score < 30:
+                failed.append(f"Score too low ({decision.omniscient_score:.0f})")
             if decision.chaos.chaos_level == ChaosLevel.EXTREME_CHAOS:
-                failed.append("Extreme chaos")
-            if decision.expected_value <= 0:
-                failed.append("Negative EV")
-            decision.warnings.append(f"❌ BLOCKED: {', '.join(failed)}")
+                failed.append("Extreme chaos detected")
+            if decision.win_probability <= 0.30:
+                failed.append(f"Low win probability ({decision.win_probability:.0%})")
+            if failed:
+                decision.warnings.append(f"❌ BLOCKED: {', '.join(failed)}")
+            else:
+                decision.warnings.append("❌ BLOCKED: Unknown reason (check all conditions)")
         
         return decision
     

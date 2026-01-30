@@ -2704,10 +2704,10 @@ class AITradingBot:
                         account_equity=balance
                     )
                     can_trade = ultra_result.can_trade if ultra_result else True
-                    score = float(ultra_result.confidence) if ultra_result and hasattr(ultra_result, 'confidence') else 60
+                    score = float(ultra_result.confidence) if ultra_result and hasattr(ultra_result, 'confidence') and ultra_result.confidence > 0 else 60
                     self._last_ultra_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
-                    logger.debug(f"Layer 17 error: {e}")
+                    logger.warning(f"Layer 17 Ultra error: {e}")
                     can_trade, score = True, 50
                 layers.append({"layer": 17, "name": "Ultra Intelligence", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
                 if can_trade and score > 50: passed += 1
@@ -2731,10 +2731,10 @@ class AITradingBot:
                         equity=balance
                     )
                     can_trade = supreme_result.can_trade if supreme_result else True
-                    score = float(supreme_result.confidence) if supreme_result and hasattr(supreme_result, 'confidence') else 60
+                    score = float(supreme_result.confidence) if supreme_result and hasattr(supreme_result, 'confidence') and supreme_result.confidence > 0 else 60
                     self._last_supreme_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
-                    logger.debug(f"Layer 18 error: {e}")
+                    logger.warning(f"Layer 18 Supreme error: {e}")
                     can_trade, score = True, 50
                 layers.append({"layer": 18, "name": "Supreme Intelligence", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
                 if can_trade and score > 50: passed += 1
@@ -2758,10 +2758,13 @@ class AITradingBot:
                         equity=balance
                     )
                     can_trade = trans_result.can_trade if trans_result else True
-                    score = float(trans_result.confidence) if trans_result and hasattr(trans_result, 'confidence') else 60
+                    # Try transcendent_score first, fallback to confidence
+                    score = float(trans_result.transcendent_score) if trans_result and hasattr(trans_result, 'transcendent_score') and trans_result.transcendent_score > 0 else 60
+                    if score == 0 and trans_result and hasattr(trans_result, 'confidence'):
+                        score = float(trans_result.confidence) if trans_result.confidence > 0 else 60
                     self._last_transcendent_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
-                    logger.debug(f"Layer 19 error: {e}")
+                    logger.warning(f"Layer 19 Transcendent error: {e}")
                     can_trade, score = True, 50
                 layers.append({"layer": 19, "name": "Transcendent", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
                 if can_trade and score > 50: passed += 1
@@ -2785,10 +2788,17 @@ class AITradingBot:
                         equity=balance
                     )
                     can_trade = omni_result.can_trade if omni_result else True
-                    score = float(omni_result.confidence) if omni_result and hasattr(omni_result, 'confidence') else 60
-                    self._last_omniscient_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
+                    # 🐛 FIX: Get score from omniscient_score (not confidence which may be 0)
+                    score = float(omni_result.omniscient_score) if omni_result and hasattr(omni_result, 'omniscient_score') and omni_result.omniscient_score > 0 else 60
+                    # Fallback to confidence if omniscient_score is 0
+                    if score == 0 and omni_result and hasattr(omni_result, 'confidence'):
+                        score = float(omni_result.confidence) if omni_result.confidence > 0 else 60
+                    self._last_omniscient_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade, "omniscient_score": score}
                 except Exception as e:
-                    logger.debug(f"Layer 20 error: {e}")
+                    # 🐛 FIX: Log actual error instead of hiding it
+                    logger.warning(f"Layer 20 Omniscient error: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
                     can_trade, score = True, 50
                 layers.append({"layer": 20, "name": "Omniscient", "status": "PASS" if can_trade and score > 50 else "FAIL", "score": score, "can_trade": can_trade})
                 if can_trade and score > 50: passed += 1
