@@ -309,139 +309,139 @@ _anti_wipeout_config = {
 }
 
 def _calculate_safe_lot_size(balance: float, symbol: str, sl_points: float, current_price: float = 0) -> float:
-"""
-🛡️ คำนวณ Lot Size ที่ปลอดภัย - UNIVERSAL SCALING $100 to $2B!
+    """
+    🛡️ คำนวณ Lot Size ที่ปลอดภัย - UNIVERSAL SCALING $100 to $2B!
     
-Formula:
-- Risk Amount = Balance × Risk% (e.g., $300 × 1% = $3 max loss)
-- Lot Size = Risk Amount / (SL$ × Lot Value)
+    Formula:
+    - Risk Amount = Balance × Risk% (e.g., $300 × 1% = $3 max loss)
+    - Lot Size = Risk Amount / (SL$ × Lot Value)
     
-🔥 EXAMPLES:
-- $300 balance, 1% risk, Gold SL $15 → Risk $3, Lot = 0.01 (minimum)
-- $1,000 balance, 1% risk, Gold SL $15 → Risk $10, Lot = 0.01
-- $10,000 balance, 1% risk, Gold SL $15 → Risk $100, Lot = 0.06
-- $100,000 balance, 1% risk, Gold SL $15 → Risk $1000, Lot = 0.67
-- $1,000,000 balance, 1% risk, Gold SL $15 → Risk $10000, Lot = 6.67
-"""
-global _anti_wipeout_config
+    🔥 EXAMPLES:
+    - $300 balance, 1% risk, Gold SL $15 → Risk $3, Lot = 0.01 (minimum)
+    - $1,000 balance, 1% risk, Gold SL $15 → Risk $10, Lot = 0.01
+    - $10,000 balance, 1% risk, Gold SL $15 → Risk $100, Lot = 0.06
+    - $100,000 balance, 1% risk, Gold SL $15 → Risk $1000, Lot = 0.67
+    - $1,000,000 balance, 1% risk, Gold SL $15 → Risk $10000, Lot = 6.67
+    """
+    global _anti_wipeout_config
     
-if not _anti_wipeout_config.get("enabled", True):
-    return 0.0  # Let original calculation handle it
+    if not _anti_wipeout_config.get("enabled", True):
+        return 0.0  # Let original calculation handle it
     
-is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-# 🔥 Calculate max risk amount (% of balance)
-max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)  # Default 1%
-max_risk_amount = balance * (max_risk_percent / 100.0)
+    # 🔥 Calculate max risk amount (% of balance)
+    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)  # Default 1%
+    max_risk_amount = balance * (max_risk_percent / 100.0)
     
-# Calculate lot size based on SL
-if is_gold:
-    # Gold: 1 lot = $1 per point (0.01 price movement = $0.01)
-    # So with SL of $15 (150 points), 1 lot risks $150
-    point_value = 1.0  # $1 per point per lot
+    # Calculate lot size based on SL
+    if is_gold:
+        # Gold: 1 lot = $1 per point (0.01 price movement = $0.01)
+        # So with SL of $15 (150 points), 1 lot risks $150
+        point_value = 1.0  # $1 per point per lot
         
-    if sl_points > 0:
-        # Lot = Risk / (SL_points × point_value)
-        safe_lot = max_risk_amount / (sl_points * point_value)
-    else:
-        # 🔥 Use % of price for minimum SL instead of fixed points
-        min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
-        if current_price > 0:
-            min_sl_points = current_price * (min_sl_percent / 100.0) * 10  # Convert to points
+        if sl_points > 0:
+            # Lot = Risk / (SL_points × point_value)
+            safe_lot = max_risk_amount / (sl_points * point_value)
         else:
-            min_sl_points = 150  # Fallback ~$15 at $5000 gold
-        safe_lot = max_risk_amount / (min_sl_points * point_value)
+            # 🔥 Use % of price for minimum SL instead of fixed points
+            min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
+            if current_price > 0:
+                min_sl_points = current_price * (min_sl_percent / 100.0) * 10  # Convert to points
+            else:
+                min_sl_points = 150  # Fallback ~$15 at $5000 gold
+            safe_lot = max_risk_amount / (min_sl_points * point_value)
         
-    # 🔥 HARD LIMIT per $1000 balance (more conservative!)
-    max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.02)  # Reduced from 0.05!
-    hard_limit = (balance / 1000.0) * max_lot_per_1000
+        # 🔥 HARD LIMIT per $1000 balance (more conservative!)
+        max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.02)  # Reduced from 0.05!
+        hard_limit = (balance / 1000.0) * max_lot_per_1000
         
-    safe_lot = min(safe_lot, hard_limit)
+        safe_lot = min(safe_lot, hard_limit)
         
-else:
-    # Forex: varies but roughly $10 per pip per lot
-    point_value = 10.0  # Approximate
-        
-    if sl_points > 0:
-        safe_lot = max_risk_amount / (sl_points * point_value)
     else:
-        min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
-        min_sl_pips = 15 if current_price == 0 else current_price * min_sl_percent / 100 * 10000
-        safe_lot = max_risk_amount / (min_sl_pips * point_value)
+        # Forex: varies but roughly $10 per pip per lot
+        point_value = 10.0  # Approximate
         
-    max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.05)
-    hard_limit = (balance / 1000.0) * max_lot_per_1000
+        if sl_points > 0:
+            safe_lot = max_risk_amount / (sl_points * point_value)
+        else:
+            min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
+            min_sl_pips = 15 if current_price == 0 else current_price * min_sl_percent / 100 * 10000
+            safe_lot = max_risk_amount / (min_sl_pips * point_value)
         
-    safe_lot = min(safe_lot, hard_limit)
+        max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.05)
+        hard_limit = (balance / 1000.0) * max_lot_per_1000
+        
+        safe_lot = min(safe_lot, hard_limit)
     
-# Round to 2 decimal places and ensure minimum
-safe_lot = max(0.01, round(safe_lot, 2))
+    # Round to 2 decimal places and ensure minimum
+    safe_lot = max(0.01, round(safe_lot, 2))
     
-# 🔥 Log for debugging
-logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% max_risk=${max_risk_amount:.2f} → lot={safe_lot}")
+    # 🔥 Log for debugging
+    logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% max_risk=${max_risk_amount:.2f} → lot={safe_lot}")
     
-return safe_lot
+    return safe_lot
 
 
 def _validate_sl_distance(symbol: str, entry_price: float, sl_price: float, side: str) -> tuple[float, str]:
-"""
-📏 ตรวจสอบและปรับ SL ให้อยู่ในช่วงที่ปลอดภัย
+    """
+    📏 ตรวจสอบและปรับ SL ให้อยู่ในช่วงที่ปลอดภัย
     
-🔥 PERCENT BASED - รองรับทุก price level!
-- Gold $5000: min SL 0.3% = $15, max SL 1.0% = $50
-- Gold $10000: min SL 0.3% = $30, max SL 1.0% = $100
+    🔥 PERCENT BASED - รองรับทุก price level!
+    - Gold $5000: min SL 0.3% = $15, max SL 1.0% = $50
+    - Gold $10000: min SL 0.3% = $30, max SL 1.0% = $100
     
-Returns: (adjusted_sl, message)
-"""
-global _anti_wipeout_config
+    Returns: (adjusted_sl, message)
+    """
+    global _anti_wipeout_config
     
-if not _anti_wipeout_config.get("enabled", True):
-    return sl_price, "SL validation disabled"
+    if not _anti_wipeout_config.get("enabled", True):
+        return sl_price, "SL validation disabled"
     
-is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-# 🔥 USE PERCENT OF PRICE instead of fixed points!
-if is_gold:
-    min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)  # 0.3% of price
-    max_sl_percent = _anti_wipeout_config.get("gold_sl_percent_max", 1.0)  # 1.0% of price
-else:
-    min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
-    max_sl_percent = _anti_wipeout_config.get("forex_sl_percent_max", 0.5)
-    
-# Calculate min/max SL distance based on % of entry price
-min_distance = entry_price * (min_sl_percent / 100.0)
-max_distance = entry_price * (max_sl_percent / 100.0)
-    
-# Calculate current SL distance
-if side.upper() == "BUY":
-    current_distance = entry_price - sl_price
-else:  # SELL
-    current_distance = sl_price - entry_price
-    
-current_percent = abs(current_distance) / entry_price * 100
-    
-adjusted_sl = sl_price
-message = "SL OK"
-    
-# Check if SL too tight
-if current_percent < min_sl_percent:
-    if side.upper() == "BUY":
-        adjusted_sl = entry_price - min_distance
+    # 🔥 USE PERCENT OF PRICE instead of fixed points!
+    if is_gold:
+        min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)  # 0.3% of price
+        max_sl_percent = _anti_wipeout_config.get("gold_sl_percent_max", 1.0)  # 1.0% of price
     else:
-        adjusted_sl = entry_price + min_distance
-    message = f"⚠️ SL too tight ({current_percent:.2f}%), adjusted to {min_sl_percent}% (${min_distance:.2f})"
-    logger.warning(f"📏 {symbol}: {message}")
+        min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
+        max_sl_percent = _anti_wipeout_config.get("forex_sl_percent_max", 0.5)
     
-# Check if SL too wide
-elif current_percent > max_sl_percent:
+    # Calculate min/max SL distance based on % of entry price
+    min_distance = entry_price * (min_sl_percent / 100.0)
+    max_distance = entry_price * (max_sl_percent / 100.0)
+    
+    # Calculate current SL distance
     if side.upper() == "BUY":
-        adjusted_sl = entry_price - max_distance
-    else:
-        adjusted_sl = entry_price + max_distance
-    message = f"⚠️ SL too wide ({current_percent:.2f}%), adjusted to {max_sl_percent}% (${max_distance:.2f})"
-    logger.warning(f"📏 {symbol}: {message}")
+        current_distance = entry_price - sl_price
+    else:  # SELL
+        current_distance = sl_price - entry_price
     
-return round(adjusted_sl, 2 if is_gold else 5), message
+    current_percent = abs(current_distance) / entry_price * 100
+    
+    adjusted_sl = sl_price
+    message = "SL OK"
+    
+    # Check if SL too tight
+    if current_percent < min_sl_percent:
+        if side.upper() == "BUY":
+            adjusted_sl = entry_price - min_distance
+        else:
+            adjusted_sl = entry_price + min_distance
+        message = f"⚠️ SL too tight ({current_percent:.2f}%), adjusted to {min_sl_percent}% (${min_distance:.2f})"
+        logger.warning(f"📏 {symbol}: {message}")
+    
+    # Check if SL too wide
+    elif current_percent > max_sl_percent:
+        if side.upper() == "BUY":
+            adjusted_sl = entry_price - max_distance
+        else:
+            adjusted_sl = entry_price + max_distance
+        message = f"⚠️ SL too wide ({current_percent:.2f}%), adjusted to {max_sl_percent}% (${max_distance:.2f})"
+        logger.warning(f"📏 {symbol}: {message}")
+    
+    return round(adjusted_sl, 2 if is_gold else 5), message
 
 
 async def _check_trend_alignment(symbol: str, signal: str) -> tuple[bool, str]:
