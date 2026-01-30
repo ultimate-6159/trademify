@@ -457,6 +457,12 @@ class AITradingBot:
         self._last_transcendent_decision: Dict[str, Any] = {}  # Last Transcendent Intelligence decision
         self._last_omniscient_decision: Dict[str, Any] = {}  # Last Omniscient Intelligence decision
         
+        # 🐛 FIX: Add missing _by_symbol dicts for all layers
+        self._last_ultra_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_supreme_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_transcendent_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_omniscient_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
+        
         # 🚀 PARALLEL LAYER PROCESSING - เร็วขึ้น 3-5x
         self.use_parallel_processing = True  # Toggle parallel vs sequential
         self.parallel_processor: Optional[ParallelLayerProcessor] = None
@@ -2626,7 +2632,6 @@ class AITradingBot:
                     )
                     can_trade = ultra_result.can_trade if ultra_result else True
                     score = float(ultra_result.confidence) if ultra_result and hasattr(ultra_result, 'confidence') else 60
-                    self._last_ultra_decision_by_symbol = getattr(self, '_last_ultra_decision_by_symbol', {})
                     self._last_ultra_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 17 error: {e}")
@@ -2654,7 +2659,6 @@ class AITradingBot:
                     )
                     can_trade = supreme_result.can_trade if supreme_result else True
                     score = float(supreme_result.confidence) if supreme_result and hasattr(supreme_result, 'confidence') else 60
-                    self._last_supreme_decision_by_symbol = getattr(self, '_last_supreme_decision_by_symbol', {})
                     self._last_supreme_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 18 error: {e}")
@@ -2682,7 +2686,6 @@ class AITradingBot:
                     )
                     can_trade = trans_result.can_trade if trans_result else True
                     score = float(trans_result.confidence) if trans_result and hasattr(trans_result, 'confidence') else 60
-                    self._last_transcendent_decision_by_symbol = getattr(self, '_last_transcendent_decision_by_symbol', {})
                     self._last_transcendent_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 19 error: {e}")
@@ -2710,7 +2713,6 @@ class AITradingBot:
                     )
                     can_trade = omni_result.can_trade if omni_result else True
                     score = float(omni_result.confidence) if omni_result and hasattr(omni_result, 'confidence') else 60
-                    self._last_omniscient_decision_by_symbol = getattr(self, '_last_omniscient_decision_by_symbol', {})
                     self._last_omniscient_decision_by_symbol[symbol] = {"confidence": score, "can_trade": can_trade}
                 except Exception as e:
                     logger.debug(f"Layer 20 error: {e}")
@@ -3108,7 +3110,7 @@ class AITradingBot:
                     
                     omniscient_decision = self.omniscient_intelligence.analyze(
                         symbol=symbol,
-                        signal_side=signal_side,
+                        signal_side=side_str,  # 🐛 FIX: was signal_side (undefined)
                         current_price=current_price,
                         prices=prices,
                         highs=highs,
