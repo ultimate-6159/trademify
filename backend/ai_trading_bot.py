@@ -4437,29 +4437,55 @@ class AITradingBot:
         
         quantity = round(max(0.01, quantity), 2)  # Min 0.01 lot
         
-        # 🛡️ ANTI-WIPEOUT: Hard limit on lot size based on balance!
-        # Formula: Max Lot = (Balance / 1000) × 0.05 for Gold
-        # Example: $7000 balance → max 0.35 lot ($7000/1000 × 0.05)
-        if is_gold:
-            max_lot_per_1000 = 0.05  # Conservative: 0.05 lot per $1000
-            hard_max_lot = round((balance / 1000) * max_lot_per_1000, 2)
-            hard_max_lot = max(0.01, hard_max_lot)  # Minimum 0.01
-            
-            if quantity > hard_max_lot:
-                old_quantity = quantity
-                quantity = hard_max_lot
-                logger.warning(f"🛡️ ANTI-WIPEOUT: Lot size capped!")
-                logger.warning(f"   Balance: ${balance:.0f} → Max Lot: {hard_max_lot} (was {old_quantity})")
-                logger.warning(f"   Formula: ${balance:.0f}/1000 × 0.05 = {hard_max_lot}")
-        else:
-            # Forex: 0.10 lot per $1000
-            max_lot_per_1000 = 0.10
-            hard_max_lot = round((balance / 1000) * max_lot_per_1000, 2)
-            hard_max_lot = max(0.01, hard_max_lot)
-            
-            if quantity > hard_max_lot:
-                quantity = hard_max_lot
-                logger.warning(f"🛡️ Forex lot capped: {quantity} (max {hard_max_lot} for ${balance:.0f})")
+        # =====================================================
+        # 🛡️ UNIVERSAL LOT SIZING - $200 to $2,000,000,000!
+        # =====================================================
+        # ใช้ 3 วิธีคำนวณแล้วเลือกค่าต่ำสุด:
+        # 1. Risk-Based: (balance × 1%) / (SL × point_value)
+        # 2. Formula-Based: balance / divisor
+        # 3. Tier-Based: absolute max ตาม balance tier
+        
+        # 📊 BALANCE TIER LIMITS (Absolute Max)
+        balance_tiers = {
+            200: {"gold": 0.01, "forex": 0.01},
+            500: {"gold": 0.01, "forex": 0.02},
+            1000: {"gold": 0.02, "forex": 0.05},
+            3000: {"gold": 0.06, "forex": 0.15},
+            5000: {"gold": 0.10, "forex": 0.25},
+            10000: {"gold": 0.20, "forex": 0.50},
+            25000: {"gold": 0.50, "forex": 1.00},
+            50000: {"gold": 1.00, "forex": 2.00},
+            100000: {"gold": 2.00, "forex": 5.00},
+            500000: {"gold": 10.0, "forex": 25.0},
+            1000000: {"gold": 20.0, "forex": 50.0},
+            10000000: {"gold": 200.0, "forex": 500.0},
+            100000000: {"gold": 2000.0, "forex": 5000.0},
+            2000000000: {"gold": 40000.0, "forex": 100000.0},
+        }
+        
+        # Get tier max for current balance
+        tier_max = 0.01
+        for tier_balance, limits in sorted(balance_tiers.items(), reverse=True):
+            if balance >= tier_balance:
+                tier_max = limits["gold"] if is_gold else limits["forex"]
+                break
+        
+        # Formula-based limit
+        divisor = 50000 if is_gold else 20000
+        formula_lot = balance / divisor
+        
+        # Risk-based limit (already calculated in quantity)
+        # Final: Take minimum of all methods
+        hard_max_lot = min(quantity, formula_lot, tier_max)
+        hard_max_lot = max(0.01, round(hard_max_lot, 2))
+        
+        if quantity > hard_max_lot:
+            old_quantity = quantity
+            quantity = hard_max_lot
+            logger.warning(f"🛡️ UNIVERSAL LOT CAP APPLIED!")
+            logger.warning(f"   Balance: ${balance:,.0f}")
+            logger.warning(f"   Original: {old_quantity:.2f} → Formula: {formula_lot:.2f} → Tier Max: {tier_max:.2f}")
+            logger.warning(f"   ✅ FINAL LOT: {quantity:.2f}")
         
         # Create order
         order = Order(
@@ -4477,6 +4503,7 @@ class AITradingBot:
         sl_str = f"${stop_loss:,.5f}" if stop_loss else "N/A"
         tp_str = f"${take_profit:,.5f}" if take_profit else "N/A"
         logger.info(f"   Entry: ${current_price:,.5f} | SL: {sl_str} | TP: {tp_str}")
+        logger.info(f"   🛡️ Safe Lot: {quantity:.2f} (Tier Max: {tier_max}, Formula: {formula_lot:.2f})")
         
         # Debug: Check trading engine state
         logger.info(f"   🔍 TradingEngine enabled: {self.trading_engine.enabled if self.trading_engine else 'N/A'}")

@@ -280,105 +280,198 @@ _pullback_config = {
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
 
 # =====================
-# 🛡️ ANTI-WIPEOUT PROTECTION - ป้องกันล้างพอร์ต!
+# 🛡️ UNIVERSAL LOT SIZING - $200 to $2,000,000,000!
 # =====================
-# ปัญหา: Lot 0.67 บน port $7000 = ล้างพอร์ตเมื่อผิดทาง
-# Solution: จำกัด lot size ตาม % ของ port + minimum SL distance
+# 🔥 สูตรสากลที่ปลอดภัยสำหรับทุกขนาดบัญชี
+# 
+# ปัญหาที่พบ:
+# - บัญชี $3,181 ใช้ Gold 0.8 lot (SL $95 = $7,600 risk = 239%!)
+# - บัญชี $3,181 ใช้ EUR 10 lot (จะล้างพอร์ตทันที!)
+# 
+# Solution: สูตร Risk-Based + Hard Limit ที่ scale ตาม balance
 
 _anti_wipeout_config = {
     "enabled": True,                          # ✅ เปิด! ป้องกันล้างพอร์ต
     
-    # 🎯 LOT SIZE LIMITER - จำกัด lot ตาม % ของ port
-    # 🔥 ULTRA CONSERVATIVE - รองรับ $100 ถึง $2,000,000,000!
-    "max_risk_per_trade_percent": 1.0,        # 🔥 Risk สูงสุด 1% ต่อเทรด (ลดจาก 2%!)
-    "max_lot_size_percent": 2.0,              # 🔥 Lot สูงสุด 2% ของ balance (ใน margin)
-    "gold_max_lot_per_1000": 0.02,            # 🔥 Gold: สูงสุด 0.02 lot ต่อทุก $1000 (ลดจาก 0.05!)
-    "forex_max_lot_per_1000": 0.05,           # 🔥 Forex: สูงสุด 0.05 lot ต่อทุก $1000
+    # =====================
+    # 🎯 UNIVERSAL LOT FORMULA - Risk-Based Calculation
+    # =====================
+    # Lot = (Balance × Risk%) / (SL_distance × Point_Value)
+    #
+    # 🏆 Gold ($5000, SL $15 = 150 pts):
+    #   Point Value = $100 per $1 move per lot (100 oz contract)
+    #   Risk per lot with $15 SL = $15 × 100 = $1,500
+    #
+    # Formula: lot = (balance × 0.01) / 1500
+    #
+    "max_risk_per_trade_percent": 1.0,        # 🔥 Risk 1% ต่อเทรด (เหมาะทุกขนาด)
     
-    # 📏 MINIMUM SL DISTANCE - SL ต้องกว้างพอ (% BASED!)
-    # 🔥 ใช้ % ของราคาแทน fixed points - scale ได้ทุกขนาด port!
-    "gold_sl_percent_min": 0.3,               # 🔥 Gold SL >= 0.3% ของราคา (~$15 ที่ $5000)
-    "gold_sl_percent_max": 1.0,               # 🔥 Gold SL <= 1.0% ของราคา (~$50 ที่ $5000)
-    "forex_sl_percent_min": 0.15,             # 🔥 Forex SL >= 0.15% ของราคา
-    "forex_sl_percent_max": 0.5,              # 🔥 Forex SL <= 0.5% ของราคา
+    # =====================
+    # 🔒 HARD LIMITS BY BALANCE TIER
+    # =====================
+    # เพิ่มความปลอดภัยด้วย absolute max ต่อ tier
+    #
+    "gold_lot_formula_divisor": 50000,        # 🔥 Gold: lot = balance / 50000
+    "forex_lot_formula_divisor": 20000,       # 🔥 Forex: lot = balance / 20000
     
-    # 🚫 TREND FILTER - ห้ามสวนเทรนด์รุนแรง
-    "check_higher_timeframe": True,           # ✅ เช็ค H4 ก่อนเข้า
-    "block_counter_trend": True,              # ✅ ห้ามเทรดสวนเทรนด์
-    "min_trend_strength": 60,                 # 🔥 Trend ต้องแข็งแรง >= 60%
+    # =====================
+    # 📊 BALANCE TIER LIMITS (Absolute Max)
+    # =====================
+    "balance_tiers": {
+        200: {"gold_max": 0.01, "forex_max": 0.01},      # $200-$499
+        500: {"gold_max": 0.01, "forex_max": 0.02},      # $500-$999  
+        1000: {"gold_max": 0.02, "forex_max": 0.05},     # $1,000-$2,999
+        3000: {"gold_max": 0.06, "forex_max": 0.15},     # $3,000-$4,999
+        5000: {"gold_max": 0.10, "forex_max": 0.25},     # $5,000-$9,999
+        10000: {"gold_max": 0.20, "forex_max": 0.50},    # $10,000-$24,999
+        25000: {"gold_max": 0.50, "forex_max": 1.00},    # $25,000-$49,999
+        50000: {"gold_max": 1.00, "forex_max": 2.00},    # $50,000-$99,999
+        100000: {"gold_max": 2.00, "forex_max": 5.00},   # $100,000-$499,999
+        500000: {"gold_max": 10.0, "forex_max": 25.0},   # $500,000-$999,999
+        1000000: {"gold_max": 20.0, "forex_max": 50.0},  # $1M-$9.99M
+        10000000: {"gold_max": 200.0, "forex_max": 500.0}, # $10M-$99.99M
+        100000000: {"gold_max": 2000.0, "forex_max": 5000.0}, # $100M-$1.99B
+        2000000000: {"gold_max": 40000.0, "forex_max": 100000.0}, # $2B
+    },
+    
+    # =====================
+    # 📏 SL DISTANCE (% of Price)
+    # =====================
+    "gold_sl_percent_min": 0.3,               # Gold SL >= 0.3% (~$15 ที่ $5000)
+    "gold_sl_percent_max": 1.5,               # Gold SL <= 1.5% (~$75 ที่ $5000)
+    "forex_sl_percent_min": 0.15,             # Forex SL >= 0.15%
+    "forex_sl_percent_max": 0.5,              # Forex SL <= 0.5%
+    
+    # =====================
+    # 🚫 TREND PROTECTION
+    # =====================
+    "check_higher_timeframe": True,
+    "block_counter_trend": True,
+    "min_trend_strength": 60,
 }
 
-def _calculate_safe_lot_size(balance: float, symbol: str, sl_points: float, current_price: float = 0) -> float:
+
+def _get_max_lot_for_balance(balance: float, is_gold: bool) -> float:
     """
-    🛡️ คำนวณ Lot Size ที่ปลอดภัย - UNIVERSAL SCALING $100 to $2B!
+    🔒 ดึง absolute max lot จาก balance tier
     
-    Formula:
-    - Risk Amount = Balance × Risk% (e.g., $300 × 1% = $3 max loss)
-    - Lot Size = Risk Amount / (SL$ × Lot Value)
+    ใช้ tier ที่ balance >= tier_threshold
+    """
+    global _anti_wipeout_config
     
-    🔥 EXAMPLES:
-    - $300 balance, 1% risk, Gold SL $15 → Risk $3, Lot = 0.01 (minimum)
-    - $1,000 balance, 1% risk, Gold SL $15 → Risk $10, Lot = 0.01
-    - $10,000 balance, 1% risk, Gold SL $15 → Risk $100, Lot = 0.06
-    - $100,000 balance, 1% risk, Gold SL $15 → Risk $1000, Lot = 0.67
-    - $1,000,000 balance, 1% risk, Gold SL $15 → Risk $10000, Lot = 6.67
+    tiers = _anti_wipeout_config.get("balance_tiers", {})
+    key = "gold_max" if is_gold else "forex_max"
+    
+    # Sort tiers descending to find highest matching tier
+    sorted_tiers = sorted(tiers.items(), key=lambda x: x[0], reverse=True)
+    
+    for tier_balance, limits in sorted_tiers:
+        if balance >= tier_balance:
+            return limits.get(key, 0.01)
+    
+    # Default for very small accounts
+    return 0.01
+
+
+def _calculate_safe_lot_size(balance: float, symbol: str, sl_price_distance: float = 0, current_price: float = 0) -> float:
+    """
+    🛡️ UNIVERSAL LOT CALCULATOR - $200 to $2,000,000,000!
+    
+    ใช้ 3 วิธีคำนวณแล้วเลือกค่าต่ำสุด:
+    1. Risk-Based: (balance × 1%) / (SL × point_value)
+    2. Formula-Based: balance / divisor
+    3. Tier-Based: absolute max ตาม balance tier
+    
+    🔥 EXAMPLES (Gold, 1% risk, $15 SL):
+    ┌──────────────┬───────────┬───────────┬───────────┬───────────┐
+    │ Balance      │ Risk-Based│ Formula   │ Tier Max  │ Final Lot │
+    ├──────────────┼───────────┼───────────┼───────────┼───────────┤
+    │ $200         │ 0.013     │ 0.004     │ 0.01      │ 0.01      │
+    │ $500         │ 0.033     │ 0.01      │ 0.01      │ 0.01      │
+    │ $1,000       │ 0.067     │ 0.02      │ 0.02      │ 0.02      │
+    │ $3,000       │ 0.20      │ 0.06      │ 0.06      │ 0.06      │
+    │ $5,000       │ 0.33      │ 0.10      │ 0.10      │ 0.10      │
+    │ $10,000      │ 0.67      │ 0.20      │ 0.20      │ 0.20      │
+    │ $50,000      │ 3.33      │ 1.00      │ 1.00      │ 1.00      │
+    │ $100,000     │ 6.67      │ 2.00      │ 2.00      │ 2.00      │
+    │ $1,000,000   │ 66.67     │ 20.0      │ 20.0      │ 20.0      │
+    │ $10,000,000  │ 666.67    │ 200.0     │ 200.0     │ 200.0     │
+    │ $100,000,000 │ 6666.67   │ 2000.0    │ 2000.0    │ 2000.0    │
+    │ $2,000,000,000│ 133333   │ 40000.0   │ 40000.0   │ 40000.0   │
+    └──────────────┴───────────┴───────────┴───────────┴───────────┘
     """
     global _anti_wipeout_config
     
     if not _anti_wipeout_config.get("enabled", True):
-        return 0.0  # Let original calculation handle it
+        return 0.01
     
     is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-    # 🔥 Calculate max risk amount (% of balance)
-    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)  # Default 1%
-    max_risk_amount = balance * (max_risk_percent / 100.0)
+    # =====================
+    # 1. RISK-BASED CALCULATION
+    # =====================
+    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)
+    risk_amount = balance * (max_risk_percent / 100.0)
     
-    # Calculate lot size based on SL
     if is_gold:
-        # Gold: 1 lot = $1 per point (0.01 price movement = $0.01)
-        # So with SL of $15 (150 points), 1 lot risks $150
-        point_value = 1.0  # $1 per point per lot
+        # Gold: $100 per $1 price move per lot (contract = 100 oz)
+        # SL of $15 = $1500 risk per lot
+        point_value_per_lot = 100.0  # $100 per $1 move per lot
         
-        if sl_points > 0:
-            # Lot = Risk / (SL_points × point_value)
-            safe_lot = max_risk_amount / (sl_points * point_value)
+        # Use provided SL distance or default
+        if sl_price_distance > 0:
+            sl_dollar = sl_price_distance
         else:
-            # 🔥 Use % of price for minimum SL instead of fixed points
-            min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
-            if current_price > 0:
-                min_sl_points = current_price * (min_sl_percent / 100.0) * 10  # Convert to points
-            else:
-                min_sl_points = 150  # Fallback ~$15 at $5000 gold
-            safe_lot = max_risk_amount / (min_sl_points * point_value)
+            # Default SL = 0.3% of price
+            min_sl_pct = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
+            sl_dollar = (current_price if current_price > 0 else 5000) * (min_sl_pct / 100.0)
         
-        # 🔥 HARD LIMIT per $1000 balance (more conservative!)
-        max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.02)  # Reduced from 0.05!
-        hard_limit = (balance / 1000.0) * max_lot_per_1000
-        
-        safe_lot = min(safe_lot, hard_limit)
+        risk_per_lot = sl_dollar * point_value_per_lot
+        risk_based_lot = risk_amount / risk_per_lot if risk_per_lot > 0 else 0.01
         
     else:
-        # Forex: varies but roughly $10 per pip per lot
-        point_value = 10.0  # Approximate
+        # Forex: ~$10 per pip per lot (varies by pair)
+        pip_value_per_lot = 10.0
         
-        if sl_points > 0:
-            safe_lot = max_risk_amount / (sl_points * point_value)
+        if sl_price_distance > 0:
+            # Convert price distance to pips (assuming 4/5 digit pricing)
+            sl_pips = sl_price_distance * 10000
         else:
-            min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
-            min_sl_pips = 15 if current_price == 0 else current_price * min_sl_percent / 100 * 10000
-            safe_lot = max_risk_amount / (min_sl_pips * point_value)
+            sl_pips = 30  # Default 30 pips
         
-        max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.05)
-        hard_limit = (balance / 1000.0) * max_lot_per_1000
-        
-        safe_lot = min(safe_lot, hard_limit)
+        risk_per_lot = sl_pips * pip_value_per_lot
+        risk_based_lot = risk_amount / risk_per_lot if risk_per_lot > 0 else 0.01
     
-    # Round to 2 decimal places and ensure minimum
-    safe_lot = max(0.01, round(safe_lot, 2))
+    # =====================
+    # 2. FORMULA-BASED CALCULATION
+    # =====================
+    divisor = _anti_wipeout_config.get(
+        "gold_lot_formula_divisor" if is_gold else "forex_lot_formula_divisor",
+        50000 if is_gold else 20000
+    )
+    formula_lot = balance / divisor
     
-    # 🔥 Log for debugging
-    logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% max_risk=${max_risk_amount:.2f} → lot={safe_lot}")
+    # =====================
+    # 3. TIER-BASED MAX
+    # =====================
+    tier_max = _get_max_lot_for_balance(balance, is_gold)
+    
+    # =====================
+    # FINAL: Take minimum of all 3 methods
+    # =====================
+    safe_lot = min(risk_based_lot, formula_lot, tier_max)
+    
+    # Apply min/max constraints
+    safe_lot = max(0.01, safe_lot)  # Minimum 0.01
+    safe_lot = round(safe_lot, 2)   # Round to 2 decimals
+    
+    # =====================
+    # LOG FOR DEBUG
+    # =====================
+    logger.info(f"🛡️ UNIVERSAL LOT CALC: {symbol}")
+    logger.info(f"   Balance: ${balance:,.0f} | Risk: {max_risk_percent}%")
+    logger.info(f"   Risk-Based: {risk_based_lot:.4f} | Formula: {formula_lot:.4f} | Tier Max: {tier_max:.2f}")
+    logger.info(f"   ✅ FINAL LOT: {safe_lot}")
     
     return safe_lot
 
