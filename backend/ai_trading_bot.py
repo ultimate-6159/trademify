@@ -4139,9 +4139,22 @@ class AITradingBot:
         
         logger.info(f"   ✅ Signal in allowed list")
         
-        # Check existing positions
+        # 🔄 CRITICAL: Sync with broker BEFORE checking existing positions
+        # This ensures we have the latest state from MT5 (positions may have been closed by SL/TP hit)
+        if self.trading_engine:
+            try:
+                sync_result = await self.trading_engine.sync_with_broker()
+                if sync_result.get("removed"):
+                    for removed in sync_result["removed"]:
+                        logger.info(f"   🔄 SYNC: Detected closed position {removed['symbol']} - clearing from cache")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Sync with broker failed: {e} - using cached positions")
+        
+        # Check existing positions (now synced with MT5)
+        has_position = False
         for pos in self.trading_engine.positions.values():
             if pos.symbol == symbol:
+                has_position = True
                 logger.info(f"   ❌ SKIP: Already have position for {symbol}")
                 return {"action": "SKIP", "reason": "Already have position"}
         

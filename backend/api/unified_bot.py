@@ -1416,6 +1416,20 @@ async def _sync_positions_with_mt5():
                 }
                 logger.info(f"📥 New position tracked: #{ticket} ({symbol} {side})")
         
+        # 🔥 CRITICAL: Also sync trading_engine.positions cache
+        # This ensures ai_trading_bot.py sees the correct position state
+        if _bot and _bot.trading_engine and hasattr(_bot.trading_engine, 'sync_with_broker'):
+            try:
+                sync_result = await _bot.trading_engine.sync_with_broker()
+                if sync_result.get("removed"):
+                    for removed in sync_result["removed"]:
+                        logger.info(f"🔄 TradingEngine sync: Removed {removed['symbol']} from cache")
+                if sync_result.get("added"):
+                    for added in sync_result["added"]:
+                        logger.info(f"🔄 TradingEngine sync: Added {added['symbol']} to cache")
+            except Exception as sync_err:
+                logger.debug(f"TradingEngine sync: {sync_err}")
+        
     except Exception as e:
         logger.warning(f"Sync with MT5 failed: {e}")
 
@@ -1897,16 +1911,20 @@ async def _validate_and_cleanup_tracking():
                 logger.info(f"🧹 Cleaned orphan position #{ticket} ({symbol})")
         
         # 2. Clean up cooldowns for symbols without positions
-        # Only if we're checking symbols that have no MT5 positions
+        # 🔥 FIX: ลด buffer จาก 120 วินาที เป็น 5 วินาที เพื่อให้เทรดได้เร็วขึ้น!
         for symbol in list(_last_traded_signal.keys()):
             if symbol.upper() not in mt5_symbols:
-                # Check if cooldown has expired (allow 60s buffer after position close)
+                # Check if cooldown has expired (allow 5s buffer after position close)
                 last_time = _last_traded_signal[symbol].get("timestamp")
                 if last_time:
                     elapsed = (datetime.now() - last_time).total_seconds()
-                    if elapsed > 120:  # 2 minutes after position close
+                    if elapsed > 5:  # 🔥 5 seconds - ให้เทรดได้เร็ว!
                         del _last_traded_signal[symbol]
                         logger.info(f"🧹 Cleaned expired cooldown for {symbol} (no MT5 position)")
+                else:
+                    # No timestamp - ลบทันที
+                    del _last_traded_signal[symbol]
+                    logger.info(f"🧹 Cleaned stale cooldown for {symbol} (no timestamp, no MT5 position)")
         
         # 3. Clean up peak profits for closed positions
         for ticket in list(_peak_profit_by_position.keys()):
@@ -2623,40 +2641,88 @@ async def _check_open_positions(symbol: str) -> bool:
     Check if there's already an open position for this symbol
     
     🔥 CRITICAL: ต้อง query MT5 ใหม่ทุกครั้งเพื่อให้ได้ข้อมูลล่าสุด
+    🔥 FIX: Force refresh และ log รายละเอียดเพื่อ debug
     """
-    global _bot, _known_positions
+    global _bot, _known_positions, _last_traded_signal
     
     if not _bot or not _bot.trading_engine:
+        logger.warning(f"📊 _check_open_positions({symbol}): Bot not ready")
         return False
     
     try:
+        # 🔥 FORCE REFRESH: Ensure MT5 connection is fresh
+        broker = _bot.trading_engine.broker
+        if hasattr(broker, 'ensure_connected'):
+            broker.ensure_connected()
+        
         # 🔥 ALWAYS get fresh positions from MT5
-        positions = await _bot.trading_engine.broker.get_positions()
+        positions = await broker.get_positions()
+        
+        # 🔥 DEBUG: Log what MT5 returns
+        pos_count = len(positions) if positions else 0
+        logger.info(f"🔍 MT5 QUERY: {symbol} - MT5 returns {pos_count} total positions")
         
         if not positions:
-            # No positions at all
-            logger.debug(f"📊 _check_open_positions({symbol}): MT5 returns 0 positions")
+            # No positions at all - clear any stale tracking for this symbol
+            if symbol in _known_positions or symbol.upper() in [v.get("symbol", "").upper() for v in _known_positions.values()]:
+                logger.warning(f"🧹 _check_open_positions({symbol}): MT5=0 but found in tracking - CLEARING STALE DATA!")
+                # Clear stale entries
+                tickets_to_remove = [k for k, v in _known_positions.items() if v.get("symbol", "").upper() == symbol.upper()]
+                for ticket in tickets_to_remove:
+                    del _known_positions[ticket]
+                # Clear cooldown
+                if symbol in _last_traded_signal:
+                    del _last_traded_signal[symbol]
+                if symbol.upper() in _last_traded_signal:
+                    del _last_traded_signal[symbol.upper()]
             return False
         
         # Check if any position matches this symbol
+        mt5_has_position = False
         for pos in positions:
             # Handle both dict and Position objects
             if isinstance(pos, dict):
                 pos_symbol = pos.get("symbol", "")
                 pos_ticket = pos.get("ticket") or pos.get("id")
+                pos_profit = pos.get("profit", 0)
             else:
                 pos_symbol = getattr(pos, "symbol", "")
                 pos_ticket = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                pos_profit = getattr(pos, "profit", 0)
+            
+            # 🔥 DEBUG: Log each position
+            logger.debug(f"   📍 Position: #{pos_ticket} {pos_symbol} profit={pos_profit}")
             
             if pos_symbol.upper() == symbol.upper():
-                logger.debug(f"📊 _check_open_positions({symbol}): Found position #{pos_ticket}")
-                return True
+                logger.info(f"✅ MT5 HAS POSITION: {symbol} #{pos_ticket} (profit={pos_profit})")
+                mt5_has_position = True
+                break
         
-        logger.debug(f"📊 _check_open_positions({symbol}): No position found for this symbol")
-        return False
+        if not mt5_has_position:
+            # No position for this symbol - clear any stale tracking
+            logger.info(f"📊 MT5 NO POSITION for {symbol} (total {pos_count} other positions)")
+            # Clear stale entries for this symbol
+            tickets_to_remove = [k for k, v in _known_positions.items() if v.get("symbol", "").upper() == symbol.upper()]
+            for ticket in tickets_to_remove:
+                logger.warning(f"🧹 Clearing stale tracking #{ticket} for {symbol}")
+                del _known_positions[ticket]
+            # 🔥 IMMEDIATE COOLDOWN RESET - ให้เทรดได้ทันที!
+            if symbol in _last_traded_signal:
+                logger.info(f"🔓 IMMEDIATE RESET: Clearing cooldown for {symbol} - MT5 has no position!")
+                del _last_traded_signal[symbol]
+            if symbol.upper() in _last_traded_signal:
+                logger.info(f"🔓 IMMEDIATE RESET: Clearing cooldown for {symbol.upper()} - MT5 has no position!")
+                del _last_traded_signal[symbol.upper()]
+            # 🔥 Also clear any known_positions tracking
+            if symbol in _known_positions:
+                del _known_positions[symbol]
+        
+        return mt5_has_position
         
     except Exception as e:
-        logger.warning(f"Failed to check positions: {e}")
+        logger.error(f"❌ Failed to check positions for {symbol}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False  # Assume no position if check fails
 
 
