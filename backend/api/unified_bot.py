@@ -2642,6 +2642,7 @@ async def _check_open_positions(symbol: str) -> bool:
     
     🔥 CRITICAL: ต้อง query MT5 ใหม่ทุกครั้งเพื่อให้ได้ข้อมูลล่าสุด
     🔥 FIX: Force refresh และ log รายละเอียดเพื่อ debug
+    🔥 FIX2: Use MT5 directly for most accurate data
     """
     global _bot, _known_positions, _last_traded_signal
     
@@ -2655,12 +2656,41 @@ async def _check_open_positions(symbol: str) -> bool:
         if hasattr(broker, 'ensure_connected'):
             broker.ensure_connected()
         
-        # 🔥 ALWAYS get fresh positions from MT5
+        # 🔥 DIRECT MT5 QUERY: Bypass any caching - get REAL positions
+        if hasattr(broker, '_mt5') and broker._mt5:
+            mt5 = broker._mt5
+            
+            # Query symbol-specific positions for accuracy
+            symbol_positions = mt5.positions_get(symbol=symbol)
+            
+            if symbol_positions and len(symbol_positions) > 0:
+                pos_count = len(symbol_positions)
+                logger.info(f"🔍 MT5 DIRECT QUERY: {symbol} - Found {pos_count} position(s) for this symbol")
+                for pos in symbol_positions:
+                    logger.info(f"   📍 #{pos.ticket} {pos.symbol} vol={pos.volume} profit={pos.profit:.2f}")
+                return True
+            else:
+                # No positions for this symbol - clear tracking
+                logger.info(f"📊 MT5 DIRECT: NO POSITION for {symbol}")
+                # Clear stale entries
+                tickets_to_remove = [k for k, v in _known_positions.items() if v.get("symbol", "").upper() == symbol.upper()]
+                for ticket in tickets_to_remove:
+                    logger.info(f"🧹 Clearing stale tracking #{ticket} for {symbol}")
+                    del _known_positions[ticket]
+                # Clear cooldown
+                if symbol in _last_traded_signal:
+                    logger.info(f"🔓 Clearing cooldown for {symbol}")
+                    del _last_traded_signal[symbol]
+                if symbol.upper() in _last_traded_signal:
+                    del _last_traded_signal[symbol.upper()]
+                return False
+        
+        # Fallback to broker method if direct MT5 access fails
         positions = await broker.get_positions()
         
         # 🔥 DEBUG: Log what MT5 returns
         pos_count = len(positions) if positions else 0
-        logger.info(f"🔍 MT5 QUERY: {symbol} - MT5 returns {pos_count} total positions")
+        logger.info(f"🔍 MT5 QUERY (fallback): {symbol} - MT5 returns {pos_count} total positions")
         
         if not positions:
             # No positions at all - clear any stale tracking for this symbol

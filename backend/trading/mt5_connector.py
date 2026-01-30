@@ -716,37 +716,74 @@ class MT5Broker(BaseBroker):
         
         return False
     
+    
     async def get_positions(self) -> List[Position]:
-        """ดึง Position ที่เปิดอยู่"""
+        """
+        ดึง Position ที่เปิดอยู่
+        
+        🔥 FIX: Always return fresh data from MT5, clear cache if MT5 returns empty!
+        🔥 FIX2: Force symbol refresh before query to get latest data
+        """
         try:
             if self._mt5:
+                # 🔥 FORCE REFRESH: Re-check connection and terminal state
+                terminal = self._mt5.terminal_info()
+                if not terminal or not terminal.connected:
+                    logger.warning("⚠️ MT5 terminal not connected - attempting reconnect")
+                    self.ensure_connected()
+                
+                # 🔥 FORCE FRESH QUERY from MT5
                 positions = self._mt5.positions_get()
-                if positions:
-                    result = []
-                    for pos in positions:
-                        position = Position(
-                            id=str(pos.ticket),
-                            symbol=pos.symbol,
-                            side=OrderSide.BUY if pos.type == 0 else OrderSide.SELL,
-                            quantity=pos.volume,
-                            entry_price=pos.price_open,
-                            current_price=pos.price_current,
-                            stop_loss=pos.sl if pos.sl > 0 else None,
-                            take_profit=pos.tp if pos.tp > 0 else None,
-                            pnl=pos.profit,
-                        )
-                        result.append(position)
-                        self._positions[position.id] = position
-                    return result
+                
+                # 🔥 CRITICAL: If MT5 returns None or empty, clear the cache!
+                if positions is None or len(positions) == 0:
+                    # No positions in MT5 - clear all cached positions
+                    if self._positions:
+                        logger.info(f"🧹 MT5 returns 0 positions - clearing {len(self._positions)} cached positions")
+                        self._positions.clear()
+                    return []
+                
+                # Build fresh list from MT5 data
+                result = []
+                current_tickets = set()
+                
+                for pos in positions:
+                    position = Position(
+                        id=str(pos.ticket),
+                        symbol=pos.symbol,
+                        side=OrderSide.BUY if pos.type == 0 else OrderSide.SELL,
+                        quantity=pos.volume,
+                        entry_price=pos.price_open,
+                        current_price=pos.price_current,
+                        stop_loss=pos.sl if pos.sl > 0 else None,
+                        take_profit=pos.tp if pos.tp > 0 else None,
+                        pnl=pos.profit,
+                    )
+                    result.append(position)
+                    current_tickets.add(position.id)
+                    self._positions[position.id] = position
+                
+                # 🔥 FIX: Remove positions from cache that are no longer in MT5
+                stale_tickets = [t for t in self._positions.keys() if t not in current_tickets]
+                for ticket in stale_tickets:
+                    logger.info(f"🧹 Removing stale position #{ticket} from cache")
+                    del self._positions[ticket]
+                
+                return result
+            
+            # MT5 not connected - return empty (not cached data!)
+            logger.warning("⚠️ MT5 not connected - returning empty positions")
+            return []
                     
         except Exception as e:
             logger.error(f"Failed to get positions: {e}")
-        
-        return list(self._positions.values())
+            # 🔥 FIX: Return empty list on error, not cached data!
+            return []
     
     async def close_position(self, position_id: str) -> TradeResult:
         """
         ปิด Position (แก้ไขแล้ว!)
+        
         
         - Auto-retry with different filling modes
         - Price normalization
