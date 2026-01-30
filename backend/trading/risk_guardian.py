@@ -342,21 +342,63 @@ class RiskGuardian:
         risk_amount = balance * (effective_risk / 100)
         
         # Calculate position size
-        # For forex: lot_size = risk_amount / (stop_pips * pip_value)
-        # Simplified: lot_size = risk_amount / stop_distance
-        lot_size = risk_amount / stop_distance
+        # 🔴 CRITICAL FIX: Different calculation for Gold vs Forex!
+        # Gold: 1 lot = 100 oz, so $1 move = $100 per lot
+        # Forex: 1 lot = 100,000 units, $0.0001 move = $10 per lot (for major pairs)
+        
+        is_gold = symbol and ('XAU' in symbol.upper() or 'GOLD' in symbol.upper())
+        
+        if is_gold:
+            # Gold: point_value = $100 per $1 price move per lot
+            # Risk per lot = SL distance × $100
+            # lot_size = risk_amount / (stop_distance × 100)
+            point_value = 100.0  # $100 per $1 move per lot for Gold
+            risk_per_lot = stop_distance * point_value
+            lot_size = risk_amount / risk_per_lot if risk_per_lot > 0 else 0.01
+            
+            # 🛡️ HARD CAP for Gold based on balance (anti-wipeout)
+            # Max lot = balance / 50000 (very conservative)
+            max_lot_by_balance = balance / 50000
+            lot_size = min(lot_size, max_lot_by_balance)
+            
+            logger.info(f"   🥇 GOLD Lot Calc: risk=${risk_amount:.2f} / (SL ${stop_distance:.2f} × $100) = {lot_size:.4f}")
+        else:
+            # Forex: lot_size = risk_amount / (stop_pips × pip_value)
+            # Simplified: assume pip_value ≈ $10 per lot for major pairs
+            pip_value = 10.0
+            stop_pips = stop_distance * 10000  # Convert to pips (4-digit pricing)
+            risk_per_lot = stop_pips * pip_value
+            lot_size = risk_amount / risk_per_lot if risk_per_lot > 0 else 0.01
         
         # Round to standard lot sizes (0.01 step for forex)
         lot_size = max(0.01, round(lot_size, 2))
         
-        # Cap at reasonable maximum - but ensure minimum 0.01 lot for micro accounts
-        # Note: entry_price comparison only valid for forex pairs (1.0-2.0 range)
-        # For Gold/Indices, use different formula
-        if entry_price < 100:  # Forex pairs like EURUSD (1.0-2.0)
-            max_lot = min(10.0, balance / entry_price * 0.1)
-        else:  # Gold, Indices, etc (high prices like 4000-5000)
-            # For small accounts, allow minimum lot regardless
-            max_lot = max(0.01, min(10.0, balance * 0.1))  # 10% of balance as max
+        # 🛡️ UNIVERSAL HARD CAP based on balance tier (anti-wipeout!)
+        # This prevents insane lot sizes regardless of calculation errors
+        balance_tiers = {
+            200: {"gold": 0.01, "forex": 0.01},
+            500: {"gold": 0.01, "forex": 0.02},
+            1000: {"gold": 0.02, "forex": 0.05},
+            3000: {"gold": 0.06, "forex": 0.15},
+            5000: {"gold": 0.10, "forex": 0.25},
+            10000: {"gold": 0.20, "forex": 0.50},
+            25000: {"gold": 0.50, "forex": 1.00},
+            50000: {"gold": 1.00, "forex": 2.00},
+            100000: {"gold": 2.00, "forex": 5.00},
+        }
+        
+        key = "gold" if is_gold else "forex"
+        max_lot = 0.01  # Default minimum
+        
+        for tier_balance, limits in sorted(balance_tiers.items(), reverse=True):
+            if balance >= tier_balance:
+                max_lot = limits.get(key, 0.01)
+                break
+        
+        # Apply hard cap
+        if lot_size > max_lot:
+            logger.warning(f"   ⚠️ Lot capped: {lot_size:.2f} → {max_lot:.2f} (balance tier limit)")
+            lot_size = max_lot
         
         lot_size = min(lot_size, max_lot)
         
