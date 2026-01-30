@@ -227,7 +227,7 @@ def _release_trade_lock(symbol: str):
 # 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 300  # 5 นาที cooldown
+_trade_cooldown_seconds = 60  # 🔥 ลดเหลือ 1 นาที cooldown (จาก 5 นาที)
 
 # 🥇 SYMBOL WHITELIST - เทรดเฉพาะ Gold เท่านั้น!
 _symbol_whitelist = {
@@ -1481,11 +1481,127 @@ async def _reinitialize_bot():
         _bot_status["error"] = f"Reinitialization failed: {e}"
 
 
+async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict]:
+    """
+    🚀 PARALLEL ANALYSIS - วิเคราะห์ symbol เดียว (ใช้กับ asyncio.gather)
+    
+    Returns: analysis result หรือ None
+    """
+    global _bot, _bot_status
+    
+    try:
+        # Run analysis
+        analysis = await _bot.analyze_symbol(symbol)
+        
+        if not analysis:
+            return None
+        
+        # Store analysis
+        _bot_status["last_analysis"][symbol] = analysis
+        
+        # Extract signal - try multiple confidence fields
+        raw_confidence = analysis.get("enhanced_confidence", 0) or analysis.get("base_confidence", 0) or analysis.get("confidence", 0)
+        
+        # 🔥 Get current_price from analysis or market_data
+        current_price = analysis.get("current_price", 0)
+        if current_price == 0 and "market_data" in analysis:
+            current_price = analysis["market_data"].get("close", 0)
+        
+        signal_data = {
+            "symbol": symbol,
+            "signal": analysis.get("signal", "WAIT"),
+            "confidence": raw_confidence,
+            "quality": analysis.get("quality", "SKIP"),
+            "current_price": current_price,
+            "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
+            "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
+            "scores": analysis.get("scores", {}),
+            "indicators": analysis.get("indicators", {}),
+            "market_regime": analysis.get("market_regime", "UNKNOWN"),
+            "market_data": analysis.get("market_data", {}),
+            "timestamp": datetime.now().isoformat()
+        }
+        _bot_status["last_signal"][symbol] = signal_data
+        
+        # ⚡ TRACK SIGNAL HISTORY for momentum detection
+        _track_signal_history(symbol, signal_data)
+        
+        # 📊 TRACK SIGNAL STRENGTH for DCA safety
+        _track_signal_strength(symbol, signal_data)
+        
+        # 📊 LOG SIGNAL STRENGTH SCORE
+        strength = _get_signal_strength_score(symbol, signal_data)
+        if strength["score"] < 50:
+            logger.warning(f"⚠️ {symbol}: WEAK SIGNAL! Score={strength['score']}/100 - {strength['recommendation']}")
+        
+        # ⚡ CHECK SIGNAL WEAKENING - ปิด position ก่อนสัญญาณกลับทิศ
+        await _check_and_close_weakening_positions(symbol, signal_data)
+        
+        # Extract layer status
+        _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
+        
+        logger.info(f"📊 {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
+        
+        # 🔄 REVERSE SIGNAL CLOSE + OPEN NEW - ปิด position เดิม + เปิดใหม่ตามสัญญาณ
+        closed_opposite = False
+        if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+            closed_opposite = await _check_and_close_opposite_positions(symbol, signal_data["signal"])
+            if closed_opposite:
+                _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED"
+                logger.info(f"   🔄 {symbol}: Opposite position closed due to reverse signal")
+                
+                # 🔥 NEW: Wait a moment then open new position in new direction
+                if _open_new_after_close and auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
+                    await asyncio.sleep(1)  # รอ 1 วินาทีให้ MT5 update
+                    logger.info(f"   🎯 {symbol}: Opening NEW position in direction {signal_data['signal']}")
+                    # Skip position check because we just closed it!
+                    await _execute_signal_trade(symbol, signal_data, skip_position_check=True)
+                    _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED_AND_OPENED"
+        
+        # 🚨 WAIT SIGNAL = CLOSE PROFITABLE - ถ้าสัญญาณเป็น WAIT และมีกำไร → ปิดทันที
+        elif signal_data["signal"] in ["WAIT", "SKIP"]:
+            closed = await _close_profitable_on_wait_signal(symbol)
+            if closed:
+                _bot_status["last_signal"][symbol]["trade_status"] = "CLOSED_ON_WAIT"
+                logger.info(f"   🚨 {symbol}: Profitable position closed due to WAIT signal")
+        
+        
+        # Auto trade ONLY if mode is AUTO (and not already handled by reverse)
+        if auto_trade and _bot_status["mode"] == BotMode.AUTO.value and not closed_opposite:
+            if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+                # Check if can trade before attempting
+                can_trade, reason = await _can_trade_signal(symbol, signal_data)
+                
+                # 🔥 DEBUG: Log why trade is blocked
+                logger.info(f"   🔍 {symbol}: can_trade={can_trade}, reason={reason}")
+                
+                if can_trade:
+                    await _execute_signal_trade(symbol, signal_data)
+                    # Update signal status
+                    _bot_status["last_signal"][symbol]["trade_status"] = "EXECUTED"
+                else:
+                    # DCA ถูกปิดแล้ว ไม่ต้องเช็ค
+                    logger.info(f"   ❌ {symbol}: Trade blocked - {reason}")
+                    _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
+            else:
+                _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
+        elif signal_data["signal"] not in ["WAIT", "SKIP"] and not closed_opposite:
+            logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
+            _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
+        
+        return signal_data
+        
+    except Exception as e:
+        logger.error(f"❌ Error analyzing {symbol}: {e}")
+        return None
+
+
 async def _run_bot_loop(interval: int, auto_trade: bool):
     """
-    🔥 ENTERPRISE GRADE Bot Analysis Loop
+    🚀 ENTERPRISE GRADE Bot Analysis Loop - PARALLEL MODE!
     
     Features:
+    - 🔥 PARALLEL ANALYSIS - วิเคราะห์ทุก symbol พร้อมกัน!
     - Auto-reconnect on MT5 disconnect
     - Heartbeat tracking for watchdog
     - Error recovery
@@ -1494,7 +1610,7 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
     global _bot, _bot_status, _last_successful_cycle, _runtime_stats
     
     mode_str = "AUTO" if auto_trade else "MANUAL"
-    logger.info(f"🚀 Unified bot loop starting (mode={mode_str}, interval={interval}s)")
+    logger.info(f"🚀 Unified bot loop starting (mode={mode_str}, interval={interval}s) - PARALLEL MODE!")
     
     consecutive_failures = 0
     max_failures = 5
@@ -1538,110 +1654,17 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # 🔄 SYNC WITH MT5 - ตรวจสอบว่า position ถูกปิดไปแล้วหรือยัง (SL/TP hit externally)
             await _sync_positions_with_mt5()
             
-            for symbol in _bot_status["symbols"]:
-                # Run analysis
-                analysis = await _bot.analyze_symbol(symbol)
-                
-                if analysis:
-                    # Store analysis
-                    _bot_status["last_analysis"][symbol] = analysis
-                    
-                    # Extract signal - try multiple confidence fields
-                    raw_confidence = analysis.get("enhanced_confidence", 0) or analysis.get("base_confidence", 0) or analysis.get("confidence", 0)
-                    
-                    # 🔥 Get current_price from analysis or market_data
-                    current_price = analysis.get("current_price", 0)
-                    if current_price == 0 and "market_data" in analysis:
-                        current_price = analysis["market_data"].get("close", 0)
-                    
-                    signal_data = {
-                        "symbol": symbol,
-                        "signal": analysis.get("signal", "WAIT"),
-                        "confidence": raw_confidence,
-                        "quality": analysis.get("quality", "SKIP"),
-                        "current_price": current_price,
-                        "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
-                        "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
-                        "scores": analysis.get("scores", {}),
-                        "indicators": analysis.get("indicators", {}),
-                        "market_regime": analysis.get("market_regime", "UNKNOWN"),
-                        "market_data": analysis.get("market_data", {}),
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    _bot_status["last_signal"][symbol] = signal_data
-                    
-                    # ⚡ TRACK SIGNAL HISTORY for momentum detection
-                    _track_signal_history(symbol, signal_data)
-                    
-                    # 📊 TRACK SIGNAL STRENGTH for DCA safety
-                    _track_signal_strength(symbol, signal_data)
-                    
-                    # 📊 LOG SIGNAL STRENGTH SCORE
-                    strength = _get_signal_strength_score(symbol, signal_data)
-                    if strength["score"] < 50:
-                        logger.warning(f"⚠️ {symbol}: WEAK SIGNAL! Score={strength['score']}/100 - {strength['recommendation']}")
-                    
-                    # ⚡ CHECK SIGNAL WEAKENING - ปิด position ก่อนสัญญาณกลับทิศ
-                    await _check_and_close_weakening_positions(symbol, signal_data)
-                    
-                    # Extract layer status
-                    _bot_status["layer_status"][symbol] = _extract_layer_status(symbol)
-                    
-                    logger.info(f"📊 {symbol}: {signal_data['signal']} @ {signal_data['confidence']:.1f}% ({_bot_status['mode']} mode)")
-                    
-                    # 🔄 REVERSE SIGNAL CLOSE + OPEN NEW - ปิด position เดิม + เปิดใหม่ตามสัญญาณ
-                    closed_opposite = False
-                    if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
-                        closed_opposite = await _check_and_close_opposite_positions(symbol, signal_data["signal"])
-                        if closed_opposite:
-                            _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED"
-                            logger.info(f"   🔄 {symbol}: Opposite position closed due to reverse signal")
-                            
-                            # 🔥 NEW: Wait a moment then open new position in new direction
-                            if _open_new_after_close and auto_trade and _bot_status["mode"] == BotMode.AUTO.value:
-                                await asyncio.sleep(1)  # รอ 1 วินาทีให้ MT5 update
-                                logger.info(f"   🎯 {symbol}: Opening NEW position in direction {signal_data['signal']}")
-                                # Skip position check because we just closed it!
-                                await _execute_signal_trade(symbol, signal_data, skip_position_check=True)
-                                _bot_status["last_signal"][symbol]["trade_status"] = "REVERSED_AND_OPENED"
-                    
-                    # 🚨 WAIT SIGNAL = CLOSE PROFITABLE - ถ้าสัญญาณเป็น WAIT และมีกำไร → ปิดทันที
-                    elif signal_data["signal"] in ["WAIT", "SKIP"]:
-                        closed = await _close_profitable_on_wait_signal(symbol)
-                        if closed:
-                            _bot_status["last_signal"][symbol]["trade_status"] = "CLOSED_ON_WAIT"
-                            logger.info(f"   🚨 {symbol}: Profitable position closed due to WAIT signal")
-                    
-                    
-                    # Auto trade ONLY if mode is AUTO (and not already handled by reverse)
-                    if auto_trade and _bot_status["mode"] == BotMode.AUTO.value and not closed_opposite:
-                        if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
-                            # Check if can trade before attempting
-                            can_trade, reason = await _can_trade_signal(symbol, signal_data)
-                            if can_trade:
-                                await _execute_signal_trade(symbol, signal_data)
-                                # Update signal status
-                                _bot_status["last_signal"][symbol]["trade_status"] = "EXECUTED"
-                            else:
-                                # 📈 DCA CHECK - ถ้าไม่สามารถเข้าใหม่ได้ (มี position อยู่แล้ว) → เช็ค DCA
-                                if "Already have open position" in reason:
-                                    current_price = signal_data.get("current_price", 0)
-                                    if current_price > 0:
-                                        dca_executed = await _check_dca_opportunity(symbol, signal_data, current_price)
-                                        if dca_executed:
-                                            _bot_status["last_signal"][symbol]["trade_status"] = "DCA_EXECUTED"
-                                        else:
-                                            _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason} (DCA monitoring)"
-                                    else:
-                                        _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
-                                else:
-                                    logger.info(f"   ❌ {symbol}: Trade blocked - {reason}")
-                                    _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {reason}"
-                        else:
-                            _bot_status["last_signal"][symbol]["trade_status"] = "NO_SIGNAL"
-                    elif signal_data["signal"] not in ["WAIT", "SKIP"] and not closed_opposite:
-                        logger.info(f"   📋 Signal available but mode is MANUAL - not auto-trading")
-                        _bot_status["last_signal"][symbol]["trade_status"] = "MANUAL_MODE"
+            # 🚀 PARALLEL ANALYSIS - วิเคราะห์ทุก symbol พร้อมกัน!
+            analysis_tasks = [
+                _analyze_single_symbol(symbol, auto_trade) 
+                for symbol in _bot_status["symbols"]
+            ]
+            results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+            
+            # Log any errors from parallel analysis
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Analysis error for {_bot_status['symbols'][i]}: {result}")
             
             # 📈 UPDATE DCA TRACKING - ล้าง tracking ของ symbols ที่ไม่มี position แล้ว
             await _update_dca_tracking_from_positions()
