@@ -289,16 +289,18 @@ _anti_wipeout_config = {
     "enabled": True,                          # ✅ เปิด! ป้องกันล้างพอร์ต
     
     # 🎯 LOT SIZE LIMITER - จำกัด lot ตาม % ของ port
-    "max_risk_per_trade_percent": 2.0,        # 🔥 Risk สูงสุด 2% ต่อเทรด
-    "max_lot_size_percent": 3.0,              # 🔥 Lot สูงสุด 3% ของ balance (ใน margin)
-    "gold_max_lot_per_1000": 0.05,            # 🔥 Gold: สูงสุด 0.05 lot ต่อทุก $1000
-    "forex_max_lot_per_1000": 0.10,           # 🔥 Forex: สูงสุด 0.10 lot ต่อทุก $1000
+    # 🔥 ULTRA CONSERVATIVE - รองรับ $100 ถึง $2,000,000,000!
+    "max_risk_per_trade_percent": 1.0,        # 🔥 Risk สูงสุด 1% ต่อเทรด (ลดจาก 2%!)
+    "max_lot_size_percent": 2.0,              # 🔥 Lot สูงสุด 2% ของ balance (ใน margin)
+    "gold_max_lot_per_1000": 0.02,            # 🔥 Gold: สูงสุด 0.02 lot ต่อทุก $1000 (ลดจาก 0.05!)
+    "forex_max_lot_per_1000": 0.05,           # 🔥 Forex: สูงสุด 0.05 lot ต่อทุก $1000
     
-    # 📏 MINIMUM SL DISTANCE - SL ต้องกว้างพอ
-    "gold_min_sl_points": 150,                # 🔥 Gold SL >= $15 (150 points)
-    "gold_max_sl_points": 500,                # 🔥 Gold SL <= $50 (500 points)
-    "forex_min_sl_pips": 15,                  # 🔥 Forex SL >= 15 pips
-    "forex_max_sl_pips": 50,                  # 🔥 Forex SL <= 50 pips
+    # 📏 MINIMUM SL DISTANCE - SL ต้องกว้างพอ (% BASED!)
+    # 🔥 ใช้ % ของราคาแทน fixed points - scale ได้ทุกขนาด port!
+    "gold_sl_percent_min": 0.3,               # 🔥 Gold SL >= 0.3% ของราคา (~$15 ที่ $5000)
+    "gold_sl_percent_max": 1.0,               # 🔥 Gold SL <= 1.0% ของราคา (~$50 ที่ $5000)
+    "forex_sl_percent_min": 0.15,             # 🔥 Forex SL >= 0.15% ของราคา
+    "forex_sl_percent_max": 0.5,              # 🔥 Forex SL <= 0.5% ของราคา
     
     # 🚫 TREND FILTER - ห้ามสวนเทรนด์รุนแรง
     "check_higher_timeframe": True,           # ✅ เช็ค H4 ก่อนเข้า
@@ -306,127 +308,140 @@ _anti_wipeout_config = {
     "min_trend_strength": 60,                 # 🔥 Trend ต้องแข็งแรง >= 60%
 }
 
-def _calculate_safe_lot_size(balance: float, symbol: str, sl_points: float) -> float:
-    """
-    🛡️ คำนวณ Lot Size ที่ปลอดภัย
+def _calculate_safe_lot_size(balance: float, symbol: str, sl_points: float, current_price: float = 0) -> float:
+"""
+🛡️ คำนวณ Lot Size ที่ปลอดภัย - UNIVERSAL SCALING $100 to $2B!
     
-    Formula:
-    - Risk Amount = Balance × Risk% (e.g., $7000 × 2% = $140 max loss)
-    - Lot Size = Risk Amount / (SL Points × Point Value)
+Formula:
+- Risk Amount = Balance × Risk% (e.g., $300 × 1% = $3 max loss)
+- Lot Size = Risk Amount / (SL$ × Lot Value)
     
-    Gold (XAUUSDm): 1 point = $0.01 per 0.01 lot
-    Forex: 1 pip = $0.10 per 0.01 lot (varies by pair)
-    """
-    global _anti_wipeout_config
+🔥 EXAMPLES:
+- $300 balance, 1% risk, Gold SL $15 → Risk $3, Lot = 0.01 (minimum)
+- $1,000 balance, 1% risk, Gold SL $15 → Risk $10, Lot = 0.01
+- $10,000 balance, 1% risk, Gold SL $15 → Risk $100, Lot = 0.06
+- $100,000 balance, 1% risk, Gold SL $15 → Risk $1000, Lot = 0.67
+- $1,000,000 balance, 1% risk, Gold SL $15 → Risk $10000, Lot = 6.67
+"""
+global _anti_wipeout_config
     
-    if not _anti_wipeout_config.get("enabled", True):
-        return 0.0  # Let original calculation handle it
+if not _anti_wipeout_config.get("enabled", True):
+    return 0.0  # Let original calculation handle it
     
-    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-    # Calculate max risk amount
-    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 2.0)
-    max_risk_amount = balance * (max_risk_percent / 100.0)
+# 🔥 Calculate max risk amount (% of balance)
+max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)  # Default 1%
+max_risk_amount = balance * (max_risk_percent / 100.0)
     
-    # Calculate lot size based on SL
-    if is_gold:
-        # Gold: 1 lot = $1 per point (0.01 price movement)
-        # So 0.01 lot = $0.01 per point
-        point_value = 1.0  # $1 per point per lot
+# Calculate lot size based on SL
+if is_gold:
+    # Gold: 1 lot = $1 per point (0.01 price movement = $0.01)
+    # So with SL of $15 (150 points), 1 lot risks $150
+    point_value = 1.0  # $1 per point per lot
         
-        if sl_points > 0:
-            # Lot = Risk / (SL_points × point_value)
-            safe_lot = max_risk_amount / (sl_points * point_value)
-        else:
-            # Use minimum SL for calculation
-            min_sl = _anti_wipeout_config.get("gold_min_sl_points", 150)
-            safe_lot = max_risk_amount / (min_sl * point_value)
-        
-        # Also check hard limit per $1000
-        max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.05)
-        hard_limit = (balance / 1000.0) * max_lot_per_1000
-        
-        safe_lot = min(safe_lot, hard_limit)
-        
+    if sl_points > 0:
+        # Lot = Risk / (SL_points × point_value)
+        safe_lot = max_risk_amount / (sl_points * point_value)
     else:
-        # Forex: varies but roughly $10 per pip per lot
-        point_value = 10.0  # Approximate
-        
-        if sl_points > 0:
-            safe_lot = max_risk_amount / (sl_points * point_value)
+        # 🔥 Use % of price for minimum SL instead of fixed points
+        min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
+        if current_price > 0:
+            min_sl_points = current_price * (min_sl_percent / 100.0) * 10  # Convert to points
         else:
-            min_sl = _anti_wipeout_config.get("forex_min_sl_pips", 15)
-            safe_lot = max_risk_amount / (min_sl * point_value)
+            min_sl_points = 150  # Fallback ~$15 at $5000 gold
+        safe_lot = max_risk_amount / (min_sl_points * point_value)
         
-        max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.10)
-        hard_limit = (balance / 1000.0) * max_lot_per_1000
+    # 🔥 HARD LIMIT per $1000 balance (more conservative!)
+    max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.02)  # Reduced from 0.05!
+    hard_limit = (balance / 1000.0) * max_lot_per_1000
         
-        safe_lot = min(safe_lot, hard_limit)
+    safe_lot = min(safe_lot, hard_limit)
+        
+else:
+    # Forex: varies but roughly $10 per pip per lot
+    point_value = 10.0  # Approximate
+        
+    if sl_points > 0:
+        safe_lot = max_risk_amount / (sl_points * point_value)
+    else:
+        min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
+        min_sl_pips = 15 if current_price == 0 else current_price * min_sl_percent / 100 * 10000
+        safe_lot = max_risk_amount / (min_sl_pips * point_value)
+        
+    max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.05)
+    hard_limit = (balance / 1000.0) * max_lot_per_1000
+        
+    safe_lot = min(safe_lot, hard_limit)
     
-    # Round to 2 decimal places and ensure minimum
-    safe_lot = max(0.01, round(safe_lot, 2))
+# Round to 2 decimal places and ensure minimum
+safe_lot = max(0.01, round(safe_lot, 2))
     
-    logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% → max_lot={safe_lot}")
+# 🔥 Log for debugging
+logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% max_risk=${max_risk_amount:.2f} → lot={safe_lot}")
     
-    return safe_lot
+return safe_lot
 
 
 def _validate_sl_distance(symbol: str, entry_price: float, sl_price: float, side: str) -> tuple[float, str]:
-    """
-    📏 ตรวจสอบและปรับ SL ให้อยู่ในช่วงที่ปลอดภัย
+"""
+📏 ตรวจสอบและปรับ SL ให้อยู่ในช่วงที่ปลอดภัย
     
-    Returns: (adjusted_sl, message)
-    """
-    global _anti_wipeout_config
+🔥 PERCENT BASED - รองรับทุก price level!
+- Gold $5000: min SL 0.3% = $15, max SL 1.0% = $50
+- Gold $10000: min SL 0.3% = $30, max SL 1.0% = $100
     
-    if not _anti_wipeout_config.get("enabled", True):
-        return sl_price, "SL validation disabled"
+Returns: (adjusted_sl, message)
+"""
+global _anti_wipeout_config
     
-    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+if not _anti_wipeout_config.get("enabled", True):
+    return sl_price, "SL validation disabled"
     
-    if is_gold:
-        min_sl_points = _anti_wipeout_config.get("gold_min_sl_points", 150)
-        max_sl_points = _anti_wipeout_config.get("gold_max_sl_points", 500)
-        # Gold: 1 point = $0.10 (price movement of 0.1)
-        point_to_price = 0.10
-    else:
-        min_sl_points = _anti_wipeout_config.get("forex_min_sl_pips", 15)
-        max_sl_points = _anti_wipeout_config.get("forex_max_sl_pips", 50)
-        # Forex: 1 pip = 0.0001 for most pairs
-        point_to_price = 0.0001 if 'JPY' not in symbol.upper() else 0.01
+is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
-    # Calculate current SL distance
+# 🔥 USE PERCENT OF PRICE instead of fixed points!
+if is_gold:
+    min_sl_percent = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)  # 0.3% of price
+    max_sl_percent = _anti_wipeout_config.get("gold_sl_percent_max", 1.0)  # 1.0% of price
+else:
+    min_sl_percent = _anti_wipeout_config.get("forex_sl_percent_min", 0.15)
+    max_sl_percent = _anti_wipeout_config.get("forex_sl_percent_max", 0.5)
+    
+# Calculate min/max SL distance based on % of entry price
+min_distance = entry_price * (min_sl_percent / 100.0)
+max_distance = entry_price * (max_sl_percent / 100.0)
+    
+# Calculate current SL distance
+if side.upper() == "BUY":
+    current_distance = entry_price - sl_price
+else:  # SELL
+    current_distance = sl_price - entry_price
+    
+current_percent = abs(current_distance) / entry_price * 100
+    
+adjusted_sl = sl_price
+message = "SL OK"
+    
+# Check if SL too tight
+if current_percent < min_sl_percent:
     if side.upper() == "BUY":
-        current_distance = entry_price - sl_price
-    else:  # SELL
-        current_distance = sl_price - entry_price
+        adjusted_sl = entry_price - min_distance
+    else:
+        adjusted_sl = entry_price + min_distance
+    message = f"⚠️ SL too tight ({current_percent:.2f}%), adjusted to {min_sl_percent}% (${min_distance:.2f})"
+    logger.warning(f"📏 {symbol}: {message}")
     
-    current_points = abs(current_distance) / point_to_price
-    min_distance = min_sl_points * point_to_price
-    max_distance = max_sl_points * point_to_price
+# Check if SL too wide
+elif current_percent > max_sl_percent:
+    if side.upper() == "BUY":
+        adjusted_sl = entry_price - max_distance
+    else:
+        adjusted_sl = entry_price + max_distance
+    message = f"⚠️ SL too wide ({current_percent:.2f}%), adjusted to {max_sl_percent}% (${max_distance:.2f})"
+    logger.warning(f"📏 {symbol}: {message}")
     
-    adjusted_sl = sl_price
-    message = "SL OK"
-    
-    # Check if SL too tight
-    if current_points < min_sl_points:
-        if side.upper() == "BUY":
-            adjusted_sl = entry_price - min_distance
-        else:
-            adjusted_sl = entry_price + min_distance
-        message = f"⚠️ SL too tight ({current_points:.0f} points), adjusted to {min_sl_points} points"
-        logger.warning(f"📏 {symbol}: {message}")
-    
-    # Check if SL too wide
-    elif current_points > max_sl_points:
-        if side.upper() == "BUY":
-            adjusted_sl = entry_price - max_distance
-        else:
-            adjusted_sl = entry_price + max_distance
-        message = f"⚠️ SL too wide ({current_points:.0f} points), adjusted to {max_sl_points} points"
-        logger.warning(f"📏 {symbol}: {message}")
-    
-    return round(adjusted_sl, 2 if is_gold else 5), message
+return round(adjusted_sl, 2 if is_gold else 5), message
 
 
 async def _check_trend_alignment(symbol: str, signal: str) -> tuple[bool, str]:
@@ -671,10 +686,12 @@ def _get_circuit_breaker_status() -> Dict:
     }
 
 # 🚨 MAX LOSS PROTECTION - บังคับปิดเมื่อขาดทุนเกินกำหนด
+# 🔥 100% PERCENT BASED - รองรับ $100 ถึง $2,000,000,000!
 _max_loss_config = {
     "enabled": True,
-    "max_loss_per_position": 1500,          # 🔥 ลดเหลือ $1,500 ต่อ position
-    "max_loss_percent": 3,                  # 🔥 ลดเหลือ 3% ของ balance
+    "max_loss_percent_per_position": 2.0,   # 🔥 Max loss 2% ต่อ position (ไม่ใช่ fixed $!)
+    "max_loss_percent_daily": 5.0,          # 🔥 Max loss 5% ต่อวัน
+    "max_drawdown_percent": 10.0,           # 🔥 Max drawdown 10% ของ balance
     "close_on_reverse_signal": True,        # ✅ ปิดทันทีเมื่อสัญญาณตรงข้าม (แม้ขาดทุน)
 }
 
@@ -5608,30 +5625,45 @@ async def get_anti_wipeout_status():
     """
     🛡️ Get Anti-Wipeout Protection configuration
     
+    🔥 UNIVERSAL SCALING - รองรับ $100 ถึง $2,000,000,000!
+    
     Features:
-    - Max lot size limiter (based on balance)
-    - Minimum SL distance (Gold >= $15, Forex >= 15 pips)
+    - Max lot size limiter (based on balance %)
+    - Minimum SL distance (% of price, not fixed points!)
     - Higher timeframe trend alignment
     - Counter-trend blocking
     
-    Example for $7,000 balance:
-    - Max lot for Gold: 0.35 (=$7000/1000 × 0.05)
-    - Risk per trade: $140 (=2% of $7,000)
+    Example for $300 balance:
+    - Max lot for Gold: 0.01 (=$300/1000 × 0.02)
+    - Risk per trade: $3 (=1% of $300)
+    - Gold SL: 0.3% of price (~$15 at $5000)
     """
     global _anti_wipeout_config, _bot
     
     # Get current balance for examples
-    balance = 7000
+    balance = 300
     try:
         if _bot and _bot.trading_engine:
-            balance = await _bot.trading_engine.broker.get_balance() or 7000
+            balance = await _bot.trading_engine.broker.get_balance() or 300
     except:
         pass
     
     # Calculate current limits
-    gold_max_lot = round((balance / 1000) * _anti_wipeout_config.get("gold_max_lot_per_1000", 0.05), 2)
-    forex_max_lot = round((balance / 1000) * _anti_wipeout_config.get("forex_max_lot_per_1000", 0.10), 2)
-    max_risk_amount = balance * (_anti_wipeout_config.get("max_risk_per_trade_percent", 2.0) / 100)
+    gold_max_lot = round((balance / 1000) * _anti_wipeout_config.get("gold_max_lot_per_1000", 0.02), 2)
+    gold_max_lot = max(0.01, gold_max_lot)  # Minimum 0.01 lot
+    forex_max_lot = round((balance / 1000) * _anti_wipeout_config.get("forex_max_lot_per_1000", 0.05), 2)
+    forex_max_lot = max(0.01, forex_max_lot)
+    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 1.0)
+    max_risk_amount = balance * (max_risk_percent / 100)
+    
+    # Get SL % config
+    gold_sl_min = _anti_wipeout_config.get("gold_sl_percent_min", 0.3)
+    gold_sl_max = _anti_wipeout_config.get("gold_sl_percent_max", 1.0)
+    
+    # Calculate SL in $ at current gold price (~$5000)
+    gold_price_estimate = 5000
+    gold_min_sl_usd = gold_price_estimate * (gold_sl_min / 100)
+    gold_max_sl_usd = gold_price_estimate * (gold_sl_max / 100)
     
     return {
         "config": _anti_wipeout_config,
@@ -5639,29 +5671,39 @@ async def get_anti_wipeout_status():
         "current_limits": {
             "gold_max_lot": gold_max_lot,
             "forex_max_lot": forex_max_lot,
-            "max_risk_per_trade": f"${max_risk_amount:.2f}",
-            "gold_min_sl": f"${_anti_wipeout_config.get('gold_min_sl_points', 150) / 10:.0f}",
-            "gold_max_sl": f"${_anti_wipeout_config.get('gold_max_sl_points', 500) / 10:.0f}",
+            "max_risk_percent": f"{max_risk_percent}%",
+            "max_risk_amount": f"${max_risk_amount:.2f}",
+            "gold_sl_range": f"{gold_sl_min}% - {gold_sl_max}% of price",
+            "gold_sl_usd_estimate": f"${gold_min_sl_usd:.0f} - ${gold_max_sl_usd:.0f} (at $5000 gold)",
         },
-        "examples": {
-            "$1,000 port": {
-                "gold_max_lot": 0.05,
-                "max_risk": "$20",
+        "scaling_examples": {
+            "$100 port": {
+                "gold_max_lot": 0.01,
+                "max_risk": f"${100 * max_risk_percent / 100:.2f}",
             },
-            "$5,000 port": {
-                "gold_max_lot": 0.25,
-                "max_risk": "$100",
+            "$300 port": {
+                "gold_max_lot": max(0.01, round(0.3 * 0.02, 2)),
+                "max_risk": f"${300 * max_risk_percent / 100:.2f}",
+            },
+            "$1,000 port": {
+                "gold_max_lot": round(1 * 0.02, 2),
+                "max_risk": f"${1000 * max_risk_percent / 100:.2f}",
             },
             "$10,000 port": {
-                "gold_max_lot": 0.50,
-                "max_risk": "$200",
+                "gold_max_lot": round(10 * 0.02, 2),
+                "max_risk": f"${10000 * max_risk_percent / 100:.2f}",
             },
-            "$50,000 port": {
-                "gold_max_lot": 2.50,
-                "max_risk": "$1,000",
+            "$100,000 port": {
+                "gold_max_lot": round(100 * 0.02, 2),
+                "max_risk": f"${100000 * max_risk_percent / 100:.2f}",
+            },
+            "$1,000,000 port": {
+                "gold_max_lot": round(1000 * 0.02, 2),
+                "max_risk": f"${1000000 * max_risk_percent / 100:.2f}",
             },
         },
         "why_important": "ล้างพอร์ตเพราะ: Lot size ใหญ่เกินไป + SL แคบเกินไป + เข้าสวนเทรนด์",
+        "note": "Config ใช้ % ทั้งหมด - รองรับ $100 ถึง $2,000,000,000!"
     }
 
 
@@ -5692,19 +5734,21 @@ async def configure_anti_wipeout(
     max_risk_per_trade_percent: float = None,
     gold_max_lot_per_1000: float = None,
     forex_max_lot_per_1000: float = None,
-    gold_min_sl_points: int = None,
-    gold_max_sl_points: int = None,
+    gold_sl_percent_min: float = None,
+    gold_sl_percent_max: float = None,
     block_counter_trend: bool = None,
     min_trend_strength: int = None,
 ):
     """
-    🛡️ Configure Anti-Wipeout Protection
+    🛡️ Configure Anti-Wipeout Protection (% BASED!)
     
-    - max_risk_per_trade_percent: Risk % ต่อเทรด (default: 2.0)
-    - gold_max_lot_per_1000: Max lot Gold ต่อทุก $1000 (default: 0.05)
-    - forex_max_lot_per_1000: Max lot Forex ต่อทุก $1000 (default: 0.10)
-    - gold_min_sl_points: Gold SL ขั้นต่ำ (points, default: 150 = $15)
-    - gold_max_sl_points: Gold SL สูงสุด (points, default: 500 = $50)
+    🔥 UNIVERSAL SCALING - รองรับ $100 ถึง $2,000,000,000!
+    
+    - max_risk_per_trade_percent: Risk % ต่อเทรด (default: 1.0, range: 0.5-3.0)
+    - gold_max_lot_per_1000: Max lot Gold ต่อทุก $1000 (default: 0.02, range: 0.01-0.10)
+    - forex_max_lot_per_1000: Max lot Forex ต่อทุก $1000 (default: 0.05)
+    - gold_sl_percent_min: Gold SL ขั้นต่ำ (% of price, default: 0.3)
+    - gold_sl_percent_max: Gold SL สูงสุด (% of price, default: 1.0)
     - block_counter_trend: ห้ามเทรดสวนเทรนด์ (default: True)
     - min_trend_strength: Trend strength ขั้นต่ำที่จะ block (default: 60%)
     """
@@ -5713,24 +5757,24 @@ async def configure_anti_wipeout(
     changes = []
     
     if max_risk_per_trade_percent is not None:
-        _anti_wipeout_config["max_risk_per_trade_percent"] = max(0.5, min(5.0, max_risk_per_trade_percent))
+        _anti_wipeout_config["max_risk_per_trade_percent"] = max(0.5, min(3.0, max_risk_per_trade_percent))
         changes.append(f"max_risk: {_anti_wipeout_config['max_risk_per_trade_percent']}%")
     
     if gold_max_lot_per_1000 is not None:
-        _anti_wipeout_config["gold_max_lot_per_1000"] = max(0.01, min(0.20, gold_max_lot_per_1000))
+        _anti_wipeout_config["gold_max_lot_per_1000"] = max(0.01, min(0.10, gold_max_lot_per_1000))
         changes.append(f"gold_max_lot: {_anti_wipeout_config['gold_max_lot_per_1000']} per $1000")
     
     if forex_max_lot_per_1000 is not None:
-        _anti_wipeout_config["forex_max_lot_per_1000"] = max(0.01, min(0.50, forex_max_lot_per_1000))
+        _anti_wipeout_config["forex_max_lot_per_1000"] = max(0.01, min(0.20, forex_max_lot_per_1000))
         changes.append(f"forex_max_lot: {_anti_wipeout_config['forex_max_lot_per_1000']} per $1000")
     
-    if gold_min_sl_points is not None:
-        _anti_wipeout_config["gold_min_sl_points"] = max(50, min(300, gold_min_sl_points))
-        changes.append(f"gold_min_sl: {_anti_wipeout_config['gold_min_sl_points']} pts (${_anti_wipeout_config['gold_min_sl_points']/10:.0f})")
+    if gold_sl_percent_min is not None:
+        _anti_wipeout_config["gold_sl_percent_min"] = max(0.1, min(1.0, gold_sl_percent_min))
+        changes.append(f"gold_sl_min: {_anti_wipeout_config['gold_sl_percent_min']}% of price")
     
-    if gold_max_sl_points is not None:
-        _anti_wipeout_config["gold_max_sl_points"] = max(200, min(1000, gold_max_sl_points))
-        changes.append(f"gold_max_sl: {_anti_wipeout_config['gold_max_sl_points']} pts (${_anti_wipeout_config['gold_max_sl_points']/10:.0f})")
+    if gold_sl_percent_max is not None:
+        _anti_wipeout_config["gold_sl_percent_max"] = max(0.3, min(3.0, gold_sl_percent_max))
+        changes.append(f"gold_sl_max: {_anti_wipeout_config['gold_sl_percent_max']}% of price")
     
     if block_counter_trend is not None:
         _anti_wipeout_config["block_counter_trend"] = block_counter_trend
@@ -5752,52 +5796,52 @@ async def configure_anti_wipeout(
 @router.post("/anti-wipeout/preset/{preset}")
 async def set_anti_wipeout_preset(preset: str):
     """
-    🛡️ Set Anti-Wipeout Preset
+    🛡️ Set Anti-Wipeout Preset (% BASED - Universal Scaling!)
     
     Presets:
-    - ultra_safe: Very conservative (for small accounts or after losses)
-    - safe: Recommended for most traders
-    - moderate: More trades, moderate risk
-    - aggressive: Higher risk (NOT recommended!)
+    - ultra_safe: Very conservative (Risk 0.5%, สำหรับ port เล็ก $100-$500)
+    - safe: Recommended for most (Risk 1%, default)
+    - moderate: More trades (Risk 1.5%)
+    - aggressive: Higher risk (Risk 2% - NOT recommended for small accounts!)
     """
     global _anti_wipeout_config
     
     presets = {
         "ultra_safe": {
-            "max_risk_per_trade_percent": 1.0,
-            "gold_max_lot_per_1000": 0.03,
-            "gold_min_sl_points": 200,  # $20
-            "gold_max_sl_points": 400,  # $40
+            "max_risk_per_trade_percent": 0.5,   # 🔥 ลดเหลือ 0.5%!
+            "gold_max_lot_per_1000": 0.01,       # 🔥 ลดเหลือ 0.01 lot per $1000
+            "gold_sl_percent_min": 0.4,          # 🔥 SL >= 0.4% of price
+            "gold_sl_percent_max": 1.2,          # 🔥 SL <= 1.2% of price
             "block_counter_trend": True,
             "min_trend_strength": 50,
-            "description": "สำหรับ port เล็กหรือหลังขาดทุน - Risk 1% ต่อเทรด"
+            "description": "Ultra safe สำหรับ $100-$500 - Risk 0.5% ต่อเทรด"
         },
         "safe": {
-            "max_risk_per_trade_percent": 2.0,
-            "gold_max_lot_per_1000": 0.05,
-            "gold_min_sl_points": 150,  # $15
-            "gold_max_sl_points": 500,  # $50
+            "max_risk_per_trade_percent": 1.0,   # 🔥 ลดเหลือ 1%!
+            "gold_max_lot_per_1000": 0.02,       # 🔥 ลดเหลือ 0.02 lot per $1000
+            "gold_sl_percent_min": 0.3,          # 🔥 SL >= 0.3% of price
+            "gold_sl_percent_max": 1.0,          # 🔥 SL <= 1.0% of price
             "block_counter_trend": True,
             "min_trend_strength": 60,
-            "description": "แนะนำสำหรับส่วนใหญ่ - Risk 2% ต่อเทรด"
+            "description": "แนะนำสำหรับส่วนใหญ่ - Risk 1% ต่อเทรด"
         },
         "moderate": {
-            "max_risk_per_trade_percent": 3.0,
-            "gold_max_lot_per_1000": 0.08,
-            "gold_min_sl_points": 120,  # $12
-            "gold_max_sl_points": 600,  # $60
+            "max_risk_per_trade_percent": 1.5,   # 🔥 1.5%
+            "gold_max_lot_per_1000": 0.03,       # 🔥 0.03 lot per $1000
+            "gold_sl_percent_min": 0.25,         # 🔥 SL >= 0.25% of price
+            "gold_sl_percent_max": 0.8,          # 🔥 SL <= 0.8% of price
             "block_counter_trend": True,
-            "min_trend_strength": 70,
-            "description": "เทรดเยอะขึ้น risk ปานกลาง - Risk 3% ต่อเทรด"
+            "min_trend_strength": 65,
+            "description": "เทรดเยอะขึ้น - Risk 1.5% ต่อเทรด"
         },
         "aggressive": {
-            "max_risk_per_trade_percent": 4.0,
-            "gold_max_lot_per_1000": 0.10,
-            "gold_min_sl_points": 100,  # $10
-            "gold_max_sl_points": 700,  # $70
-            "block_counter_trend": False,  # ⚠️ อนุญาตสวนเทรนด์!
-            "min_trend_strength": 80,
-            "description": "⚠️ RISKY! สำหรับ experienced traders เท่านั้น"
+            "max_risk_per_trade_percent": 2.0,   # 🔥 2%
+            "gold_max_lot_per_1000": 0.05,       # 🔥 0.05 lot per $1000
+            "gold_sl_percent_min": 0.2,          # 🔥 SL >= 0.2% of price
+            "gold_sl_percent_max": 0.6,          # 🔥 SL <= 0.6% of price
+            "block_counter_trend": True,         # 🔥 ยังบล็อกสวนเทรนด์!
+            "min_trend_strength": 70,
+            "description": "⚠️ สำหรับ port $5000+ เท่านั้น - Risk 2% ต่อเทรด"
         }
     }
     
@@ -5808,8 +5852,8 @@ async def set_anti_wipeout_preset(preset: str):
     
     _anti_wipeout_config["max_risk_per_trade_percent"] = config["max_risk_per_trade_percent"]
     _anti_wipeout_config["gold_max_lot_per_1000"] = config["gold_max_lot_per_1000"]
-    _anti_wipeout_config["gold_min_sl_points"] = config["gold_min_sl_points"]
-    _anti_wipeout_config["gold_max_sl_points"] = config["gold_max_sl_points"]
+    _anti_wipeout_config["gold_sl_percent_min"] = config["gold_sl_percent_min"]
+    _anti_wipeout_config["gold_sl_percent_max"] = config["gold_sl_percent_max"]
     _anti_wipeout_config["block_counter_trend"] = config["block_counter_trend"]
     _anti_wipeout_config["min_trend_strength"] = config["min_trend_strength"]
     
@@ -5820,5 +5864,10 @@ async def set_anti_wipeout_preset(preset: str):
         "preset": preset,
         "description": config["description"],
         "config": _anti_wipeout_config,
-        "warning": "⚠️ HIGH RISK PRESET!" if preset == "aggressive" else None
+        "warning": "⚠️ สำหรับ port $5000+ เท่านั้น!" if preset == "aggressive" else None,
+        "scaling_examples": {
+            "$300 port": f"max_lot={max(0.01, 0.3 * config['gold_max_lot_per_1000']):.2f}, max_risk=${300 * config['max_risk_per_trade_percent'] / 100:.2f}",
+            "$1000 port": f"max_lot={config['gold_max_lot_per_1000']:.2f}, max_risk=${1000 * config['max_risk_per_trade_percent'] / 100:.2f}",
+            "$10000 port": f"max_lot={10 * config['gold_max_lot_per_1000']:.2f}, max_risk=${10000 * config['max_risk_per_trade_percent'] / 100:.2f}",
+        }
     }
