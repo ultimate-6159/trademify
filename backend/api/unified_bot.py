@@ -239,7 +239,7 @@ _symbol_whitelist = {
 # 🔄 REVERSE SIGNAL CLOSE - ปิด position เมื่อสัญญาณตรงข้าม (ต้องกำไรก่อน!)
 _enable_reverse_signal_close = True    # ✅ เปิด! แต่ต้องกำไรก่อน
 _open_new_after_close = True           # ✅ ปิดแล้วเปิดใหม่ (รอ pullback)
-_reverse_signal_min_profit = 50        # 🔥 ต้องมีกำไร >= $50 ถึงจะปิดตาม reverse signal
+_reverse_signal_min_profit_percent = 10.0  # 🔥 ต้องมีกำไร >= 10% ของ balance ถึงจะปิดตาม reverse signal
 
 # ⚡ SIGNAL MOMENTUM TRACKER - ตรวจสอบว่าสัญญาณกำลังอ่อนตัว (ต้องกำไรก่อน!)
 # 🔥 ปิดชั่วคราว! เพราะ trigger บ่อยเกินไปทำให้ระบบไม่เสถียร
@@ -251,7 +251,7 @@ _signal_weakening_config = {
     "close_on_confidence_drop": False,      # 🔥 ปิด! ไม่เสถียร
     "quality_drop_threshold": 3,            # 🔥 เพิ่มเป็น 3 (PREMIUM→LOW = 3 levels)
     "confidence_drop_threshold": 25,        # 🔥 เพิ่มเป็น 25%
-    "min_profit_to_exit_early": 500,        # 🔥 เพิ่มเป็น $500 ถึงจะ early exit
+    "min_profit_to_exit_early_percent": 15.0,  # 🔥 กำไร >= 15% ของ balance ถึงจะ early exit
 }
 
 
@@ -265,17 +265,234 @@ _contrarian_mode = {
 }
 
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
-# ❌ ปิดชั่วคราว! เพราะทำให้พลาดโอกาสเทรด - ราคาพุ่งตรงๆ ไม่ pullback
+# ✅ เปิดใช้งาน! Multi-timeframe pullback confirmation
 _pullback_config = {
-    "enabled": False,                        # ❌ ปิด! เข้าเทรดทันทีเมื่อมีสัญญาณ
-    "min_pullback_percent": 0.03,            # 🔥 Gold: ราคาต้องย่อ >= 0.03% (~$2)
-    "max_pullback_percent": 0.20,            # 🔥 Gold: ย่อไม่เกิน 0.20% (~$12)
+    "enabled": True,                         # ✅ เปิด! รอ pullback ก่อนเข้า (ป้องกันล้างพอร์ต!)
+    "min_pullback_percent": 0.05,            # 🔥 Gold: ราคาต้องย่อ >= 0.05% (~$2.5)
+    "max_pullback_percent": 0.30,            # 🔥 Gold: ย่อไม่เกิน 0.30% (~$15)
     "wait_for_stabilization": True,          # ✅ รอให้ราคานิ่งก่อนเข้า
-    "stabilization_candles": 1,              # 🔥 รอ 1 แท่งเด้งกลับ
-    "max_wait_minutes": 10,                  # 🔥 รอสูงสุด 10 นาที (ไม่รอนานเกิน)
+    "stabilization_candles": 2,              # 🔥 รอ 2 แท่งเด้งกลับ (M5)
+    "max_wait_minutes": 15,                  # 🔥 รอสูงสุด 15 นาที
     "require_signal_still_valid": True,      # ✅ Signal ต้องยังเป็นทิศทางเดิม
+    "use_multi_timeframe": True,             # 🆕 ใช้ M5 ยืนยัน pullback
+    "confirmation_timeframe": "M5",          # 🆕 Timeframe สำหรับยืนยัน pullback
 }
 _pending_signals = {}  # {symbol: {"signal": "BUY", "price_at_signal": 2750, "timestamp": datetime, "pullback_detected": False}}
+
+# =====================
+# 🛡️ ANTI-WIPEOUT PROTECTION - ป้องกันล้างพอร์ต!
+# =====================
+# ปัญหา: Lot 0.67 บน port $7000 = ล้างพอร์ตเมื่อผิดทาง
+# Solution: จำกัด lot size ตาม % ของ port + minimum SL distance
+
+_anti_wipeout_config = {
+    "enabled": True,                          # ✅ เปิด! ป้องกันล้างพอร์ต
+    
+    # 🎯 LOT SIZE LIMITER - จำกัด lot ตาม % ของ port
+    "max_risk_per_trade_percent": 2.0,        # 🔥 Risk สูงสุด 2% ต่อเทรด
+    "max_lot_size_percent": 3.0,              # 🔥 Lot สูงสุด 3% ของ balance (ใน margin)
+    "gold_max_lot_per_1000": 0.05,            # 🔥 Gold: สูงสุด 0.05 lot ต่อทุก $1000
+    "forex_max_lot_per_1000": 0.10,           # 🔥 Forex: สูงสุด 0.10 lot ต่อทุก $1000
+    
+    # 📏 MINIMUM SL DISTANCE - SL ต้องกว้างพอ
+    "gold_min_sl_points": 150,                # 🔥 Gold SL >= $15 (150 points)
+    "gold_max_sl_points": 500,                # 🔥 Gold SL <= $50 (500 points)
+    "forex_min_sl_pips": 15,                  # 🔥 Forex SL >= 15 pips
+    "forex_max_sl_pips": 50,                  # 🔥 Forex SL <= 50 pips
+    
+    # 🚫 TREND FILTER - ห้ามสวนเทรนด์รุนแรง
+    "check_higher_timeframe": True,           # ✅ เช็ค H4 ก่อนเข้า
+    "block_counter_trend": True,              # ✅ ห้ามเทรดสวนเทรนด์
+    "min_trend_strength": 60,                 # 🔥 Trend ต้องแข็งแรง >= 60%
+}
+
+def _calculate_safe_lot_size(balance: float, symbol: str, sl_points: float) -> float:
+    """
+    🛡️ คำนวณ Lot Size ที่ปลอดภัย
+    
+    Formula:
+    - Risk Amount = Balance × Risk% (e.g., $7000 × 2% = $140 max loss)
+    - Lot Size = Risk Amount / (SL Points × Point Value)
+    
+    Gold (XAUUSDm): 1 point = $0.01 per 0.01 lot
+    Forex: 1 pip = $0.10 per 0.01 lot (varies by pair)
+    """
+    global _anti_wipeout_config
+    
+    if not _anti_wipeout_config.get("enabled", True):
+        return 0.0  # Let original calculation handle it
+    
+    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+    
+    # Calculate max risk amount
+    max_risk_percent = _anti_wipeout_config.get("max_risk_per_trade_percent", 2.0)
+    max_risk_amount = balance * (max_risk_percent / 100.0)
+    
+    # Calculate lot size based on SL
+    if is_gold:
+        # Gold: 1 lot = $1 per point (0.01 price movement)
+        # So 0.01 lot = $0.01 per point
+        point_value = 1.0  # $1 per point per lot
+        
+        if sl_points > 0:
+            # Lot = Risk / (SL_points × point_value)
+            safe_lot = max_risk_amount / (sl_points * point_value)
+        else:
+            # Use minimum SL for calculation
+            min_sl = _anti_wipeout_config.get("gold_min_sl_points", 150)
+            safe_lot = max_risk_amount / (min_sl * point_value)
+        
+        # Also check hard limit per $1000
+        max_lot_per_1000 = _anti_wipeout_config.get("gold_max_lot_per_1000", 0.05)
+        hard_limit = (balance / 1000.0) * max_lot_per_1000
+        
+        safe_lot = min(safe_lot, hard_limit)
+        
+    else:
+        # Forex: varies but roughly $10 per pip per lot
+        point_value = 10.0  # Approximate
+        
+        if sl_points > 0:
+            safe_lot = max_risk_amount / (sl_points * point_value)
+        else:
+            min_sl = _anti_wipeout_config.get("forex_min_sl_pips", 15)
+            safe_lot = max_risk_amount / (min_sl * point_value)
+        
+        max_lot_per_1000 = _anti_wipeout_config.get("forex_max_lot_per_1000", 0.10)
+        hard_limit = (balance / 1000.0) * max_lot_per_1000
+        
+        safe_lot = min(safe_lot, hard_limit)
+    
+    # Round to 2 decimal places and ensure minimum
+    safe_lot = max(0.01, round(safe_lot, 2))
+    
+    logger.info(f"🛡️ SAFE LOT: {symbol} balance=${balance:.0f} risk={max_risk_percent}% → max_lot={safe_lot}")
+    
+    return safe_lot
+
+
+def _validate_sl_distance(symbol: str, entry_price: float, sl_price: float, side: str) -> tuple[float, str]:
+    """
+    📏 ตรวจสอบและปรับ SL ให้อยู่ในช่วงที่ปลอดภัย
+    
+    Returns: (adjusted_sl, message)
+    """
+    global _anti_wipeout_config
+    
+    if not _anti_wipeout_config.get("enabled", True):
+        return sl_price, "SL validation disabled"
+    
+    is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+    
+    if is_gold:
+        min_sl_points = _anti_wipeout_config.get("gold_min_sl_points", 150)
+        max_sl_points = _anti_wipeout_config.get("gold_max_sl_points", 500)
+        # Gold: 1 point = $0.10 (price movement of 0.1)
+        point_to_price = 0.10
+    else:
+        min_sl_points = _anti_wipeout_config.get("forex_min_sl_pips", 15)
+        max_sl_points = _anti_wipeout_config.get("forex_max_sl_pips", 50)
+        # Forex: 1 pip = 0.0001 for most pairs
+        point_to_price = 0.0001 if 'JPY' not in symbol.upper() else 0.01
+    
+    # Calculate current SL distance
+    if side.upper() == "BUY":
+        current_distance = entry_price - sl_price
+    else:  # SELL
+        current_distance = sl_price - entry_price
+    
+    current_points = abs(current_distance) / point_to_price
+    min_distance = min_sl_points * point_to_price
+    max_distance = max_sl_points * point_to_price
+    
+    adjusted_sl = sl_price
+    message = "SL OK"
+    
+    # Check if SL too tight
+    if current_points < min_sl_points:
+        if side.upper() == "BUY":
+            adjusted_sl = entry_price - min_distance
+        else:
+            adjusted_sl = entry_price + min_distance
+        message = f"⚠️ SL too tight ({current_points:.0f} points), adjusted to {min_sl_points} points"
+        logger.warning(f"📏 {symbol}: {message}")
+    
+    # Check if SL too wide
+    elif current_points > max_sl_points:
+        if side.upper() == "BUY":
+            adjusted_sl = entry_price - max_distance
+        else:
+            adjusted_sl = entry_price + max_distance
+        message = f"⚠️ SL too wide ({current_points:.0f} points), adjusted to {max_sl_points} points"
+        logger.warning(f"📏 {symbol}: {message}")
+    
+    return round(adjusted_sl, 2 if is_gold else 5), message
+
+
+async def _check_trend_alignment(symbol: str, signal: str) -> tuple[bool, str]:
+    """
+    🔍 เช็คว่าสัญญาณตรงกับเทรนด์บน timeframe ใหญ่หรือไม่
+    
+    ใช้ H4 เป็น reference - ถ้าสวนเทรนด์รุนแรง → ไม่เทรด
+    
+    Returns: (is_aligned, reason)
+    """
+    global _bot, _anti_wipeout_config
+    
+    if not _anti_wipeout_config.get("check_higher_timeframe", True):
+        return True, "Higher timeframe check disabled"
+    
+    if not _anti_wipeout_config.get("block_counter_trend", True):
+        return True, "Counter-trend blocking disabled"
+    
+    if not _bot or not _bot.trading_engine or not _bot.trading_engine.broker:
+        return True, "Cannot check - bot not ready"
+    
+    try:
+        broker = _bot.trading_engine.broker
+        if not hasattr(broker, '_mt5') or not broker._mt5:
+            return True, "MT5 not available"
+        
+        mt5 = broker._mt5
+        
+        # Get H4 data for trend check
+        timeframe = mt5.TIMEFRAME_H4
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, 20)
+        
+        if rates is None or len(rates) < 20:
+            return True, "Cannot get H4 data"
+        
+        # Simple trend detection using EMA
+        closes = [r['close'] for r in rates]
+        ema_fast = sum(closes[-5:]) / 5
+        ema_slow = sum(closes[-20:]) / 20
+        
+        # Calculate trend strength (0-100)
+        trend_diff = (ema_fast - ema_slow) / ema_slow * 100
+        trend_strength = min(100, abs(trend_diff) * 10)
+        
+        is_uptrend = ema_fast > ema_slow
+        is_downtrend = ema_fast < ema_slow
+        
+        is_buy_signal = "BUY" in signal.upper()
+        is_sell_signal = "SELL" in signal.upper()
+        
+        min_strength = _anti_wipeout_config.get("min_trend_strength", 60)
+        
+        # Check alignment
+        if is_buy_signal and is_downtrend and trend_strength >= min_strength:
+            return False, f"❌ BLOCKED: BUY signal against strong DOWNTREND (H4 strength={trend_strength:.0f}%)"
+        
+        if is_sell_signal and is_uptrend and trend_strength >= min_strength:
+            return False, f"❌ BLOCKED: SELL signal against strong UPTREND (H4 strength={trend_strength:.0f}%)"
+        
+        # Aligned or weak trend
+        trend_dir = "UP" if is_uptrend else "DOWN"
+        return True, f"✅ Trend aligned: H4 {trend_dir} (strength={trend_strength:.0f}%)"
+        
+    except Exception as e:
+        logger.warning(f"Trend check error: {e}")
+        return True, f"Trend check error: {e}"
 
 # =====================
 # 🎯 UNIVERSAL DYNAMIC CONFIG - รองรับ $100 ถึง $200,000,000!
@@ -374,6 +591,17 @@ def _should_allow_dca(balance: float) -> bool:
 
 def _should_stop_trading(balance: float) -> bool:
     return balance < _small_account_config.get("min_balance_stop_trading", 50)
+
+def _get_reverse_signal_min_profit(balance: float) -> float:
+    """🔄 Get minimum profit for reverse signal close (% based)"""
+    return _calc_dynamic(balance, _reverse_signal_min_profit_percent, 5)
+
+def _get_early_exit_min_profit(balance: float) -> float:
+    """⚡ Get minimum profit for early exit on weakening signal (% based)"""
+    return _calc_dynamic(balance, _signal_weakening_config.get("min_profit_to_exit_early_percent", 15), 10)
+
+
+
 
 
 # =====================
@@ -1895,8 +2123,12 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
             if not is_opposite:
                 continue
             
-            # 🔥 NEW: ต้องมีกำไรขั้นต่ำก่อนถึงจะปิด
-            min_profit_for_reverse = _reverse_signal_min_profit  # Default $50
+            # 🔥 DYNAMIC: Get minimum profit based on balance (% based)
+            try:
+                balance = await _bot.trading_engine.broker.get_balance() or 300
+            except:
+                balance = 300
+            min_profit_for_reverse = _get_reverse_signal_min_profit(balance)
             
             # Determine if we should close
             should_close = False
@@ -1905,11 +2137,11 @@ async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> b
             if pos_pnl >= min_profit_for_reverse:
                 # กำไร >= min → ปิดเลย ล็อกกำไร!
                 should_close = True
-                close_reason = f"PROFIT ${pos_pnl:.2f} >= ${min_profit_for_reverse} + reverse signal"
+                close_reason = f"PROFIT ${pos_pnl:.2f} >= ${min_profit_for_reverse:.0f} (10% of ${balance:.0f}) + reverse signal"
                 logger.info(f"✅ REVERSE SIGNAL PROFIT: {symbol} {pos_side} PROFIT ${pos_pnl:.2f} + {new_signal} → CLOSE & LOCK PROFIT!")
             elif pos_pnl > 0 and pos_pnl < min_profit_for_reverse:
                 # กำไรน้อย → ไม่ปิด รอกำไรเพิ่ม
-                logger.info(f"⏳ REVERSE SIGNAL: {symbol} {pos_side} profit ${pos_pnl:.2f} < ${min_profit_for_reverse} → HOLD (wait for more profit)")
+                logger.info(f"⏳ REVERSE SIGNAL: {symbol} {pos_side} profit ${pos_pnl:.2f} < ${min_profit_for_reverse:.0f} → HOLD (wait for more profit)")
                 continue
             elif pos_pnl <= 0:
                 # ❌ ขาดทุน → ไม่ปิด! รอกลับมากำไรก่อน
@@ -2836,13 +3068,17 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
             should_close, reason = _detect_signal_weakening(symbol, signal_data, pos_side)
             
             if should_close:
-                # 🔥 ต้องมีกำไรขั้นต่ำสูงก่อนถึงจะปิด
-                min_profit = _signal_weakening_config.get("min_profit_to_exit_early", 500)
+                # 🔥 DYNAMIC: Get min profit based on balance (% based)
+                try:
+                    balance = await _bot.trading_engine.broker.get_balance() or 300
+                except:
+                    balance = 300
+                min_profit = _get_early_exit_min_profit(balance)
                 
                 # ต้องมีกำไร >= min_profit ถึงจะปิด
                 if pos_pnl >= min_profit:
                     logger.warning(f"⚡ SIGNAL WEAKENING: {symbol} - {reason}")
-                    logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f} (>= ${min_profit})")
+                    logger.warning(f"   Position: {pos_side} | PnL: ${pos_pnl:.2f} (>= ${min_profit:.0f} = 15% of ${balance:.0f})")
                     logger.warning(f"   ACTION: Closing to LOCK PROFIT!")
                     
                     # 🔥 ใช้ broker interface แทน MT5 โดยตรง - เสถียรกว่า!
@@ -2867,17 +3103,20 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
         logger.error(f"Error checking weakening positions: {e}")
 
 
-
-
-
-
-
 async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     """
     🎯 SMART TRADE FILTER
     Check if we should trade this signal - Quality + Confidence filter
     
-    🥇 Gold: MEDIUM quality OK (Gold Strategy v2 มี filter เข้มอยู่แล้ว)
+    🛡️ ANTI-WIPEOUT CHECKS:
+    1. Symbol whitelist (Gold only)
+    2. Quality + Confidence filter
+    3. Pullback confirmation
+    4. 🆕 TREND ALIGNMENT CHECK - ห้ามสวนเทรนด์รุนแรง!
+    5. Open position check
+    6. Cooldown check
+    
+    🥇 Gold: HIGH quality, 75%+ confidence
     💱 Forex: ❌ BLOCKED! ไม่เทรด Forex
     
     Returns: (can_trade: bool, reason: str)
@@ -2928,22 +3167,28 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     if confidence < min_confidence:
         return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}% (for {'Gold' if is_gold else 'Forex'})"
     
-    # 4. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า
+    # 4. 🛡️ TREND ALIGNMENT CHECK - ห้ามสวนเทรนด์รุนแรง!
+    trend_aligned, trend_reason = await _check_trend_alignment(symbol, signal)
+    if not trend_aligned:
+        logger.warning(f"🛡️ ANTI-WIPEOUT: {symbol} - {trend_reason}")
+        return False, trend_reason
+    
+    # 5. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า
     current_price = signal_data.get("current_price", 0)
     if current_price > 0:
         can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
         if not can_enter_pullback:
             return False, f"PULLBACK: {pullback_reason}"
     
-    # 5. Check for open positions
+    # 6. Check for open positions
     has_position = await _check_open_positions(symbol)
     if has_position:
         return False, f"Already have open position for {symbol}"
     
-    # 6. Generate signal ID
+    # 7. Generate signal ID
     signal_id = _generate_signal_id(symbol, signal, confidence)
     
-    # 7. Check if we already traded this signal
+    # 8. Check if we already traded this signal
     last_trade = _last_traded_signal.get(symbol)
     if last_trade:
         last_signal_id = last_trade.get("signal_id")
@@ -5349,4 +5594,229 @@ async def configure_symbol_whitelist(
         "status": "success",
         "changes": changes,
         "config": _symbol_whitelist
+    }
+
+
+# =====================
+# 🛡️ ANTI-WIPEOUT PROTECTION - ป้องกันล้างพอร์ต!
+# =====================
+
+@router.get("/anti-wipeout")
+async def get_anti_wipeout_status():
+    """
+    🛡️ Get Anti-Wipeout Protection configuration
+    
+    Features:
+    - Max lot size limiter (based on balance)
+    - Minimum SL distance (Gold >= $15, Forex >= 15 pips)
+    - Higher timeframe trend alignment
+    - Counter-trend blocking
+    
+    Example for $7,000 balance:
+    - Max lot for Gold: 0.35 (=$7000/1000 × 0.05)
+    - Risk per trade: $140 (=2% of $7,000)
+    """
+    global _anti_wipeout_config, _bot
+    
+    # Get current balance for examples
+    balance = 7000
+    try:
+        if _bot and _bot.trading_engine:
+            balance = await _bot.trading_engine.broker.get_balance() or 7000
+    except:
+        pass
+    
+    # Calculate current limits
+    gold_max_lot = round((balance / 1000) * _anti_wipeout_config.get("gold_max_lot_per_1000", 0.05), 2)
+    forex_max_lot = round((balance / 1000) * _anti_wipeout_config.get("forex_max_lot_per_1000", 0.10), 2)
+    max_risk_amount = balance * (_anti_wipeout_config.get("max_risk_per_trade_percent", 2.0) / 100)
+    
+    return {
+        "config": _anti_wipeout_config,
+        "current_balance": balance,
+        "current_limits": {
+            "gold_max_lot": gold_max_lot,
+            "forex_max_lot": forex_max_lot,
+            "max_risk_per_trade": f"${max_risk_amount:.2f}",
+            "gold_min_sl": f"${_anti_wipeout_config.get('gold_min_sl_points', 150) / 10:.0f}",
+            "gold_max_sl": f"${_anti_wipeout_config.get('gold_max_sl_points', 500) / 10:.0f}",
+        },
+        "examples": {
+            "$1,000 port": {
+                "gold_max_lot": 0.05,
+                "max_risk": "$20",
+            },
+            "$5,000 port": {
+                "gold_max_lot": 0.25,
+                "max_risk": "$100",
+            },
+            "$10,000 port": {
+                "gold_max_lot": 0.50,
+                "max_risk": "$200",
+            },
+            "$50,000 port": {
+                "gold_max_lot": 2.50,
+                "max_risk": "$1,000",
+            },
+        },
+        "why_important": "ล้างพอร์ตเพราะ: Lot size ใหญ่เกินไป + SL แคบเกินไป + เข้าสวนเทรนด์",
+    }
+
+
+@router.post("/anti-wipeout/toggle")
+async def toggle_anti_wipeout(enabled: bool = True):
+    """
+    🛡️ Enable/Disable Anti-Wipeout Protection
+    
+    ⚠️ WARNING: Disabling this increases risk of account wipeout!
+    """
+    global _anti_wipeout_config
+    
+    _anti_wipeout_config["enabled"] = enabled
+    
+    status = "ENABLED ✅ (SAFE)" if enabled else "DISABLED ⚠️ (RISKY!)"
+    logger.info(f"🛡️ Anti-Wipeout Protection: {status}")
+    
+    return {
+        "status": "success",
+        "anti_wipeout_enabled": enabled,
+        "message": f"Anti-Wipeout Protection {status}",
+        "warning": "RISKY! Account may be wiped out easily!" if not enabled else None
+    }
+
+
+@router.post("/anti-wipeout/configure")
+async def configure_anti_wipeout(
+    max_risk_per_trade_percent: float = None,
+    gold_max_lot_per_1000: float = None,
+    forex_max_lot_per_1000: float = None,
+    gold_min_sl_points: int = None,
+    gold_max_sl_points: int = None,
+    block_counter_trend: bool = None,
+    min_trend_strength: int = None,
+):
+    """
+    🛡️ Configure Anti-Wipeout Protection
+    
+    - max_risk_per_trade_percent: Risk % ต่อเทรด (default: 2.0)
+    - gold_max_lot_per_1000: Max lot Gold ต่อทุก $1000 (default: 0.05)
+    - forex_max_lot_per_1000: Max lot Forex ต่อทุก $1000 (default: 0.10)
+    - gold_min_sl_points: Gold SL ขั้นต่ำ (points, default: 150 = $15)
+    - gold_max_sl_points: Gold SL สูงสุด (points, default: 500 = $50)
+    - block_counter_trend: ห้ามเทรดสวนเทรนด์ (default: True)
+    - min_trend_strength: Trend strength ขั้นต่ำที่จะ block (default: 60%)
+    """
+    global _anti_wipeout_config
+    
+    changes = []
+    
+    if max_risk_per_trade_percent is not None:
+        _anti_wipeout_config["max_risk_per_trade_percent"] = max(0.5, min(5.0, max_risk_per_trade_percent))
+        changes.append(f"max_risk: {_anti_wipeout_config['max_risk_per_trade_percent']}%")
+    
+    if gold_max_lot_per_1000 is not None:
+        _anti_wipeout_config["gold_max_lot_per_1000"] = max(0.01, min(0.20, gold_max_lot_per_1000))
+        changes.append(f"gold_max_lot: {_anti_wipeout_config['gold_max_lot_per_1000']} per $1000")
+    
+    if forex_max_lot_per_1000 is not None:
+        _anti_wipeout_config["forex_max_lot_per_1000"] = max(0.01, min(0.50, forex_max_lot_per_1000))
+        changes.append(f"forex_max_lot: {_anti_wipeout_config['forex_max_lot_per_1000']} per $1000")
+    
+    if gold_min_sl_points is not None:
+        _anti_wipeout_config["gold_min_sl_points"] = max(50, min(300, gold_min_sl_points))
+        changes.append(f"gold_min_sl: {_anti_wipeout_config['gold_min_sl_points']} pts (${_anti_wipeout_config['gold_min_sl_points']/10:.0f})")
+    
+    if gold_max_sl_points is not None:
+        _anti_wipeout_config["gold_max_sl_points"] = max(200, min(1000, gold_max_sl_points))
+        changes.append(f"gold_max_sl: {_anti_wipeout_config['gold_max_sl_points']} pts (${_anti_wipeout_config['gold_max_sl_points']/10:.0f})")
+    
+    if block_counter_trend is not None:
+        _anti_wipeout_config["block_counter_trend"] = block_counter_trend
+        changes.append(f"block_counter_trend: {block_counter_trend}")
+    
+    if min_trend_strength is not None:
+        _anti_wipeout_config["min_trend_strength"] = max(30, min(90, min_trend_strength))
+        changes.append(f"min_trend_strength: {_anti_wipeout_config['min_trend_strength']}%")
+    
+    logger.info(f"🛡️ Anti-Wipeout configured: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _anti_wipeout_config
+    }
+
+
+@router.post("/anti-wipeout/preset/{preset}")
+async def set_anti_wipeout_preset(preset: str):
+    """
+    🛡️ Set Anti-Wipeout Preset
+    
+    Presets:
+    - ultra_safe: Very conservative (for small accounts or after losses)
+    - safe: Recommended for most traders
+    - moderate: More trades, moderate risk
+    - aggressive: Higher risk (NOT recommended!)
+    """
+    global _anti_wipeout_config
+    
+    presets = {
+        "ultra_safe": {
+            "max_risk_per_trade_percent": 1.0,
+            "gold_max_lot_per_1000": 0.03,
+            "gold_min_sl_points": 200,  # $20
+            "gold_max_sl_points": 400,  # $40
+            "block_counter_trend": True,
+            "min_trend_strength": 50,
+            "description": "สำหรับ port เล็กหรือหลังขาดทุน - Risk 1% ต่อเทรด"
+        },
+        "safe": {
+            "max_risk_per_trade_percent": 2.0,
+            "gold_max_lot_per_1000": 0.05,
+            "gold_min_sl_points": 150,  # $15
+            "gold_max_sl_points": 500,  # $50
+            "block_counter_trend": True,
+            "min_trend_strength": 60,
+            "description": "แนะนำสำหรับส่วนใหญ่ - Risk 2% ต่อเทรด"
+        },
+        "moderate": {
+            "max_risk_per_trade_percent": 3.0,
+            "gold_max_lot_per_1000": 0.08,
+            "gold_min_sl_points": 120,  # $12
+            "gold_max_sl_points": 600,  # $60
+            "block_counter_trend": True,
+            "min_trend_strength": 70,
+            "description": "เทรดเยอะขึ้น risk ปานกลาง - Risk 3% ต่อเทรด"
+        },
+        "aggressive": {
+            "max_risk_per_trade_percent": 4.0,
+            "gold_max_lot_per_1000": 0.10,
+            "gold_min_sl_points": 100,  # $10
+            "gold_max_sl_points": 700,  # $70
+            "block_counter_trend": False,  # ⚠️ อนุญาตสวนเทรนด์!
+            "min_trend_strength": 80,
+            "description": "⚠️ RISKY! สำหรับ experienced traders เท่านั้น"
+        }
+    }
+    
+    if preset not in presets:
+        return {"status": "error", "message": f"Unknown preset: {preset}. Available: {list(presets.keys())}"}
+    
+    config = presets[preset]
+    
+    _anti_wipeout_config["max_risk_per_trade_percent"] = config["max_risk_per_trade_percent"]
+    _anti_wipeout_config["gold_max_lot_per_1000"] = config["gold_max_lot_per_1000"]
+    _anti_wipeout_config["gold_min_sl_points"] = config["gold_min_sl_points"]
+    _anti_wipeout_config["gold_max_sl_points"] = config["gold_max_sl_points"]
+    _anti_wipeout_config["block_counter_trend"] = config["block_counter_trend"]
+    _anti_wipeout_config["min_trend_strength"] = config["min_trend_strength"]
+    
+    logger.info(f"🛡️ Preset '{preset}' activated: {config['description']}")
+    
+    return {
+        "status": "success",
+        "preset": preset,
+        "description": config["description"],
+        "config": _anti_wipeout_config,
+        "warning": "⚠️ HIGH RISK PRESET!" if preset == "aggressive" else None
     }

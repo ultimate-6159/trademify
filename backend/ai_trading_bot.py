@@ -4296,8 +4296,34 @@ class AITradingBot:
                     logger.info(f"🎯 Limited TP: R:R {current_rr:.1f} -> {max_rr:.1f}, TP: {old_tp:.5f} -> {take_profit:.5f}")
 
 
-        # �🛡️ Calculate position size using Risk Guardian
+        # 🛡️ Calculate position size using Risk Guardian
         balance = await self.trading_engine.broker.get_balance()
+        
+        # 🛡️ ANTI-WIPEOUT: Validate and adjust SL distance
+        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        if is_gold and stop_loss:
+            # Gold: Minimum SL = $15 (150 points), Maximum = $50 (500 points)
+            sl_distance_points = abs(current_price - stop_loss) * 10  # Convert to points
+            min_sl_points = 150  # $15
+            max_sl_points = 500  # $50
+            
+            if sl_distance_points < min_sl_points:
+                old_sl = stop_loss
+                sl_distance_price = min_sl_points / 10  # Convert back to price
+                if side == OrderSide.BUY:
+                    stop_loss = current_price - sl_distance_price
+                else:
+                    stop_loss = current_price + sl_distance_price
+                logger.warning(f"🛡️ ANTI-WIPEOUT: SL too tight! {sl_distance_points:.0f} pts → {min_sl_points} pts (${min_sl_points/10:.0f})")
+                logger.warning(f"   Adjusted SL: {old_sl:.2f} → {stop_loss:.2f}")
+            elif sl_distance_points > max_sl_points:
+                old_sl = stop_loss
+                sl_distance_price = max_sl_points / 10
+                if side == OrderSide.BUY:
+                    stop_loss = current_price - sl_distance_price
+                else:
+                    stop_loss = current_price + sl_distance_price
+                logger.info(f"🛡️ SL capped: {sl_distance_points:.0f} pts → {max_sl_points} pts (${max_sl_points/10:.0f})")
         
         if self.risk_guardian:
             quantity, calc_details = self.risk_guardian.calculate_position_size(
@@ -4317,6 +4343,30 @@ class AITradingBot:
             quantity = risk_amount / stop_distance if stop_distance > 0 else 0.001
         
         quantity = round(max(0.01, quantity), 2)  # Min 0.01 lot
+        
+        # 🛡️ ANTI-WIPEOUT: Hard limit on lot size based on balance!
+        # Formula: Max Lot = (Balance / 1000) × 0.05 for Gold
+        # Example: $7000 balance → max 0.35 lot ($7000/1000 × 0.05)
+        if is_gold:
+            max_lot_per_1000 = 0.05  # Conservative: 0.05 lot per $1000
+            hard_max_lot = round((balance / 1000) * max_lot_per_1000, 2)
+            hard_max_lot = max(0.01, hard_max_lot)  # Minimum 0.01
+            
+            if quantity > hard_max_lot:
+                old_quantity = quantity
+                quantity = hard_max_lot
+                logger.warning(f"🛡️ ANTI-WIPEOUT: Lot size capped!")
+                logger.warning(f"   Balance: ${balance:.0f} → Max Lot: {hard_max_lot} (was {old_quantity})")
+                logger.warning(f"   Formula: ${balance:.0f}/1000 × 0.05 = {hard_max_lot}")
+        else:
+            # Forex: 0.10 lot per $1000
+            max_lot_per_1000 = 0.10
+            hard_max_lot = round((balance / 1000) * max_lot_per_1000, 2)
+            hard_max_lot = max(0.01, hard_max_lot)
+            
+            if quantity > hard_max_lot:
+                quantity = hard_max_lot
+                logger.warning(f"🛡️ Forex lot capped: {quantity} (max {hard_max_lot} for ${balance:.0f})")
         
         # Create order
         order = Order(
