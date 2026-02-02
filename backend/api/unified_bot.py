@@ -294,11 +294,19 @@ _signal_fade_config = {
     "peak_tracking_enabled": True,                # 📊 Track peak confidence
     "momentum_window_size": 5,                    # 📈 ใช้ 5 readings ล่าสุดคำนวณ momentum
     "trend_detection_enabled": True,              # 🔄 ตรวจจับ trend ของ confidence
+    
+    # 🤖 AUTO-ACTION SETTINGS - จัดการ position อัตโนมัติเมื่อ signal fading!
+    "auto_action_enabled": True,                  # ✅ เปิด auto-action
+    "block_new_trades_on_warning": True,          # ❌ Block เปิด position ใหม่เมื่อ WARNING
+    "block_new_trades_on_danger": True,           # ❌ Block เปิด position ใหม่เมื่อ DANGER
+    "move_sl_to_breakeven_on_warning": True,      # 🔄 ย้าย SL มา break-even เมื่อ WARNING (ต้องมีกำไร)
+    "close_profitable_on_danger": True,           # 💰 ปิด position ที่มีกำไรเมื่อ DANGER
+    "min_profit_percent_to_close_on_danger": 5.0, # 💰 ต้องกำไร >= 5% ของ balance ถึงจะปิด
+    "min_profit_to_move_sl": 0.5,                 # 🔄 ต้องกำไร >= 0.5% ของ balance ถึงจะย้าย SL
 }
 
 # 📊 Signal Health Tracker - เก็บ peak confidence และ momentum
 _signal_health = {}  # {symbol: {"peak_confidence": 85, "current_confidence": 75, "momentum": "FALLING", "trend": "DOWN", "alert_level": "WARNING"}}
-
 
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
@@ -1666,6 +1674,13 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
         elif signal_health.get("alert_level") == "WARNING":
             logger.warning(f"📉 SIGNAL WARNING: {symbol} - {signal_health.get('momentum', 'UNKNOWN')} momentum, trend: {signal_health.get('trend', 'UNKNOWN')}")
         
+        # 🤖 AUTO-ACTION: จัดการ position อัตโนมัติเมื่อ signal fading!
+        if signal_health.get("alert_level") in ["WARNING", "DANGER"]:
+            auto_action_result = await _handle_signal_fade_auto_action(symbol, signal_health)
+            if auto_action_result.get("actions_taken"):
+                for action in auto_action_result["actions_taken"]:
+                    logger.info(f"🤖 AUTO-ACTION: {action.get('action')} - {action.get('reason')}")
+        
         # 📊 LOG SIGNAL STRENGTH SCORE
         strength = _get_signal_strength_score(symbol, signal_data)
         if strength["score"] < 50:
@@ -1706,6 +1721,13 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
         # Auto trade ONLY if mode is AUTO (and not already handled by reverse)
         if auto_trade and _bot_status["mode"] == BotMode.AUTO.value and not closed_opposite:
             if signal_data["signal"] in ["BUY", "SELL", "STRONG_BUY", "STRONG_SELL"]:
+                # 🔍 CHECK SIGNAL HEALTH before trading!
+                health_ok, health_reason = _check_signal_health_allows_trading(symbol)
+                if not health_ok:
+                    logger.warning(f"   🤖 {symbol}: Trade blocked by Signal Health - {health_reason}")
+                    _bot_status["last_signal"][symbol]["trade_status"] = f"BLOCKED: {health_reason}"
+                    return signal_data  # Skip trade
+                
                 # Check if can trade before attempting
                 can_trade, reason = await _can_trade_signal(symbol, signal_data)
                 
@@ -3294,6 +3316,196 @@ def _get_health_recommendations(health: Dict) -> List[str]:
         recommendations.append("👍 Signal stable - normal trading")
     
     return recommendations
+
+
+# =====================
+# 🤖 SIGNAL FADE AUTO-ACTION - จัดการ position อัตโนมัติ!
+# =====================
+
+async def _handle_signal_fade_auto_action(symbol: str, signal_health: Dict):
+    """
+    🤖 AUTO-ACTION เมื่อ Signal Fading
+    
+    Actions:
+    1. WARNING → ย้าย SL มา break-even (ถ้ามีกำไร)
+    2. DANGER → ปิด position ที่มีกำไร >= X%
+    
+    Returns: Dict with actions taken
+    """
+    global _bot, _signal_fade_config, _bot_status
+    
+    if not _signal_fade_config.get("auto_action_enabled", True):
+        return {"action": "disabled"}
+    
+    if not _bot or not _bot.trading_engine:
+        return {"action": "bot_not_ready"}
+    
+    alert_level = signal_health.get("alert_level", "OK")
+    
+    if alert_level == "OK":
+        return {"action": "none", "reason": "Signal healthy"}
+    
+    actions_taken = []
+    
+    try:
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return {"action": "no_positions"}
+        
+        # Get balance for % calculations
+        try:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+        except:
+            balance = 1000
+        
+        for pos in positions:
+            # Extract position info
+            if isinstance(pos, dict):
+                pos_id = pos.get("ticket") or pos.get("id")
+                pos_symbol = pos.get("symbol", "")
+                pos_side = pos.get("side", "").upper()
+                pos_pnl = float(pos.get("profit", 0) or 0)
+                pos_entry = float(pos.get("open_price", 0) or pos.get("price_open", 0) or 0)
+                pos_sl = float(pos.get("sl", 0) or 0)
+            else:
+                pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                pos_symbol = getattr(pos, "symbol", "")
+                pos_side = getattr(pos, "side", "")
+                if hasattr(pos_side, "value"):
+                    pos_side = pos_side.value.upper()
+                pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                pos_entry = float(getattr(pos, "open_price", 0) or getattr(pos, "price_open", 0) or 0)
+                pos_sl = float(getattr(pos, "sl", 0) or 0)
+            
+            # Only handle positions for this symbol
+            if pos_symbol.upper() != symbol.upper():
+                continue
+            
+            # Calculate profit % of balance
+            profit_percent = (pos_pnl / balance) * 100 if balance > 0 else 0
+            
+            # =====================
+            # 🔴 DANGER → Close profitable positions
+            # =====================
+            if alert_level == "DANGER" and _signal_fade_config.get("close_profitable_on_danger", True):
+                min_profit_percent = _signal_fade_config.get("min_profit_percent_to_close_on_danger", 5.0)
+                
+                if profit_percent >= min_profit_percent:
+                    logger.warning(f"🤖 AUTO-ACTION DANGER: {symbol} closing position #{pos_id}")
+                    logger.warning(f"   Profit: ${pos_pnl:.2f} ({profit_percent:.1f}% of balance)")
+                    logger.warning(f"   Reason: Signal DANGER - confidence dropped significantly!")
+                    
+                    try:
+                        result = await _bot.trading_engine.broker.close_position(pos_id)
+                        if result:
+                            logger.info(f"✅ Position #{pos_id} closed! Locked profit: ${pos_pnl:.2f}")
+                            
+                            # Update stats
+                            _bot_status["daily_stats"]["trades"] += 1
+                            _bot_status["daily_stats"]["pnl"] += pos_pnl
+                            _bot_status["daily_stats"]["wins"] += 1
+                            
+                            actions_taken.append({
+                                "action": "closed",
+                                "ticket": pos_id,
+                                "symbol": pos_symbol,
+                                "pnl": pos_pnl,
+                                "reason": "DANGER - signal fading",
+                            })
+                        else:
+                            logger.error(f"❌ Failed to close position #{pos_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Error closing position: {e}")
+                else:
+                    logger.info(f"📊 DANGER but profit {profit_percent:.1f}% < {min_profit_percent}% - NOT closing yet")
+            
+            # =====================
+            # 🟡 WARNING → Move SL to break-even
+            # =====================
+            elif alert_level == "WARNING" and _signal_fade_config.get("move_sl_to_breakeven_on_warning", True):
+                min_profit_to_move = _signal_fade_config.get("min_profit_to_move_sl", 0.5)
+                
+                if profit_percent >= min_profit_to_move and pos_entry > 0:
+                    # Calculate break-even SL (entry price + small buffer)
+                    is_gold = 'XAU' in pos_symbol.upper() or 'GOLD' in pos_symbol.upper()
+                    buffer = 1.0 if is_gold else 0.0005  # $1 for gold, 0.5 pips for forex
+                    
+                    if pos_side == "BUY":
+                        new_sl = pos_entry + buffer
+                        # Only move if new SL is better (higher for BUY)
+                        if pos_sl > 0 and new_sl <= pos_sl:
+                            continue  # Already better SL
+                    else:  # SELL
+                        new_sl = pos_entry - buffer
+                        # Only move if new SL is better (lower for SELL)
+                        if pos_sl > 0 and new_sl >= pos_sl:
+                            continue  # Already better SL
+                    
+                    new_sl = round(new_sl, 2 if is_gold else 5)
+                    
+                    logger.warning(f"🤖 AUTO-ACTION WARNING: {symbol} moving SL to break-even")
+                    logger.warning(f"   Position: #{pos_id} {pos_side} @ {pos_entry:.2f}")
+                    logger.warning(f"   Current SL: {pos_sl:.2f} → New SL: {new_sl:.2f}")
+                    logger.warning(f"   Reason: Signal WARNING - protecting profit ${pos_pnl:.2f}")
+                    
+                    try:
+                        result = await _bot.trading_engine.broker.modify_position(
+                            str(pos_id),
+                            stop_loss=new_sl
+                        )
+                        
+                        if result and result.success:
+                            logger.info(f"✅ SL moved to break-even: #{pos_id} SL={new_sl:.2f}")
+                            actions_taken.append({
+                                "action": "sl_moved",
+                                "ticket": pos_id,
+                                "symbol": pos_symbol,
+                                "old_sl": pos_sl,
+                                "new_sl": new_sl,
+                                "reason": "WARNING - break-even protection",
+                            })
+                        else:
+                            error = result.error if result else "Unknown"
+                            logger.warning(f"⚠️ Failed to move SL: {error}")
+                    except Exception as e:
+                        logger.error(f"❌ Error moving SL: {e}")
+        
+        return {
+            "action": "completed",
+            "alert_level": alert_level,
+            "actions_taken": actions_taken,
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in signal fade auto-action: {e}")
+        return {"action": "error", "error": str(e)}
+
+
+def _check_signal_health_allows_trading(symbol: str) -> tuple[bool, str]:
+    """
+    🔍 Check if signal health allows opening new trades
+    
+    Returns: (can_trade: bool, reason: str)
+    """
+    global _signal_health, _signal_fade_config
+    
+    if not _signal_fade_config.get("auto_action_enabled", True):
+        return True, "Auto-action disabled"
+    
+    health = _signal_health.get(symbol, {})
+    alert_level = health.get("alert_level", "OK")
+    
+    # DANGER → Block new trades
+    if alert_level == "DANGER" and _signal_fade_config.get("block_new_trades_on_danger", True):
+        drop = health.get("peak_drop_percent", 0)
+        return False, f"🔴 BLOCKED: Signal DANGER (confidence dropped {drop:.1f}% from peak)"
+    
+    # WARNING → Block new trades
+    if alert_level == "WARNING" and _signal_fade_config.get("block_new_trades_on_warning", True):
+        momentum = health.get("momentum", "UNKNOWN")
+        return False, f"🟡 BLOCKED: Signal WARNING ({momentum} momentum)"
+    
+    return True, "✅ Signal health OK"
 
 
 # =====================
@@ -5317,6 +5529,140 @@ async def configure_signal_fade_alerts(
         "status": "success",
         "changes": changes,
         "config": _signal_fade_config
+    }
+
+
+@router.get("/signal-fade/auto-action")
+async def get_signal_fade_auto_action_config():
+    """
+    🤖 Get Signal Fade Auto-Action configuration
+    
+    Shows automatic actions when signal fades:
+    - WARNING → Block new trades + Move SL to break-even
+    - DANGER → Block new trades + Close profitable positions
+    """
+    global _signal_fade_config
+    
+    return {
+        "config": {
+            "auto_action_enabled": _signal_fade_config.get("auto_action_enabled", True),
+            "block_new_trades_on_warning": _signal_fade_config.get("block_new_trades_on_warning", True),
+            "block_new_trades_on_danger": _signal_fade_config.get("block_new_trades_on_danger", True),
+            "move_sl_to_breakeven_on_warning": _signal_fade_config.get("move_sl_to_breakeven_on_warning", True),
+            "close_profitable_on_danger": _signal_fade_config.get("close_profitable_on_danger", True),
+            "min_profit_percent_to_close_on_danger": _signal_fade_config.get("min_profit_percent_to_close_on_danger", 5.0),
+            "min_profit_to_move_sl": _signal_fade_config.get("min_profit_to_move_sl", 0.5),
+        },
+        "description": {
+            "auto_action_enabled": "เปิด/ปิด auto-action ทั้งหมด",
+            "block_new_trades_on_warning": "Block การเปิด position ใหม่เมื่อ WARNING",
+            "block_new_trades_on_danger": "Block การเปิด position ใหม่เมื่อ DANGER",
+            "move_sl_to_breakeven_on_warning": "ย้าย SL มา break-even เมื่อ WARNING (ต้องมีกำไร)",
+            "close_profitable_on_danger": "ปิด position ที่มีกำไรเมื่อ DANGER",
+            "min_profit_percent_to_close_on_danger": "% กำไรขั้นต่ำ (ของ balance) ก่อนปิดเมื่อ DANGER",
+            "min_profit_to_move_sl": "% กำไรขั้นต่ำ (ของ balance) ก่อนย้าย SL",
+        },
+        "actions_summary": {
+            "OK": "✅ เทรดตามปกติ",
+            "WARNING": "🟡 Block เปิดใหม่ + ย้าย SL มา break-even (ถ้ามีกำไร)",
+            "DANGER": "🔴 Block เปิดใหม่ + ปิด position ที่มีกำไร >= X%",
+        }
+    }
+
+
+@router.post("/signal-fade/auto-action/configure")
+async def configure_signal_fade_auto_action(
+    auto_action_enabled: bool = None,
+    block_on_warning: bool = None,
+    block_on_danger: bool = None,
+    move_sl_on_warning: bool = None,
+    close_on_danger: bool = None,
+    min_profit_percent_to_close: float = None,
+    min_profit_to_move_sl: float = None,
+):
+    """
+    🤖 Configure Signal Fade Auto-Action
+    
+    - auto_action_enabled: เปิด/ปิด auto-action ทั้งหมด
+    - block_on_warning: Block เปิด position ใหม่เมื่อ WARNING
+    - block_on_danger: Block เปิด position ใหม่เมื่อ DANGER
+    - move_sl_on_warning: ย้าย SL มา break-even เมื่อ WARNING
+    - close_on_danger: ปิด position ที่มีกำไรเมื่อ DANGER
+    - min_profit_percent_to_close: % กำไรขั้นต่ำก่อนปิด (1-20%)
+    - min_profit_to_move_sl: % กำไรขั้นต่ำก่อนย้าย SL (0.1-5%)
+    """
+    global _signal_fade_config
+    
+    changes = []
+    
+    if auto_action_enabled is not None:
+        _signal_fade_config["auto_action_enabled"] = auto_action_enabled
+        changes.append(f"auto_action: {'ON' if auto_action_enabled else 'OFF'}")
+    
+    if block_on_warning is not None:
+        _signal_fade_config["block_new_trades_on_warning"] = block_on_warning
+        changes.append(f"block_on_warning: {block_on_warning}")
+    
+    if block_on_danger is not None:
+        _signal_fade_config["block_new_trades_on_danger"] = block_on_danger
+        changes.append(f"block_on_danger: {block_on_danger}")
+    
+    if move_sl_on_warning is not None:
+        _signal_fade_config["move_sl_to_breakeven_on_warning"] = move_sl_on_warning
+        changes.append(f"move_sl_on_warning: {move_sl_on_warning}")
+    
+    if close_on_danger is not None:
+        _signal_fade_config["close_profitable_on_danger"] = close_on_danger
+        changes.append(f"close_on_danger: {close_on_danger}")
+    
+    if min_profit_percent_to_close is not None:
+        _signal_fade_config["min_profit_percent_to_close_on_danger"] = max(1, min(20, min_profit_percent_to_close))
+        changes.append(f"min_profit_to_close: {_signal_fade_config['min_profit_percent_to_close_on_danger']}%")
+    
+    if min_profit_to_move_sl is not None:
+        _signal_fade_config["min_profit_to_move_sl"] = max(0.1, min(5, min_profit_to_move_sl))
+        changes.append(f"min_profit_to_move_sl: {_signal_fade_config['min_profit_to_move_sl']}%")
+    
+    logger.info(f"🤖 Signal fade auto-action configured: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": {
+            "auto_action_enabled": _signal_fade_config.get("auto_action_enabled"),
+            "block_new_trades_on_warning": _signal_fade_config.get("block_new_trades_on_warning"),
+            "block_new_trades_on_danger": _signal_fade_config.get("block_new_trades_on_danger"),
+            "move_sl_to_breakeven_on_warning": _signal_fade_config.get("move_sl_to_breakeven_on_warning"),
+            "close_profitable_on_danger": _signal_fade_config.get("close_profitable_on_danger"),
+            "min_profit_percent_to_close_on_danger": _signal_fade_config.get("min_profit_percent_to_close_on_danger"),
+            "min_profit_to_move_sl": _signal_fade_config.get("min_profit_to_move_sl"),
+        }
+    }
+
+
+@router.post("/signal-fade/auto-action/toggle")
+async def toggle_signal_fade_auto_action(enabled: bool = True):
+    """
+    🤖 Enable/Disable Signal Fade Auto-Action
+    
+    - enabled=true: เปิด auto-action (ปิด position อัตโนมัติเมื่อ signal fading)
+    - enabled=false: ปิด auto-action (แจ้งเตือนอย่างเดียว ไม่จัดการ position)
+    """
+    global _signal_fade_config
+    
+    _signal_fade_config["auto_action_enabled"] = enabled
+    
+    status = "🤖 ENABLED - จัดการ position อัตโนมัติ" if enabled else "📢 DISABLED - แจ้งเตือนอย่างเดียว"
+    logger.info(f"🤖 Signal Fade Auto-Action: {status}")
+    
+    return {
+        "status": "success",
+        "auto_action_enabled": enabled,
+        "message": status,
+        "actions_when_enabled": {
+            "WARNING": "Block เปิดใหม่ + ย้าย SL มา break-even",
+            "DANGER": "Block เปิดใหม่ + ปิด position ที่มีกำไร >= 5%",
+        }
     }
 
 
