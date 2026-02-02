@@ -1606,8 +1606,8 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
             "confidence": raw_confidence,
             "quality": analysis.get("quality", "SKIP"),
             "current_price": current_price,
-            "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
-            "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
+            "stop_loss": analysis.get("risk_management", {}).get("stop_loss") or 0,
+            "take_profit": analysis.get("risk_management", {}).get("take_profit") or 0,
             "scores": scores,
             "indicators": analysis.get("indicators", {}),
             "market_regime": trend,
@@ -4247,25 +4247,25 @@ async def get_signal_for_symbol(symbol: str):
                 "message": "No analysis available for this symbol. Start the bot first."
             }
         
-        # Build response safely
+        # Build response safely - 🐛 FIX: Handle None values properly
         response = {
             "status": "ok",
             "bot_mode": _bot_status["mode"],
             "symbol": signal.get("symbol", symbol),
             "signal": signal.get("signal", "WAIT"),
-            "confidence": float(signal.get("confidence", 0)),
+            "confidence": float(signal.get("confidence") or 0),
             "quality": signal.get("quality", "SKIP"),
-            "current_price": float(signal.get("current_price", 0)),
-            "stop_loss": float(signal.get("stop_loss", 0)),
-            "take_profit": float(signal.get("take_profit", 0)),
+            "current_price": float(signal.get("current_price") or 0),
+            "stop_loss": float(signal.get("stop_loss") or 0),
+            "take_profit": float(signal.get("take_profit") or 0),
             "trade_status": signal.get("trade_status", "N/A"),
             "market_regime": signal.get("market_regime", "UNKNOWN"),
             "timestamp": signal.get("timestamp", datetime.now().isoformat()),
             # 🔥 NEW: Add explicit fields for frontend
-            "buy_score": signal.get("buy_score", 0),
-            "sell_score": signal.get("sell_score", 0),
-            "session": signal.get("session", "N/A"),
-            "trend": signal.get("trend", signal.get("market_regime", "UNKNOWN")),
+            "buy_score": signal.get("buy_score") or 0,
+            "sell_score": signal.get("sell_score") or 0,
+            "session": signal.get("session") or "N/A",
+            "trend": signal.get("trend") or signal.get("market_regime") or "UNKNOWN",
         }
         
         # Add optional fields if present
