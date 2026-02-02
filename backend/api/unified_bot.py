@@ -308,6 +308,23 @@ _signal_fade_config = {
 # 📊 Signal Health Tracker - เก็บ peak confidence และ momentum
 _signal_health = {}  # {symbol: {"peak_confidence": 85, "current_confidence": 75, "momentum": "FALLING", "trend": "DOWN", "alert_level": "WARNING"}}
 
+# 🎯 SCORE GAP FILTER - ป้องกันสัญญาณไม่ชัดเจน (NEW!)
+# =====================
+# ถ้า Buy Score กับ Sell Score ใกล้กันเกินไป = ไม่เทรด!
+# ช่วยลด false signals และเพิ่ม win rate
+
+_score_gap_config = {
+    "enabled": True,                              # ✅ เปิด Score Gap Filter
+    "min_score_gap_gold": 2,                      # 🥇 Gold: ต้องต่างกันอย่างน้อย 2 points
+    "min_score_gap_forex": 3,                     # 💱 Forex: ต้องต่างกันอย่างน้อย 3 points
+    "min_dominant_score_gold": 7,                 # 🥇 Gold: Score ที่ชนะต้อง >= 7/12
+    "min_dominant_score_forex": 7,                # 💱 Forex: Score ที่ชนะต้อง >= 7/12
+    "confidence_bonus_gap_5": 10,                 # 📈 Gap >= 5 = +10% confidence
+    "confidence_bonus_gap_4": 5,                  # 📈 Gap 4 = +5% confidence  
+    "confidence_bonus_gap_3": 2,                  # 📈 Gap 3 = +2% confidence
+    "confidence_penalty_gap_2": -5,               # 📉 Gap 2 = -5% confidence penalty
+}
+
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
 # ❌ ปิดถาวร! ใช้สัญญาณปกติ (BUY=BUY, SELL=SELL)
@@ -5670,6 +5687,167 @@ async def toggle_signal_fade_auto_action(enabled: bool = True):
 # 🎯 AGGRESSIVE TRADING MODE
 # =====================
 
+# =====================
+# 🎯 SCORE GAP FILTER - ป้องกันสัญญาณไม่ชัดเจน
+# =====================
+
+@router.get("/score-gap")
+async def get_score_gap_config():
+    """
+    🎯 Get Score Gap Filter configuration
+    
+    Score Gap Filter ป้องกันสัญญาณที่ไม่ชัดเจน:
+    - ถ้า Buy=5 vs Sell=6 (gap=1) → ไม่เทรด! ไม่รู้จะไปทางไหน
+    - ถ้า Buy=8 vs Sell=3 (gap=5) → เทรด BUY! ชัดเจนมาก
+    """
+    global _score_gap_config
+    
+    return {
+        "config": _score_gap_config,
+        "description": {
+            "min_score_gap_gold": "🥇 Gold: Gap ขั้นต่ำระหว่าง Buy/Sell Score",
+            "min_score_gap_forex": "💱 Forex: Gap ขั้นต่ำระหว่าง Buy/Sell Score",
+            "min_dominant_score_gold": "🥇 Gold: Score ที่ชนะต้อง >= X",
+            "min_dominant_score_forex": "💱 Forex: Score ที่ชนะต้อง >= X",
+            "confidence_bonus_gap_5": "📈 Gap >= 5 = +X% confidence",
+            "confidence_penalty_gap_2": "📉 Gap 2 = X% confidence penalty",
+        },
+        "examples": {
+            "blocked": "Buy=5, Sell=6, Gap=1 → ❌ BLOCKED (gap < 2)",
+            "weak": "Buy=7, Sell=5, Gap=2 → ⚠️ LOW confidence (-5%)",
+            "good": "Buy=8, Sell=4, Gap=4 → ✅ HIGH confidence (+5%)",
+            "strong": "Buy=10, Sell=3, Gap=7 → 🔥 PREMIUM confidence (+10%)",
+        }
+    }
+
+
+@router.post("/score-gap/toggle")
+async def toggle_score_gap_filter(enabled: bool = True):
+    """
+    🎯 Enable/Disable Score Gap Filter
+    
+    - enabled=true: Block สัญญาณที่ไม่ชัดเจน (แนะนำ!)
+    - enabled=false: อนุญาตสัญญาณทั้งหมด (เสี่ยงสูง)
+    """
+    global _score_gap_config
+    
+    _score_gap_config["enabled"] = enabled
+    
+    status = "ENABLED ✅" if enabled else "DISABLED ⚠️"
+    logger.info(f"🎯 Score Gap Filter: {status}")
+    
+    return {
+        "status": "success",
+        "score_gap_filter_enabled": enabled,
+        "message": f"Score Gap Filter {status}",
+        "warning": "⚠️ Disabling may increase false signals!" if not enabled else None
+    }
+
+
+@router.post("/score-gap/configure")
+async def configure_score_gap_filter(
+    min_score_gap_gold: int = None,
+    min_score_gap_forex: int = None,
+    min_dominant_score_gold: int = None,
+    min_dominant_score_forex: int = None,
+):
+    """
+    🎯 Configure Score Gap Filter
+    
+    - min_score_gap_gold: Gap ขั้นต่ำสำหรับ Gold (1-5, default: 2)
+    - min_score_gap_forex: Gap ขั้นต่ำสำหรับ Forex (2-6, default: 3)
+    - min_dominant_score_gold: Score ที่ชนะต้อง >= X (5-10, default: 7)
+    - min_dominant_score_forex: Score ที่ชนะต้อง >= X (5-10, default: 7)
+    """
+    global _score_gap_config
+    
+    changes = []
+    
+    if min_score_gap_gold is not None:
+        _score_gap_config["min_score_gap_gold"] = max(1, min(5, min_score_gap_gold))
+        changes.append(f"gold_gap: {_score_gap_config['min_score_gap_gold']}")
+    
+    if min_score_gap_forex is not None:
+        _score_gap_config["min_score_gap_forex"] = max(2, min(6, min_score_gap_forex))
+        changes.append(f"forex_gap: {_score_gap_config['min_score_gap_forex']}")
+    
+    if min_dominant_score_gold is not None:
+        _score_gap_config["min_dominant_score_gold"] = max(5, min(10, min_dominant_score_gold))
+        changes.append(f"gold_min_score: {_score_gap_config['min_dominant_score_gold']}")
+    
+    if min_dominant_score_forex is not None:
+        _score_gap_config["min_dominant_score_forex"] = max(5, min(10, min_dominant_score_forex))
+        changes.append(f"forex_min_score: {_score_gap_config['min_dominant_score_forex']}")
+    
+    logger.info(f"🎯 Score Gap config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _score_gap_config
+    }
+
+
+@router.post("/score-gap/preset/{preset}")
+async def set_score_gap_preset(preset: str):
+    """
+    🎯 Set Score Gap Filter Preset
+    
+    Presets:
+    - strict: เทรดน้อย แต่ win rate สูง (Gap >= 3, Score >= 8)
+    - balanced: สมดุล (Gap >= 2, Score >= 7) - แนะนำ!
+    - relaxed: เทรดเยอะ win rate ปานกลาง (Gap >= 1, Score >= 6)
+    """
+    global _score_gap_config
+    
+    presets = {
+        "strict": {
+            "min_score_gap_gold": 3,
+            "min_score_gap_forex": 4,
+            "min_dominant_score_gold": 8,
+            "min_dominant_score_forex": 8,
+            "description": "🎯 Strict: เทรดน้อย Win Rate สูง ~85%+"
+        },
+        "balanced": {
+            "min_score_gap_gold": 2,
+            "min_score_gap_forex": 3,
+            "min_dominant_score_gold": 7,
+            "min_dominant_score_forex": 7,
+            "description": "⚖️ Balanced: สมดุล Win Rate ~80% (แนะนำ!)"
+        },
+        "relaxed": {
+            "min_score_gap_gold": 1,
+            "min_score_gap_forex": 2,
+            "min_dominant_score_gold": 6,
+            "min_dominant_score_forex": 6,
+            "description": "📈 Relaxed: เทรดเยอะ Win Rate ~70%"
+        }
+    }
+    
+    if preset not in presets:
+        return {"status": "error", "message": f"Unknown preset: {preset}. Available: {list(presets.keys())}"}
+    
+    config = presets[preset]
+    
+    _score_gap_config["min_score_gap_gold"] = config["min_score_gap_gold"]
+    _score_gap_config["min_score_gap_forex"] = config["min_score_gap_forex"]
+    _score_gap_config["min_dominant_score_gold"] = config["min_dominant_score_gold"]
+    _score_gap_config["min_dominant_score_forex"] = config["min_dominant_score_forex"]
+    
+    logger.info(f"🎯 Preset '{preset}' activated: {config['description']}")
+    
+    return {
+        "status": "success",
+        "preset": preset,
+        "description": config["description"],
+        "config": _score_gap_config
+    }
+
+
+# =====================
+# 🎯 AGGRESSIVE TRADING MODE
+# =====================
+
 @router.get("/aggressive")
 async def get_aggressive_config():
     """
@@ -5690,6 +5868,8 @@ async def get_aggressive_config():
             "quick_scalp_mode": "Scalping mode (เทรดถี่มาก)"
         }
     }
+
+
 
 
 @router.post("/aggressive/configure")

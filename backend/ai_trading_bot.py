@@ -835,6 +835,35 @@ class AITradingBot:
                     buy_score += 1
                     sell_score += 1
             
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🎯 SCORE GAP FILTER - ป้องกันสัญญาณไม่ชัดเจน (NEW!)
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            score_gap = abs(buy_score - sell_score)
+            
+            # 🥇 GOLD: ต้องมี gap ที่ชัดเจน
+            if is_gold:
+                min_score_gap = 2  # Gold ต้องต่างกันอย่างน้อย 2 points
+                min_dominant_score = 7  # Score ที่ชนะต้อง >= 7 (ไม่ใช่แค่ 6)
+            else:
+                min_score_gap = 3  # Forex ต้องต่างกันอย่างน้อย 3 points
+                min_dominant_score = 7  # Score ที่ชนะต้อง >= 7
+            
+            # ❌ BLOCK if score gap too small
+            if score_gap < min_score_gap:
+                logger.info(f"   🚫 SCORE GAP FILTER: Buy={buy_score} vs Sell={sell_score}, Gap={score_gap} < {min_score_gap} required")
+                logger.info(f"      → Signal BLOCKED: Scores too close, no clear direction!")
+                return None
+            
+            # ❌ BLOCK if dominant score too low
+            dominant_score = max(buy_score, sell_score)
+            if dominant_score < min_dominant_score:
+                logger.info(f"   🚫 LOW SCORE FILTER: Dominant score={dominant_score} < {min_dominant_score} required")
+                logger.info(f"      → Signal BLOCKED: Not enough confirmations!")
+                return None
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
             # Min conditions - 💱 FOREX needs higher threshold
             if is_gold:
                 min_conditions = 6  # Gold needs 6/12 conditions
@@ -896,15 +925,32 @@ class AITradingBot:
                     signal = "BUY"
                     # 🥇 GOLD: Higher confidence requirement
                     if is_gold:
-                        confidence = 65 + (buy_score - min_conditions) * 5
-                        if buy_score >= 9:
+                        # 📊 BASE CONFIDENCE from score
+                        base_confidence = 65 + (buy_score - min_conditions) * 5
+                        
+                        # 🎯 SCORE GAP BONUS/PENALTY - ยิ่ง gap มาก ยิ่งมั่นใจ
+                        if score_gap >= 5:
+                            gap_bonus = 10  # Gap 5+ = +10% confidence
+                        elif score_gap >= 4:
+                            gap_bonus = 5   # Gap 4 = +5%
+                        elif score_gap >= 3:
+                            gap_bonus = 2   # Gap 3 = +2%
+                        else:
+                            gap_bonus = -5  # Gap 2 = -5% penalty
+                        
+                        confidence = min(95, base_confidence + gap_bonus)
+                        
+                        # 📊 QUALITY based on score AND gap
+                        if buy_score >= 9 and score_gap >= 4:
                             quality = "PREMIUM"
-                        elif buy_score >= 7:
+                        elif buy_score >= 8 or (buy_score >= 7 and score_gap >= 4):
                             quality = "HIGH"
-                        elif buy_score >= 6:
+                        elif buy_score >= 7:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
+                            
+                        logger.info(f"   📊 BUY Signal: Score={buy_score}, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
                     else:
                         # 💱 FOREX: Higher threshold for quality
                         confidence = 65 + (buy_score - min_conditions) * 5
@@ -920,15 +966,32 @@ class AITradingBot:
                     signal = "SELL"
                     # 🥇 GOLD: Higher confidence requirement
                     if is_gold:
-                        confidence = 65 + (sell_score - min_conditions) * 5
-                        if sell_score >= 9:
+                        # 📊 BASE CONFIDENCE from score
+                        base_confidence = 65 + (sell_score - min_conditions) * 5
+                        
+                        # 🎯 SCORE GAP BONUS/PENALTY - ยิ่ง gap มาก ยิ่งมั่นใจ
+                        if score_gap >= 5:
+                            gap_bonus = 10  # Gap 5+ = +10% confidence
+                        elif score_gap >= 4:
+                            gap_bonus = 5   # Gap 4 = +5%
+                        elif score_gap >= 3:
+                            gap_bonus = 2   # Gap 3 = +2%
+                        else:
+                            gap_bonus = -5  # Gap 2 = -5% penalty
+                        
+                        confidence = min(95, base_confidence + gap_bonus)
+                        
+                        # 📊 QUALITY based on score AND gap
+                        if sell_score >= 9 and score_gap >= 4:
                             quality = "PREMIUM"
-                        elif sell_score >= 7:
+                        elif sell_score >= 8 or (sell_score >= 7 and score_gap >= 4):
                             quality = "HIGH"
-                        elif sell_score >= 6:
+                        elif sell_score >= 7:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
+                            
+                        logger.info(f"   📊 SELL Signal: Score={sell_score}, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
                     else:
                         # 💱 FOREX: Higher threshold for quality
                         confidence = 65 + (sell_score - min_conditions) * 5
@@ -999,6 +1062,18 @@ class AITradingBot:
                 stop_loss = current_price + sl_distance
                 take_profit = current_price - tp_distance
             
+            # 📊 Determine market regime
+            if strong_uptrend:
+                market_regime = "STRONG_UP"
+            elif has_uptrend:
+                market_regime = "UP"
+            elif strong_downtrend:
+                market_regime = "STRONG_DOWN"
+            elif has_downtrend:
+                market_regime = "DOWN"
+            else:
+                market_regime = "RANGE"
+            
             # Return signal dict
             return {
                 "signal": signal,
@@ -1011,8 +1086,10 @@ class AITradingBot:
                 "rsi": rsi,
                 "buy_score": buy_score,
                 "sell_score": sell_score,
+                "score_gap": score_gap,  # 🆕 เพิ่ม score gap
                 "session": "OVERLAP" if overlap_session else "LONDON" if london_session else "NY" if ny_session else "ASIAN",
-                "trend": "STRONG_UP" if strong_uptrend else "UP" if has_uptrend else "STRONG_DOWN" if strong_downtrend else "DOWN" if has_downtrend else "RANGE",
+                "trend": market_regime,
+                "market_regime": market_regime,
             }
             
         except Exception as e:
