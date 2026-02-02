@@ -281,6 +281,24 @@ _signal_weakening_config = {
     "min_profit_to_exit_early_percent": 15.0,  # 🔥 กำไร >= 15% ของ balance ถึงจะ early exit
 }
 
+# =====================
+# 🔔 SIGNAL FADE ALERT - Early Warning System (NEW!)
+# =====================
+# ตรวจจับเมื่อ confidence เริ่มลดลง ก่อนที่สัญญาณจะหายไป!
+
+_signal_fade_config = {
+    "enabled": True,                              # ✅ เปิด Early Warning
+    "alert_on_confidence_drop": True,             # ✅ Alert เมื่อ confidence ลด
+    "confidence_drop_threshold_percent": 10,     # 📉 Alert เมื่อลดลง >= 10% จาก peak
+    "alert_on_quality_drop": True,                # ✅ Alert เมื่อ quality ลด
+    "peak_tracking_enabled": True,                # 📊 Track peak confidence
+    "momentum_window_size": 5,                    # 📈 ใช้ 5 readings ล่าสุดคำนวณ momentum
+    "trend_detection_enabled": True,              # 🔄 ตรวจจับ trend ของ confidence
+}
+
+# 📊 Signal Health Tracker - เก็บ peak confidence และ momentum
+_signal_health = {}  # {symbol: {"peak_confidence": 85, "current_confidence": 75, "momentum": "FALLING", "trend": "DOWN", "alert_level": "WARNING"}}
+
 
 
 # 🔀 CONTRARIAN MODE - กลับสัญญาณ
@@ -1627,6 +1645,26 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
         
         # 📊 TRACK SIGNAL STRENGTH for DCA safety
         _track_signal_strength(symbol, signal_data)
+        
+        # 🔔 CALCULATE SIGNAL HEALTH & MOMENTUM (NEW!)
+        signal_health = _calculate_signal_momentum(symbol, raw_confidence)
+        
+        # Add health info to signal_data
+        signal_data["health"] = {
+            "momentum": signal_health.get("momentum", "UNKNOWN"),
+            "trend": signal_health.get("trend", "UNKNOWN"),
+            "alert_level": signal_health.get("alert_level", "OK"),
+            "peak_confidence": signal_health.get("peak_confidence", raw_confidence),
+            "peak_drop_percent": signal_health.get("peak_drop_percent", 0),
+            "is_fading": signal_health.get("momentum") in ["FALLING", "FADING"],
+        }
+        _bot_status["last_signal"][symbol] = signal_data  # Update with health
+        
+        # 🔔 LOG WARNING if signal is fading
+        if signal_health.get("alert_level") == "DANGER":
+            logger.warning(f"⚠️ SIGNAL DANGER: {symbol} confidence dropped {signal_health['peak_drop_percent']:.1f}% from peak!")
+        elif signal_health.get("alert_level") == "WARNING":
+            logger.warning(f"📉 SIGNAL WARNING: {symbol} - {signal_health.get('momentum', 'UNKNOWN')} momentum, trend: {signal_health.get('trend', 'UNKNOWN')}")
         
         # 📊 LOG SIGNAL STRENGTH SCORE
         strength = _get_signal_strength_score(symbol, signal_data)
@@ -3068,6 +3106,195 @@ def _get_signal_strength_score(symbol: str, signal_data: Dict) -> Dict:
     }
 
 
+# =====================
+# 🔔 SIGNAL FADE ALERT FUNCTIONS - Early Warning System
+# =====================
+
+def _calculate_signal_momentum(symbol: str, current_confidence: float) -> Dict:
+    """
+    📈 Calculate Signal Momentum - ตรวจจับว่า confidence กำลังขึ้นหรือลง
+    
+    Returns:
+    - momentum: RISING, STABLE, FALLING, FADING
+    - trend: UP, FLAT, DOWN
+    - alert_level: OK, WARNING, DANGER
+    - peak_drop_percent: % ที่ลดลงจาก peak
+    """
+    global _signal_strength_tracker, _signal_health, _signal_fade_config
+    
+    tracker = _signal_strength_tracker.get(symbol, {})
+    conf_history = tracker.get("confidence_history", [])
+    quality_history = tracker.get("quality_history", [])
+    
+    # Initialize health tracking for this symbol
+    if symbol not in _signal_health:
+        _signal_health[symbol] = {
+            "peak_confidence": current_confidence,
+            "peak_quality": "SKIP",
+            "current_confidence": current_confidence,
+            "momentum": "STABLE",
+            "trend": "FLAT",
+            "alert_level": "OK",
+            "peak_drop_percent": 0,
+            "consecutive_drops": 0,
+            "last_alert_time": None,
+        }
+    
+    health = _signal_health[symbol]
+    
+    # Update current confidence
+    health["current_confidence"] = current_confidence
+    
+    # Track peak confidence
+    if current_confidence > health["peak_confidence"]:
+        health["peak_confidence"] = current_confidence
+        health["consecutive_drops"] = 0
+    
+    # Calculate drop from peak
+    peak = health["peak_confidence"]
+    if peak > 0:
+        drop_percent = ((peak - current_confidence) / peak) * 100
+        health["peak_drop_percent"] = round(drop_percent, 1)
+    else:
+        drop_percent = 0
+        health["peak_drop_percent"] = 0
+    
+    # Need at least 3 data points to calculate momentum
+    if len(conf_history) < 3:
+        return health
+    
+    # Calculate momentum from recent history
+    window = _signal_fade_config.get("momentum_window_size", 5)
+    recent = conf_history[-window:] if len(conf_history) >= window else conf_history
+    
+    # Trend detection: compare first half to second half
+    if len(recent) >= 4:
+        first_half = sum(recent[:len(recent)//2]) / (len(recent)//2)
+        second_half = sum(recent[len(recent)//2:]) / (len(recent) - len(recent)//2)
+        
+        diff = second_half - first_half
+        
+        if diff > 5:
+            health["trend"] = "UP"
+            health["momentum"] = "RISING"
+        elif diff < -5:
+            health["trend"] = "DOWN"
+            health["momentum"] = "FALLING"
+        else:
+            health["trend"] = "FLAT"
+            health["momentum"] = "STABLE"
+    
+    # Check for consecutive drops
+    if len(recent) >= 3:
+        if recent[-1] < recent[-2] < recent[-3]:
+            health["consecutive_drops"] = 3
+            health["momentum"] = "FADING"
+        elif recent[-1] < recent[-2]:
+            health["consecutive_drops"] = max(1, health.get("consecutive_drops", 0))
+    
+    # Determine alert level
+    threshold = _signal_fade_config.get("confidence_drop_threshold_percent", 10)
+    
+    if drop_percent >= threshold * 2:  # 20%+ drop from peak
+        health["alert_level"] = "DANGER"
+    elif drop_percent >= threshold:     # 10%+ drop from peak
+        health["alert_level"] = "WARNING"
+    elif health["momentum"] == "FADING":
+        health["alert_level"] = "WARNING"
+    else:
+        health["alert_level"] = "OK"
+    
+    # Quality drop detection
+    if quality_history and len(quality_history) >= 2:
+        quality_order = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "PREMIUM": 4}
+        current_quality = quality_history[-1]
+        peak_quality_idx = max(quality_order.get(q, 0) for q in quality_history)
+        current_quality_idx = quality_order.get(current_quality, 0)
+        
+        if peak_quality_idx - current_quality_idx >= 2:
+            health["alert_level"] = "DANGER"
+        elif peak_quality_idx - current_quality_idx >= 1:
+            if health["alert_level"] == "OK":
+                health["alert_level"] = "WARNING"
+        
+        # Store peak quality
+        health["peak_quality"] = [k for k, v in quality_order.items() if v == peak_quality_idx][0] if peak_quality_idx > 0 else "SKIP"
+    
+    return health
+
+
+def _get_signal_health_summary(symbol: str) -> Dict:
+    """
+    📊 Get comprehensive signal health summary
+    """
+    global _signal_health, _bot_status
+    
+    signal = _bot_status.get("last_signal", {}).get(symbol, {})
+    health = _signal_health.get(symbol, {})
+    
+    return {
+        "symbol": symbol,
+        "current_confidence": signal.get("confidence", 0),
+        "peak_confidence": health.get("peak_confidence", 0),
+        "peak_drop_percent": health.get("peak_drop_percent", 0),
+        "current_quality": signal.get("quality", "SKIP"),
+        "peak_quality": health.get("peak_quality", "SKIP"),
+        "momentum": health.get("momentum", "UNKNOWN"),
+        "trend": health.get("trend", "UNKNOWN"),
+        "alert_level": health.get("alert_level", "OK"),
+        "consecutive_drops": health.get("consecutive_drops", 0),
+        "signal": signal.get("signal", "WAIT"),
+        "is_fading": health.get("momentum") in ["FALLING", "FADING"],
+        "warning_message": _get_warning_message(health),
+    }
+
+
+def _get_warning_message(health: Dict) -> Optional[str]:
+    """Generate warning message based on health status"""
+    alert = health.get("alert_level", "OK")
+    momentum = health.get("momentum", "STABLE")
+    drop = health.get("peak_drop_percent", 0)
+    
+    if alert == "DANGER":
+        return f"⚠️ DANGER: Confidence dropped {drop:.1f}% from peak! Signal may reverse soon!"
+    elif alert == "WARNING":
+        if momentum == "FADING":
+            return f"📉 WARNING: Signal fading! {health.get('consecutive_drops', 0)} consecutive drops detected."
+        else:
+            return f"📉 WARNING: Confidence dropped {drop:.1f}% from peak. Monitor closely."
+    elif momentum == "FALLING":
+        return f"📊 NOTE: Confidence trending down. Watch for reversal."
+    
+    return None
+
+
+def _get_health_recommendations(health: Dict) -> List[str]:
+    """Generate actionable recommendations based on signal health"""
+    recommendations = []
+    
+    alert = health.get("alert_level", "OK")
+    momentum = health.get("momentum", "STABLE")
+    is_fading = health.get("is_fading", False)
+    
+    if alert == "DANGER":
+        recommendations.append("🛑 Consider closing profitable positions")
+        recommendations.append("⛔ Do NOT open new positions")
+        recommendations.append("👀 Wait for signal to stabilize")
+    elif alert == "WARNING":
+        recommendations.append("⚠️ Tighten stop loss on existing positions")
+        recommendations.append("🔍 Monitor closely for reversal")
+        recommendations.append("⏸️ Pause new entries until stabilized")
+    elif momentum == "FALLING":
+        recommendations.append("📊 Signal weakening - be cautious")
+        recommendations.append("💰 Consider taking partial profits")
+    elif momentum == "RISING":
+        recommendations.append("✅ Signal strengthening - good for entries")
+        recommendations.append("📈 Consider adding to position")
+    else:
+        recommendations.append("👍 Signal stable - normal trading")
+    
+    return recommendations
+
 
 # =====================
 # 📈 SMART DCA FUNCTIONS - เข้าซ้ำเมื่อราคาย่อ
@@ -4274,6 +4501,14 @@ async def get_signal_for_symbol(symbol: str):
             "trend": signal.get("trend") or signal.get("market_regime") or "UNKNOWN",
         }
         
+        # 🔔 ADD HEALTH INFO (Early Warning System)
+        if "health" in signal:
+            response["health"] = _convert_to_json_serializable(signal["health"])
+        else:
+            # Generate health on-the-fly if not present
+            health = _get_signal_health_summary(symbol)
+            response["health"] = _convert_to_json_serializable(health)
+        
         # Add optional fields if present
         if "scores" in signal:
             response["scores"] = _convert_to_json_serializable(signal["scores"])
@@ -4941,6 +5176,148 @@ async def reset_signal_strength_tracking(symbol: str = None):
         count = len(_signal_strength_tracker)
         _signal_strength_tracker.clear()
         return {"status": "reset_all", "cleared_count": count}
+
+
+# =====================
+# 🔔 SIGNAL HEALTH ENDPOINTS - Early Warning System
+# =====================
+
+@router.get("/signal-health/{symbol}")
+async def get_signal_health(symbol: str):
+    """
+    📊 Get Signal Health for a symbol
+    
+    Shows:
+    - Current vs Peak confidence
+    - Momentum (RISING/STABLE/FALLING/FADING)
+    - Trend direction
+    - Alert level (OK/WARNING/DANGER)
+    - Early warning if signal is weakening
+    
+    Use this to monitor signal strength and get early warnings!
+    """
+    global _bot_status, _signal_health, _signal_strength_tracker
+    
+    signal = _bot_status.get("last_signal", {}).get(symbol)
+    
+    if not signal:
+        return {
+            "status": "no_signal",
+            "symbol": symbol,
+            "message": "No signal data. Start bot first."
+        }
+    
+    # Get health summary
+    health = _get_signal_health_summary(symbol)
+    
+    # Get history for chart
+    tracker = _signal_strength_tracker.get(symbol, {})
+    
+    return _convert_to_json_serializable({
+        "status": "ok",
+        "symbol": symbol,
+        **health,
+        "history": {
+            "confidence": tracker.get("confidence_history", [])[-20:],
+            "quality": tracker.get("quality_history", [])[-20:],
+            "direction_changes": tracker.get("direction_changes", 0),
+        },
+        "recommendations": _get_health_recommendations(health),
+        "timestamp": datetime.now().isoformat()
+    })
+
+
+@router.get("/signal-health")
+async def get_all_signal_health():
+    """
+    📊 Get Signal Health for all tracked symbols
+    """
+    global _bot_status, _signal_health
+    
+    results = {}
+    
+    for symbol in _bot_status.get("symbols", []):
+        health = _get_signal_health_summary(symbol)
+        results[symbol] = health
+    
+    # Count alerts
+    danger_count = sum(1 for h in results.values() if h.get("alert_level") == "DANGER")
+    warning_count = sum(1 for h in results.values() if h.get("alert_level") == "WARNING")
+    
+    return _convert_to_json_serializable({
+        "status": "ok",
+        "symbols": results,
+        "summary": {
+            "total_symbols": len(results),
+            "danger_alerts": danger_count,
+            "warning_alerts": warning_count,
+            "ok_count": len(results) - danger_count - warning_count,
+        },
+        "timestamp": datetime.now().isoformat()
+    })
+
+
+@router.post("/signal-health/reset/{symbol}")
+async def reset_signal_health(symbol: str = None):
+    """
+    🔄 Reset signal health tracking (clears peak values)
+    """
+    global _signal_health
+    
+    if symbol:
+        if symbol in _signal_health:
+            del _signal_health[symbol]
+            return {"status": "reset", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        count = len(_signal_health)
+        _signal_health.clear()
+        return {"status": "reset_all", "cleared_count": count}
+
+
+@router.post("/signal-fade/configure")
+async def configure_signal_fade_alerts(
+    enabled: bool = None,
+    confidence_drop_threshold: float = None,
+    alert_on_quality_drop: bool = None,
+    momentum_window_size: int = None,
+):
+    """
+    🔔 Configure Signal Fade Alert settings
+    
+    - enabled: Enable/disable fade detection
+    - confidence_drop_threshold: Alert when dropped X% from peak (default: 10)
+    - alert_on_quality_drop: Alert when quality drops
+    - momentum_window_size: Number of readings for momentum calc (default: 5)
+    """
+    global _signal_fade_config
+    
+    changes = []
+    
+    if enabled is not None:
+        _signal_fade_config["enabled"] = enabled
+        changes.append(f"enabled: {enabled}")
+    
+    if confidence_drop_threshold is not None:
+        _signal_fade_config["confidence_drop_threshold_percent"] = max(5, min(30, confidence_drop_threshold))
+        changes.append(f"threshold: {_signal_fade_config['confidence_drop_threshold_percent']}%")
+    
+    if alert_on_quality_drop is not None:
+        _signal_fade_config["alert_on_quality_drop"] = alert_on_quality_drop
+        changes.append(f"quality_alert: {alert_on_quality_drop}")
+    
+    if momentum_window_size is not None:
+        _signal_fade_config["momentum_window_size"] = max(3, min(10, momentum_window_size))
+        changes.append(f"window: {_signal_fade_config['momentum_window_size']}")
+    
+    logger.info(f"🔔 Signal fade config updated: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _signal_fade_config
+    }
 
 
 # =====================
