@@ -1553,39 +1553,40 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
         # 🔥 Extract buy_score and sell_score from analysis
         scores = analysis.get("scores", {})
         
-        # Try to get buy_score/sell_score directly from analysis (technical mode)
-        # or from factors (pattern mode)
-        buy_score = 0
-        sell_score = 0
-        session = "N/A"
+        
+        # 🔥 PRIORITY: Try to get values directly from analysis first (new format)
+        buy_score = analysis.get("buy_score", 0)
+        sell_score = analysis.get("sell_score", 0)
+        session = analysis.get("session", "N/A")
         trend = analysis.get("market_regime", "UNKNOWN")
         
-        # Check if analysis has direct scores (from technical signal)
+        # Fallback: Try to extract from factors (old format)
         factors = analysis.get("factors", {})
-        if factors.get("bullish"):
-            for f in factors["bullish"]:
-                if "Buy Score" in str(f):
-                    try:
-                        match = str(f).split(":")[1].split("/")[0].strip()
-                        buy_score = int(match)
-                    except:
-                        pass
-                if "Session" in str(f):
-                    try:
-                        session = str(f).split(":")[1].strip()
-                    except:
-                        pass
+        if buy_score == 0 and sell_score == 0:
+            if factors.get("bullish"):
+                for f in factors["bullish"]:
+                    if "Buy Score" in str(f):
+                        try:
+                            match = str(f).split(":")[1].split("/")[0].strip()
+                            buy_score = int(match)
+                        except:
+                            pass
+                    if session == "N/A" and "Session" in str(f):
+                        try:
+                            session = str(f).split(":")[1].strip()
+                        except:
+                            pass
+            
+            if factors.get("bearish"):
+                for f in factors["bearish"]:
+                    if "Sell Score" in str(f):
+                        try:
+                            match = str(f).split(":")[1].split("/")[0].strip()
+                            sell_score = int(match)
+                        except:
+                            pass
         
-        if factors.get("bearish"):
-            for f in factors["bearish"]:
-                if "Sell Score" in str(f):
-                    try:
-                        match = str(f).split(":")[1].split("/")[0].strip()
-                        sell_score = int(match)
-                    except:
-                        pass
-        
-        # Fallback: calculate from pattern score
+        # Last fallback: calculate from pattern score
         if buy_score == 0 and sell_score == 0:
             pattern_score = scores.get("pattern", 0)
             signal_type = analysis.get("signal", "WAIT")
@@ -1594,9 +1595,10 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
             elif signal_type in ["SELL", "STRONG_SELL"]:
                 sell_score = max(1, pattern_score // 10) if pattern_score > 0 else 0
         
-        # Get session from analysis
+        # Get session from market_data if still N/A
         if session == "N/A":
-            session = analysis.get("session", analysis.get("market_data", {}).get("session", "N/A"))
+            session = analysis.get("market_data", {}).get("session", "N/A")
+        
         
         signal_data = {
             "symbol": symbol,

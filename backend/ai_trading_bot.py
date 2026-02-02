@@ -2166,6 +2166,10 @@ class AITradingBot:
                     "recency": 60,
                 },
                 "market_regime": tech_signal.get("trend", "UNKNOWN"),
+                # 🔥 ADD session and buy_score/sell_score at top level for frontend
+                "session": tech_signal["session"],
+                "buy_score": tech_signal["buy_score"],
+                "sell_score": tech_signal["sell_score"],
                 "indicators": {
                     "rsi": tech_signal["rsi"],
                     "atr": tech_signal["atr"],
