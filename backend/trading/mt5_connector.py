@@ -94,6 +94,7 @@ class MT5Config:
     max_reconnect_attempts: int = 0  # 🔥 0 = UNLIMITED!
     reconnect_delay: int = 2  # 🔄 เริ่มที่ 2 วินาที
     reconnect_backoff_max: int = 30  # 🆕 Max backoff 30 วินาที
+    operation_timeout: int = 10  # 🆕 Timeout for MT5 operations (seconds)
 
 
 @dataclass
@@ -144,6 +145,39 @@ class MT5Broker(BaseBroker):
         self._reconnect_count = 0
         self._last_heartbeat = time.time()
         self._connection_lock = threading.Lock()
+        
+        # 🆕 Thread pool for running blocking MT5 operations with timeout
+        from concurrent.futures import ThreadPoolExecutor
+        self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="mt5_")
+    
+    async def _run_with_timeout(self, func, *args, timeout: float = None):
+        """
+        🆕 Run blocking MT5 function with timeout to prevent API freeze
+        
+        Args:
+            func: Blocking function to run
+            *args: Arguments for the function
+            timeout: Timeout in seconds (default: config.operation_timeout)
+        
+        Returns:
+            Result of the function or None on timeout/error
+        """
+        if timeout is None:
+            timeout = getattr(self.config, 'operation_timeout', 10)
+        
+        try:
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(self._executor, func, *args),
+                timeout=timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ MT5 operation timed out after {timeout}s: {func.__name__ if hasattr(func, '__name__') else 'unknown'}")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ MT5 operation failed: {e}")
+            return None
     
     async def connect(self) -> bool:
         """เชื่อมต่อกับ MT5 Terminal - ใช้ connection ที่มีอยู่แล้ว"""
@@ -469,60 +503,61 @@ class MT5Broker(BaseBroker):
         elif mode_name == "RETURN":
             return self._mt5.ORDER_FILLING_RETURN
         
+        
         return self._mt5.ORDER_FILLING_IOC
     
+    def _get_account_info_sync(self) -> Optional[Dict[str, Any]]:
+        """🆕 Synchronous account info getter for thread pool"""
+        try:
+            if not self._mt5:
+                return None
+            account = self._mt5.account_info()
+            if account:
+                return {
+                    "login": account.login,
+                    "name": account.name,
+                    "server": account.server,
+                    "currency": account.currency,
+                    "balance": account.balance,
+                    "equity": account.equity,
+                    "margin": account.margin,
+                    "margin_free": account.margin_free,
+                    "margin_level": account.margin_level,
+                    "profit": account.profit,
+                }
+            return None
+        except Exception as e:
+            logger.warning(f"Sync account info failed: {e}")
+            return None
+    
     async def get_account_info(self) -> Dict[str, Any]:
-        """ดึงข้อมูลบัญชี - พร้อม auto-reconnect"""
+        """ดึงข้อมูลบัญชี - พร้อม auto-reconnect และ timeout protection"""
         # Ensure connection before operation
         if not self.ensure_connected():
             logger.warning("MT5 not connected - cannot get account info")
-            return {}
+            return self._account_info if self._account_info else {}
         
         try:
             if self._mt5:
-                account = self._mt5.account_info()
-                if account:
-                    self._account_info = {
-                        "login": account.login,
-                        "name": account.name,
-                        "server": account.server,
-                        "currency": account.currency,
-                        "balance": account.balance,
-                        "equity": account.equity,
-                        "margin": account.margin,
-                        "margin_free": account.margin_free,
-                        "margin_level": account.margin_level,
-                        "profit": account.profit,
-                    }
+                # 🆕 Use timeout wrapper to prevent blocking
+                account_data = await self._run_with_timeout(self._get_account_info_sync)
+                
+                if account_data:
+                    self._account_info = account_data
                     return self._account_info
                 else:
-                    # Account info failed - try reconnect
-                    logger.warning("Failed to get account info, attempting reconnect...")
-                    self._attempt_reconnect()
-                    if self._connected:
-                        account = self._mt5.account_info()
-                        if account:
-                            self._account_info = {
-                                "login": account.login,
-                                "name": account.name,
-                                "server": account.server,
-                                "currency": account.currency,
-                                "balance": account.balance,
-                                "equity": account.equity,
-                                "margin": account.margin,
-                                "margin_free": account.margin_free,
-                                "margin_level": account.margin_level,
-                                "profit": account.profit,
-                            }
-                            return self._account_info
+                    # Return cached data if fresh fetch failed
+                    logger.warning("Failed to get fresh account info, using cached")
+                    return self._account_info if self._account_info else {}
             
-            # MT5 not available
-            logger.warning("MT5 not connected - cannot get account info")
-            return {}
+            # MT5 not available - return cached
+            logger.warning("MT5 not connected - returning cached account info")
+            return self._account_info if self._account_info else {}
             
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
-            return {}
+            return self._account_info if self._account_info else {}
+    
     
     async def get_balance(self) -> float:
         """ดึงยอดเงินคงเหลือ"""
@@ -717,26 +752,42 @@ class MT5Broker(BaseBroker):
         return False
     
     
+    def _get_positions_sync(self) -> Optional[List]:
+        """🆕 Synchronous positions getter for thread pool"""
+        try:
+            if not self._mt5:
+                return None
+            
+            # Check connection first
+            terminal = self._mt5.terminal_info()
+            if not terminal or not terminal.connected:
+                return None
+            
+            return self._mt5.positions_get()
+        except Exception as e:
+            logger.warning(f"Sync positions fetch failed: {e}")
+            return None
+    
     async def get_positions(self) -> List[Position]:
         """
         ดึง Position ที่เปิดอยู่
         
         🔥 FIX: Always return fresh data from MT5, clear cache if MT5 returns empty!
         🔥 FIX2: Force symbol refresh before query to get latest data
+        🔥 FIX3: Timeout protection to prevent API freeze
         """
         try:
             if self._mt5:
-                # 🔥 FORCE REFRESH: Re-check connection and terminal state
-                terminal = self._mt5.terminal_info()
-                if not terminal or not terminal.connected:
-                    logger.warning("⚠️ MT5 terminal not connected - attempting reconnect")
-                    self.ensure_connected()
+                # 🆕 Use timeout wrapper to prevent blocking
+                positions = await self._run_with_timeout(self._get_positions_sync)
                 
-                # 🔥 FORCE FRESH QUERY from MT5
-                positions = self._mt5.positions_get()
+                # If timeout or error, return cached positions
+                if positions is None:
+                    logger.warning("⚠️ MT5 positions query timed out or failed - returning cached")
+                    return list(self._positions.values())
                 
-                # 🔥 CRITICAL: If MT5 returns None or empty, clear the cache!
-                if positions is None or len(positions) == 0:
+                # 🔥 CRITICAL: If MT5 returns empty list, clear the cache!
+                if len(positions) == 0:
                     # No positions in MT5 - clear all cached positions
                     if self._positions:
                         logger.info(f"🧹 MT5 returns 0 positions - clearing {len(self._positions)} cached positions")
@@ -771,14 +822,14 @@ class MT5Broker(BaseBroker):
                 
                 return result
             
-            # MT5 not connected - return empty (not cached data!)
-            logger.warning("⚠️ MT5 not connected - returning empty positions")
-            return []
+            # MT5 not connected - return cached
+            logger.warning("⚠️ MT5 not connected - returning cached positions")
+            return list(self._positions.values())
                     
         except Exception as e:
             logger.error(f"Failed to get positions: {e}")
-            # 🔥 FIX: Return empty list on error, not cached data!
-            return []
+            # Return cached on error
+            return list(self._positions.values())
     
     async def close_position(self, position_id: str) -> TradeResult:
         """

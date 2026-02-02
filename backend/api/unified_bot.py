@@ -3873,26 +3873,38 @@ async def get_unified_status():
     📊 Get complete unified status
     
     Returns bot status, current signals, account info all in one call
+    🆕 With timeout protection to prevent API freeze
     """
     global _bot, _bot_status
     
     try:
-        # Get account info
+        # Get account info with timeout protection
         account = {"balance": 0, "equity": 0, "profit": 0, "free_margin": 0, "margin_level": 0}
         try:
             if _bot and _bot.trading_engine:
-                balance = await _bot.trading_engine.broker.get_balance()
-                account_info = await _bot.trading_engine.broker.get_account_info()
-                if account_info:
-                    equity = account_info.get("equity", balance)
-                    margin = account_info.get("margin", 0)
-                    account = {
-                        "balance": float(balance) if balance else 0,
-                        "equity": float(equity) if equity else 0,
-                        "profit": float(account_info.get("profit", 0)),
-                        "free_margin": float(account_info.get("free_margin", balance or 0)),
-                        "margin_level": float((equity / margin * 100) if margin and margin > 0 else 0)
-                    }
+                # 🆕 Use asyncio.wait_for with 5 second timeout
+                try:
+                    balance = await asyncio.wait_for(
+                        _bot.trading_engine.broker.get_balance(), 
+                        timeout=5.0
+                    )
+                    account_info = await asyncio.wait_for(
+                        _bot.trading_engine.broker.get_account_info(),
+                        timeout=5.0
+                    )
+                    if account_info:
+                        equity = account_info.get("equity", balance)
+                        margin = account_info.get("margin", 0)
+                        account = {
+                            "balance": float(balance) if balance else 0,
+                            "equity": float(equity) if equity else 0,
+                            "profit": float(account_info.get("profit", 0)),
+                            "free_margin": float(account_info.get("free_margin", balance or 0)),
+                            "margin_level": float((equity / margin * 100) if margin and margin > 0 else 0)
+                        }
+                except asyncio.TimeoutError:
+                    logger.warning("⏱️ Account info fetch timed out - using cached")
+                    # Use last known account info from bot status if available
         except Exception as e:
             logger.warning(f"Failed to get account: {e}")
         
