@@ -1007,51 +1007,84 @@ class AITradingBot:
                     return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ SL/TP CALCULATION - ATR-BASED (Fixed for proper risk management!)
+            # 🛡️ SL/TP CALCULATION - FULLY DYNAMIC (Balance + ATR Adaptive!)
             # ═══════════════════════════════════════════════════════════════════════════════
             # 
-            # 🔴 PROBLEM FIXED: 
-            # - Before: SL clamped by balance% → SL < ATR → hit too easily
-            # - Now: SL based on ATR, lot size adjusted instead
+            # 🎯 PHILOSOPHY:
+            # - SL ต้องกว้างพอให้ราคา "หายใจ" ได้ (>= ATR)
+            # - Lot size ลดลงเพื่อให้ risk คงที่ (1-2% of balance)
+            # - ไม่ clamp SL แคบ → ลด lot แทน!
             #
-            # 🎯 FORMULA:
-            # - SL = 1.0-1.5x ATR (minimum breathing room for volatility)
-            # - TP = 1.2-2.0x SL (positive R:R ratio)
-            # - Lot size adjusted to keep risk within 1-2% of balance
+            # 📊 FORMULA:
+            # - SL = 1.0-1.5x ATR (ขั้นต่ำที่ให้ราคา swing ได้)
+            # - TP = 1.5-2.0x SL (R:R >= 1.5)
+            # - Lot = (Balance × Risk%) / (SL × Point_Value)
+            #
+            # 💰 BALANCE SCALING:
+            # - Small balance ($200-$500): ใช้ minimum lot (0.01) + wide SL
+            # - Medium balance ($500-$5000): Risk 1% + ATR-based SL
+            # - Large balance ($5000+): Risk 1-2% + optimal SL
             #
             
             if is_gold:
+                # 📊 DYNAMIC SL BASED ON ATR AND BALANCE
+                
                 if is_m15:
-                    # 🥇 M15 SCALPING: Quick trades, tighter SL
-                    # ATR ~30-50 for M15 Gold → SL ~$45-$75
-                    sl_multiplier = 1.5  # 1.5x ATR for SL
+                    # 🥇 M15 SCALPING: Tighter SL but still respect ATR
+                    sl_multiplier = 1.2  # 1.2x ATR for SL
                     tp_multiplier = 1.0  # TP = 1.0x SL (R:R = 1:1 for scalping)
                 else:
-                    # 🥇 H1: Wider SL for higher timeframe
-                    # ATR ~80-150 for H1 Gold → SL ~$80-$150
-                    sl_multiplier = 1.0  # 1.0x ATR for SL (ATR already represents hourly volatility)
-                    tp_multiplier = 1.5  # TP = 1.5x SL (R:R = 1:1.5 for better risk/reward)
+                    # 🥇 H1: Use full ATR for SL (let price breathe!)
+                    sl_multiplier = 1.0  # 1.0x ATR for SL
+                    tp_multiplier = 1.5  # TP = 1.5x SL (R:R = 1:1.5)
                 
                 # 📊 Calculate ATR-based SL/TP
                 sl_distance = atr * sl_multiplier
                 tp_distance = sl_distance * tp_multiplier
                 
-                # 🛡️ Apply minimum/maximum limits based on PRICE, not balance
-                # Gold: Min SL = 0.15% of price (~$7 at $4700), Max SL = 0.5% (~$23.5)
-                # For H1: Min = 0.2% (~$9.4), Max = 1.0% (~$47)
+                # ═══════════════════════════════════════════════════════════════════
+                # 💰 BALANCE-AWARE LIMITS - ยืดหยุ่นตาม port size!
+                # ═══════════════════════════════════════════════════════════════════
+                # 
+                # Small balance: ให้ SL กว้างได้ (ลด lot แทน)
+                # Large balance: ให้ SL optimal ตาม ATR
+                #
+                # Max SL % ปรับตาม balance:
+                # - $200-$500: max 3% of price (รองรับ ATR สูง, lot = 0.01)
+                # - $500-$2000: max 2.5% of price
+                # - $2000-$10000: max 2% of price
+                # - $10000+: max 1.5% of price (มี lot พอ ไม่ต้อง SL กว้างมาก)
                 
-                if is_m15:
-                    min_sl_pct = 0.15  # 0.15% minimum
-                    max_sl_pct = 0.40  # 0.40% maximum
+                if balance < 500:
+                    # 💸 Micro account: ให้ SL กว้างมาก (ลด lot เหลือ 0.01)
+                    min_sl_pct = 0.3   # min 0.3%
+                    max_sl_pct = 3.0   # max 3% (~$141 at $4700)
+                    logger.info(f"   💸 MICRO ACCOUNT (${balance:.0f}): Wide SL allowed (up to {max_sl_pct}%)")
+                elif balance < 2000:
+                    # 💵 Small account
+                    min_sl_pct = 0.25
+                    max_sl_pct = 2.5   # max 2.5% (~$117 at $4700)
+                elif balance < 10000:
+                    # 💰 Medium account
+                    min_sl_pct = 0.2
+                    max_sl_pct = 2.0   # max 2% (~$94 at $4700)
                 else:
-                    min_sl_pct = 0.25  # 0.25% minimum for H1
-                    max_sl_pct = 0.80  # 0.80% maximum for H1
+                    # 🏦 Large account
+                    min_sl_pct = 0.15
+                    max_sl_pct = 1.5   # max 1.5% (~$70 at $4700)
                 
                 min_sl = current_price * (min_sl_pct / 100)
                 max_sl = current_price * (max_sl_pct / 100)
                 
-                # Apply limits
-                sl_distance = max(min_sl, min(sl_distance, max_sl))
+                # 📊 ATR Validation: ถ้า ATR > max_sl → log warning แต่ใช้ ATR
+                if sl_distance > max_sl:
+                    logger.warning(f"   ⚠️ ATR (${sl_distance:.2f}) > max_sl (${max_sl:.2f}) - Using ATR-based SL!")
+                    logger.warning(f"   ⚠️ Lot will be reduced to maintain risk. Wide SL = fewer SL hits!")
+                    # ไม่ clamp! ใช้ ATR-based SL แล้วลด lot แทน
+                    # sl_distance = max_sl  # ← ลบออก! ไม่ clamp
+                
+                # Apply only MINIMUM limit (ไม่ clamp maximum!)
+                sl_distance = max(min_sl, sl_distance)
                 tp_distance = sl_distance * tp_multiplier
                 
                 # 📊 Ensure minimum R:R of 1.0 (TP >= SL)
@@ -1059,9 +1092,18 @@ class AITradingBot:
                     tp_distance = sl_distance * 1.0  # Minimum 1:1 R:R
                 
                 # 🔔 Log the calculation for debugging
-                logger.info(f"   📊 SL/TP CALC: ATR={atr:.2f}, SL_mult={sl_multiplier}, TP_mult={tp_multiplier}")
-                logger.info(f"   📊 Limits: min_sl=${min_sl:.2f}, max_sl=${max_sl:.2f}")
+                logger.info(f"   📊 SL/TP CALC: ATR=${atr:.2f}, Balance=${balance:.0f}")
+                logger.info(f"   📊 SL_mult={sl_multiplier}x, TP_mult={tp_multiplier}x")
+                logger.info(f"   📊 Limits: min_sl=${min_sl:.2f} ({min_sl_pct}%), max_sl=${max_sl:.2f} ({max_sl_pct}%)")
                 logger.info(f"   📊 Final: SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=1:{tp_distance/sl_distance:.2f}")
+                
+                # 💡 Calculate expected lot size (for info)
+                point_value = 100.0  # $100 per $1 move per lot for gold
+                risk_amount = balance * 0.01  # 1% risk
+                risk_per_lot = sl_distance * point_value
+                expected_lot = risk_amount / risk_per_lot if risk_per_lot > 0 else 0.01
+                expected_lot = max(0.01, round(expected_lot, 2))
+                logger.info(f"   💰 Expected lot: {expected_lot} (Risk ${risk_amount:.2f} / SL risk ${risk_per_lot:.0f})")
             else:
                 # Forex: Use pip-based with proper R:R
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
