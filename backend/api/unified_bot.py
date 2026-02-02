@@ -387,30 +387,32 @@ _anti_wipeout_config = {
     # =====================
     # 📊 BALANCE TIER LIMITS (Absolute Max)
     # =====================
+    # 🔴 UPDATED: Lower max lots to account for wider ATR-based SL
     "balance_tiers": {
         200: {"gold_max": 0.01, "forex_max": 0.01},      # $200-$499
-        500: {"gold_max": 0.01, "forex_max": 0.02},      # $500-$999  
-        1000: {"gold_max": 0.02, "forex_max": 0.05},     # $1,000-$2,999
-        3000: {"gold_max": 0.06, "forex_max": 0.15},     # $3,000-$4,999
-        5000: {"gold_max": 0.10, "forex_max": 0.25},     # $5,000-$9,999
-        10000: {"gold_max": 0.20, "forex_max": 0.50},    # $10,000-$24,999
-        25000: {"gold_max": 0.50, "forex_max": 1.00},    # $25,000-$49,999
-        50000: {"gold_max": 1.00, "forex_max": 2.00},    # $50,000-$99,999
-        100000: {"gold_max": 2.00, "forex_max": 5.00},   # $100,000-$499,999
-        500000: {"gold_max": 10.0, "forex_max": 25.0},   # $500,000-$999,999
-        1000000: {"gold_max": 20.0, "forex_max": 50.0},  # $1M-$9.99M
-        10000000: {"gold_max": 200.0, "forex_max": 500.0}, # $10M-$99.99M
-        100000000: {"gold_max": 2000.0, "forex_max": 5000.0}, # $100M-$1.99B
-        2000000000: {"gold_max": 40000.0, "forex_max": 100000.0}, # $2B
+        500: {"gold_max": 0.01, "forex_max": 0.01},      # $500-$999  (reduced!)
+        1000: {"gold_max": 0.01, "forex_max": 0.02},     # $1,000-$2,999 (reduced!)
+        3000: {"gold_max": 0.02, "forex_max": 0.05},     # $3,000-$4,999 (reduced!)
+        5000: {"gold_max": 0.03, "forex_max": 0.08},     # $5,000-$9,999 (reduced!)
+        10000: {"gold_max": 0.05, "forex_max": 0.15},    # $10,000-$24,999 (reduced!)
+        25000: {"gold_max": 0.10, "forex_max": 0.30},    # $25,000-$49,999 (reduced!)
+        50000: {"gold_max": 0.20, "forex_max": 0.50},    # $50,000-$99,999 (reduced!)
+        100000: {"gold_max": 0.50, "forex_max": 1.00},   # $100,000-$499,999 (reduced!)
+        500000: {"gold_max": 2.00, "forex_max": 5.00},   # $500,000-$999,999
+        1000000: {"gold_max": 5.00, "forex_max": 10.0},  # $1M-$9.99M
+        10000000: {"gold_max": 50.0, "forex_max": 100.0}, # $10M-$99.99M
+        100000000: {"gold_max": 500.0, "forex_max": 1000.0}, # $100M-$1.99B
+        2000000000: {"gold_max": 10000.0, "forex_max": 20000.0}, # $2B
     },
     
     # =====================
-    # 📏 SL DISTANCE (% of Price)
+    # 📏 SL DISTANCE (% of Price) - UPDATED FOR ATR-BASED!
     # =====================
-    "gold_sl_percent_min": 0.3,               # Gold SL >= 0.3% (~$15 ที่ $5000)
-    "gold_sl_percent_max": 1.5,               # Gold SL <= 1.5% (~$75 ที่ $5000)
-    "forex_sl_percent_min": 0.15,             # Forex SL >= 0.15%
-    "forex_sl_percent_max": 0.5,              # Forex SL <= 0.5%
+    # 🔴 UPDATED: Wider range to match ATR-based SL calculation
+    "gold_sl_percent_min": 0.25,               # Gold SL >= 0.25% (~$12 ที่ $4700)
+    "gold_sl_percent_max": 1.0,                # Gold SL <= 1.0% (~$47 ที่ $4700)
+    "forex_sl_percent_min": 0.15,              # Forex SL >= 0.15%
+    "forex_sl_percent_max": 0.5,               # Forex SL <= 0.5%
     
     # =====================
     # 🚫 TREND PROTECTION

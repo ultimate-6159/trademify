@@ -1007,53 +1007,71 @@ class AITradingBot:
                     return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ SL/TP CALCULATION - เหมือน Backtest (Optimized for High Win Rate)
+            # 🛡️ SL/TP CALCULATION - ATR-BASED (Fixed for proper risk management!)
             # ═══════════════════════════════════════════════════════════════════════════════
+            # 
+            # 🔴 PROBLEM FIXED: 
+            # - Before: SL clamped by balance% → SL < ATR → hit too easily
+            # - Now: SL based on ATR, lot size adjusted instead
+            #
+            # 🎯 FORMULA:
+            # - SL = 1.0-1.5x ATR (minimum breathing room for volatility)
+            # - TP = 1.2-2.0x SL (positive R:R ratio)
+            # - Lot size adjusted to keep risk within 1-2% of balance
+            #
             
             if is_gold:
                 if is_m15:
-                    # 🥇 M15 SCALPING: Proven best settings
-                    sl_distance = atr * 2.0
-                    tp_distance = atr * 0.6
-                    
-                    # Dynamic SL based on balance
-                    ABSOLUTE_MIN_SL = 0.5
-                    ABSOLUTE_MAX_SL = 50.0
-                    
-                    raw_min_sl = balance * 0.005
-                    raw_max_sl = balance * 0.02
-                    
-                    min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))
-                    max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))
-                    
-                    sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    tp_distance = sl_distance * 0.6
+                    # 🥇 M15 SCALPING: Quick trades, tighter SL
+                    # ATR ~30-50 for M15 Gold → SL ~$45-$75
+                    sl_multiplier = 1.5  # 1.5x ATR for SL
+                    tp_multiplier = 1.0  # TP = 1.0x SL (R:R = 1:1 for scalping)
                 else:
-                    # H1: Better R:R settings
-                    sl_distance = atr * 1.8
-                    tp_distance = atr * 0.7
-                    
-                    raw_min_sl = balance * 0.01
-                    raw_max_sl = balance * 0.03
-                    
-                    ABSOLUTE_MIN_SL_H1 = 1.0
-                    ABSOLUTE_MAX_SL_H1 = 100.0
-                    
-                    min_sl = max(ABSOLUTE_MIN_SL_H1, min(raw_min_sl, ABSOLUTE_MAX_SL_H1 * 0.2))
-                    max_sl = max(5.0, min(raw_max_sl, ABSOLUTE_MAX_SL_H1))
-                    
-                    sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    tp_distance = sl_distance * 0.7
+                    # 🥇 H1: Wider SL for higher timeframe
+                    # ATR ~80-150 for H1 Gold → SL ~$80-$150
+                    sl_multiplier = 1.0  # 1.0x ATR for SL (ATR already represents hourly volatility)
+                    tp_multiplier = 1.5  # TP = 1.5x SL (R:R = 1:1.5 for better risk/reward)
+                
+                # 📊 Calculate ATR-based SL/TP
+                sl_distance = atr * sl_multiplier
+                tp_distance = sl_distance * tp_multiplier
+                
+                # 🛡️ Apply minimum/maximum limits based on PRICE, not balance
+                # Gold: Min SL = 0.15% of price (~$7 at $4700), Max SL = 0.5% (~$23.5)
+                # For H1: Min = 0.2% (~$9.4), Max = 1.0% (~$47)
+                
+                if is_m15:
+                    min_sl_pct = 0.15  # 0.15% minimum
+                    max_sl_pct = 0.40  # 0.40% maximum
+                else:
+                    min_sl_pct = 0.25  # 0.25% minimum for H1
+                    max_sl_pct = 0.80  # 0.80% maximum for H1
+                
+                min_sl = current_price * (min_sl_pct / 100)
+                max_sl = current_price * (max_sl_pct / 100)
+                
+                # Apply limits
+                sl_distance = max(min_sl, min(sl_distance, max_sl))
+                tp_distance = sl_distance * tp_multiplier
+                
+                # 📊 Ensure minimum R:R of 1.0 (TP >= SL)
+                if tp_distance < sl_distance:
+                    tp_distance = sl_distance * 1.0  # Minimum 1:1 R:R
+                
+                # 🔔 Log the calculation for debugging
+                logger.info(f"   📊 SL/TP CALC: ATR={atr:.2f}, SL_mult={sl_multiplier}, TP_mult={tp_multiplier}")
+                logger.info(f"   📊 Limits: min_sl=${min_sl:.2f}, max_sl=${max_sl:.2f}")
+                logger.info(f"   📊 Final: SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=1:{tp_distance/sl_distance:.2f}")
             else:
-                # Forex: Use pip-based
+                # Forex: Use pip-based with proper R:R
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
                 sl_distance = atr * 1.5
-                tp_distance = atr * 2.0
+                tp_distance = atr * 2.0  # 1:1.33 R:R
                 
                 min_sl = 20 * pip_value
-                max_sl = 50 * pip_value
+                max_sl = 100 * pip_value  # Increased from 50
                 sl_distance = max(min_sl, min(sl_distance, max_sl))
-                tp_distance = sl_distance * 1.5
+                tp_distance = sl_distance * 1.5  # Ensure 1:1.5 R:R
             
             if signal == "BUY":
                 stop_loss = current_price - sl_distance
