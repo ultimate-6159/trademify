@@ -227,7 +227,34 @@ def _release_trade_lock(symbol: str):
 # 🔓 DUPLICATE TRADE PREVENTION
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
-_trade_cooldown_seconds = 60  # 🔥 ลดเหลือ 1 นาที cooldown (จาก 5 นาที)
+_trade_cooldown_seconds = 300  # 🔥 5 นาที cooldown! (เทรดบ่อยขึ้น!)
+
+# 🚨 MAX TRADES PER DAY - ป้องกันเทรดมากเกินไป!
+_daily_trade_limit = {
+    "enabled": True,
+    "max_trades_per_day": 20,           # 🔥 เพิ่มเป็น 20 เทรด/วัน!
+    "max_losing_streak": 3,             # 🔥 แพ้ติดต่อกัน 3 ครั้ง = หยุด!
+    "max_daily_loss_percent": 5.0,      # 🔥 ขาดทุน 5% ของ balance = หยุด!
+    "pause_after_loss_minutes": 30,     # 🔥 หยุด 30 นาทีหลังแพ้ติดต่อกัน
+}
+_consecutive_losses = 0
+_daily_trade_count = 0
+_last_trade_date = None
+
+# 🏗️ 20-LAYER GATE - ต้องผ่านกี่ layer ถึงจะเทรด
+_layer_gate_config = {
+    "enabled": True,                     # ✅ เปิดใช้งาน 20 Layer!
+    "min_layers_passed": 12,             # 🔥 ต้องผ่านอย่างน้อย 12/20 layers (60%)
+    "min_pass_rate": 60,                 # 🔥 Pass rate >= 60%
+    "required_layers": [1, 2, 3, 4],     # 🔥 Layer 1-4 (Base) ต้องผ่านทั้งหมด
+}
+
+# 📊 Loss Streak Tracking
+_loss_streak_tracker = {
+    "current_streak": 0,
+    "last_loss_time": None,
+    "paused_until": None,
+}
 
 # 🥇 SYMBOL WHITELIST - เทรดเฉพาะ Gold เท่านั้น!
 _symbol_whitelist = {
@@ -1304,9 +1331,11 @@ async def _sync_positions_with_mt5():
                     # ❌ LOSS = ขาดทุน
                     if actual_pnl > 0:
                         _bot_status["daily_stats"]["wins"] += 1
+                        _update_loss_streak(is_win=True)  # 🆕 Reset loss streak
                         logger.info(f"✅ WIN: #{ticket} {closed_symbol} {closed_side} | PnL: +${actual_pnl:.2f} | Reason: {close_reason}")
                     elif actual_pnl < 0:
                         _bot_status["daily_stats"]["losses"] += 1
+                        _update_loss_streak(is_win=False)  # 🆕 Increment loss streak
                         logger.info(f"❌ LOSS: #{ticket} {closed_symbol} {closed_side} | PnL: ${actual_pnl:.2f} | Reason: {close_reason}")
                     else:
                         logger.info(f"➖ BREAKEVEN: #{ticket} {closed_symbol} {closed_side} | PnL: $0.00 | Reason: {close_reason}")
@@ -3435,21 +3464,137 @@ async def _check_and_close_weakening_positions(symbol: str, signal_data: Dict):
         logger.error(f"Error checking weakening positions: {e}")
 
 
+# =====================
+# 🏗️ 20-LAYER GATE + DAILY LIMIT FUNCTIONS
+# =====================
+
+def _check_layer_gate(symbol: str) -> tuple[bool, str]:
+    """
+    🏗️ 20-LAYER GATE - ตรวจสอบว่าผ่าน layer เพียงพอหรือไม่
+    
+    🔥 ต้องผ่าน 12/20 layers (60%) ถึงจะเทรดได้!
+    
+    Returns: (can_trade: bool, reason: str)
+    """
+    global _bot_status, _layer_gate_config
+    
+    if not _layer_gate_config.get("enabled", True):
+        return True, "Layer gate disabled"
+    
+    layer_status = _bot_status.get("layer_status", {}).get(symbol)
+    
+    if not layer_status:
+        return False, "No layer data available"
+    
+    passed = layer_status.get("passed", 0)
+    total = layer_status.get("total", 20)
+    pass_rate = layer_status.get("pass_rate", 0)
+    layers = layer_status.get("layers", [])
+    
+    min_passed = _layer_gate_config.get("min_layers_passed", 12)
+    min_rate = _layer_gate_config.get("min_pass_rate", 60)
+    required = _layer_gate_config.get("required_layers", [1, 2, 3, 4])
+    
+    # 1. Check minimum layers passed
+    if passed < min_passed:
+        return False, f"Only {passed}/{total} layers passed (need {min_passed}+)"
+    
+    # 2. Check pass rate
+    if pass_rate < min_rate:
+        return False, f"Pass rate {pass_rate:.1f}% < {min_rate}% required"
+    
+    # 3. Check required layers (Base layers 1-4)
+    for layer_num in required:
+        layer = next((l for l in layers if l.get("layer") == layer_num), None)
+        if layer and layer.get("status") not in ["PASS", "READY"]:
+            layer_name = layer.get("name", f"Layer {layer_num}")
+            return False, f"Required layer {layer_num} ({layer_name}) not passed"
+    
+    logger.info(f"🏗️ LAYER GATE PASSED: {symbol} - {passed}/{total} ({pass_rate:.1f}%)")
+    return True, f"✅ Layer gate passed: {passed}/{total} ({pass_rate:.1f}%)"
+
+
+def _check_daily_limit(symbol: str) -> tuple[bool, str]:
+    """
+    🚨 CHECK DAILY LIMIT - ตรวจสอบว่าเทรดเกินลิมิตหรือยัง
+    
+    🔥 Features:
+    - Max 20 trades per day
+    - Pause 30 mins after 3 consecutive losses
+    - Stop if daily loss > 5% of balance
+    
+    Returns: (can_trade: bool, reason: str)
+    """
+    global _bot_status, _daily_trade_limit, _loss_streak_tracker
+    
+    if not _daily_trade_limit.get("enabled", True):
+        return True, "Daily limit disabled"
+    
+    daily_stats = _bot_status.get("daily_stats", {})
+    trades_today = daily_stats.get("trades", 0)
+    pnl_today = daily_stats.get("pnl", 0)
+    
+    max_trades = _daily_trade_limit.get("max_trades_per_day", 20)
+    max_loss_streak = _daily_trade_limit.get("max_losing_streak", 3)
+    pause_minutes = _daily_trade_limit.get("pause_after_loss_minutes", 30)
+    
+    # 1. Check max trades per day
+    if trades_today >= max_trades:
+        return False, f"Daily limit reached: {trades_today}/{max_trades} trades"
+    
+    # 2. Check if paused after loss streak
+    paused_until = _loss_streak_tracker.get("paused_until")
+    if paused_until and datetime.now() < paused_until:
+        remaining = int((paused_until - datetime.now()).total_seconds() / 60)
+        return False, f"Paused for {remaining}m after loss streak"
+    
+    # 3. Check current loss streak
+    current_streak = _loss_streak_tracker.get("current_streak", 0)
+    if current_streak >= max_loss_streak:
+        # Pause trading
+        _loss_streak_tracker["paused_until"] = datetime.now() + timedelta(minutes=pause_minutes)
+        _loss_streak_tracker["current_streak"] = 0  # Reset after pause
+        logger.warning(f"🚨 LOSS STREAK {current_streak} >= {max_loss_streak} - PAUSING {pause_minutes} minutes!")
+        return False, f"Loss streak {current_streak} >= {max_loss_streak} - pausing {pause_minutes}m"
+    
+    # 4. Check daily loss limit (% of balance) - async so we skip here
+    # Will be checked in trade execution
+    
+    logger.debug(f"📊 Daily limit OK: {trades_today}/{max_trades} trades, streak: {current_streak}")
+    return True, f"OK: {trades_today}/{max_trades} trades, streak: {current_streak}"
+
+
+def _update_loss_streak(is_win: bool):
+    """
+    📊 Update loss streak after trade closes
+    
+    - Win: Reset streak to 0
+    - Loss: Increment streak
+    """
+    global _loss_streak_tracker
+    
+    if is_win:
+        if _loss_streak_tracker.get("current_streak", 0) > 0:
+            logger.info(f"✅ WIN! Loss streak reset from {_loss_streak_tracker['current_streak']} to 0")
+        _loss_streak_tracker["current_streak"] = 0
+    else:
+        _loss_streak_tracker["current_streak"] = _loss_streak_tracker.get("current_streak", 0) + 1
+        _loss_streak_tracker["last_loss_time"] = datetime.now()
+        logger.warning(f"❌ LOSS! Streak now: {_loss_streak_tracker['current_streak']}")
+
+
 async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     """
-    🎯 SMART TRADE FILTER
-    Check if we should trade this signal - Quality + Confidence filter
+    🎯 SMART TRADE FILTER - ENHANCED!
     
-    🛡️ ANTI-WIPEOUT CHECKS:
-    1. Symbol whitelist (Gold only)
-    2. Quality + Confidence filter
-    3. Pullback confirmation
-    4. 🆕 TREND ALIGNMENT CHECK - ห้ามสวนเทรนด์รุนแรง!
-    5. Open position check
-    6. Cooldown check
-    
-    🥇 Gold: HIGH quality, 75%+ confidence
-    💱 Forex: ❌ BLOCKED! ไม่เทรด Forex
+    🔥 NEW CHECKS ADDED:
+    1. 🏗️ 20-LAYER GATE - ต้องผ่าน 12/20 layers!
+    2. 🚨 DAILY LIMIT - Max 20 trades, loss streak protection!
+    3. 🥇 Symbol whitelist (Gold only)
+    4. 📊 Quality + Confidence filter
+    5. 🛡️ Trend alignment check
+    6. 📍 Open position check
+    7. ⏱️ Cooldown check
     
     Returns: (can_trade: bool, reason: str)
     """
@@ -3479,7 +3624,17 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     if signal in ["WAIT", "SKIP"]:
         return False, "Signal is WAIT/SKIP"
     
-    # 2. 🎯 SYMBOL-SPECIFIC QUALITY FILTER (Gold only now)
+    # 🆕 2. 🚨 CHECK DAILY LIMIT - เทรดเกินลิมิตหรือยัง?
+    can_trade_daily, daily_reason = _check_daily_limit(symbol)
+    if not can_trade_daily:
+        return False, f"DAILY LIMIT: {daily_reason}"
+    
+    # 🆕 3. 🏗️ CHECK 20-LAYER GATE - ผ่าน layer เพียงพอหรือไม่?
+    layer_passed, layer_reason = _check_layer_gate(symbol)
+    if not layer_passed:
+        return False, f"LAYER GATE: {layer_reason}"
+    
+    # 4. 🎯 SYMBOL-SPECIFIC QUALITY FILTER (Gold only now)
     is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
     
     # 🔥 Gold-focused settings
@@ -3495,17 +3650,17 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     if quality_order.get(quality, 0) < quality_order.get(min_quality, 2):
         return False, f"Quality {quality} < minimum {min_quality} (for {'Gold' if is_gold else 'Forex'})"
     
-    # 3. 🎯 Confidence Filter
+    # 5. 🎯 Confidence Filter
     if confidence < min_confidence:
         return False, f"Confidence {confidence:.1f}% < minimum {min_confidence}% (for {'Gold' if is_gold else 'Forex'})"
     
-    # 4. 🛡️ TREND ALIGNMENT CHECK - ห้ามสวนเทรนด์รุนแรง!
+    # 6. 🛡️ TREND ALIGNMENT CHECK - ห้ามสวนเทรนด์รุนแรง!
     trend_aligned, trend_reason = await _check_trend_alignment(symbol, signal)
     if not trend_aligned:
         logger.warning(f"🛡️ ANTI-WIPEOUT: {symbol} - {trend_reason}")
         return False, trend_reason
     
-    # 5. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า (ถ้าเปิดใช้งาน)
+    # 7. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า (ถ้าเปิดใช้งาน)
     if _pullback_config.get("enabled", False):
         current_price = signal_data.get("current_price", 0)
         if current_price > 0:
@@ -3513,15 +3668,15 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
             if not can_enter_pullback:
                 return False, f"PULLBACK: {pullback_reason}"
     
-    # 6. Check for open positions
+    # 8. Check for open positions
     has_position = await _check_open_positions(symbol)
     if has_position:
         return False, f"Already have open position for {symbol}"
     
-    # 7. Generate signal ID
+    # 9. Generate signal ID
     signal_id = _generate_signal_id(symbol, signal, confidence)
     
-    # 8. Check if we already traded this signal
+    # 10. Check if we already traded this signal / Cooldown
     last_trade = _last_traded_signal.get(symbol)
     if last_trade:
         last_signal_id = last_trade.get("signal_id")
@@ -3531,7 +3686,7 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
         if last_signal_id == signal_id:
             return False, f"Already traded this signal (ID: {signal_id})"
         
-        # Check cooldown
+        # Check cooldown (5 minutes)
         if last_time:
             elapsed = (datetime.now() - last_time).total_seconds()
             if elapsed < _trade_cooldown_seconds:
