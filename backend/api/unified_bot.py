@@ -4247,7 +4247,13 @@ async def get_signal_for_symbol(symbol: str):
                 "message": "No analysis available for this symbol. Start the bot first."
             }
         
-        # Build response safely - 🐛 FIX: Handle None values properly
+        # Build response safely - 🐛 FIX: Handle None values and numpy types properly
+        # Convert buy_score/sell_score to native Python int (could be numpy.int64)
+        buy_score_raw = signal.get("buy_score") or 0
+        sell_score_raw = signal.get("sell_score") or 0
+        buy_score = int(buy_score_raw) if hasattr(buy_score_raw, '__int__') else 0
+        sell_score = int(sell_score_raw) if hasattr(sell_score_raw, '__int__') else 0
+        
         response = {
             "status": "ok",
             "bot_mode": _bot_status["mode"],
@@ -4262,8 +4268,8 @@ async def get_signal_for_symbol(symbol: str):
             "market_regime": signal.get("market_regime", "UNKNOWN"),
             "timestamp": signal.get("timestamp", datetime.now().isoformat()),
             # 🔥 NEW: Add explicit fields for frontend
-            "buy_score": signal.get("buy_score") or 0,
-            "sell_score": signal.get("sell_score") or 0,
+            "buy_score": buy_score,
+            "sell_score": sell_score,
             "session": signal.get("session") or "N/A",
             "trend": signal.get("trend") or signal.get("market_regime") or "UNKNOWN",
         }
@@ -4276,7 +4282,8 @@ async def get_signal_for_symbol(symbol: str):
         if "factors" in signal:
             response["factors"] = _convert_to_json_serializable(signal["factors"])
         
-        return response
+        # 🐛 FIX: Ensure entire response is JSON serializable (handles any remaining numpy types)
+        return _convert_to_json_serializable(response)
         
     except Exception as e:
         logger.error(f"Error getting signal for {symbol}: {e}")
