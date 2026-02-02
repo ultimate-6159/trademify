@@ -287,13 +287,14 @@ const technicalData = computed(() => {
   const scores = signal.value.scores || {}
   const factors = signal.value.factors || {}
   
-  // Try to extract buy/sell score from factors
-  let buyScore = 0
-  let sellScore = 0
-  let session = 'N/A'
-  let trend = 'RANGE'
+  // ?? First try to use direct values from API (new format)
+  let buyScore = signal.value.buy_score || 0
+  let sellScore = signal.value.sell_score || 0
+  let session = signal.value.session || 'N/A'
+  let trend = signal.value.trend || signal.value.market_regime || 'RANGE'
   
-  if (factors.bullish) {
+  // Fallback: Try to extract from factors (old format)
+  if (buyScore === 0 && sellScore === 0 && factors.bullish) {
     const buyFactor = factors.bullish.find(f => f.includes('Buy Score'))
     if (buyFactor) {
       const match = buyFactor.match(/(\d+)\/10/)
@@ -309,7 +310,7 @@ const technicalData = computed(() => {
     }
   }
   
-  if (factors.bearish) {
+  if (buyScore === 0 && sellScore === 0 && factors.bearish) {
     const sellFactor = factors.bearish.find(f => f.includes('Sell Score'))
     if (sellFactor) {
       const match = sellFactor.match(/(\d+)\/10/)
@@ -325,11 +326,16 @@ const technicalData = computed(() => {
     }
   }
   
+  // Last fallback: use pattern score
+  if (buyScore === 0 && sellScore === 0 && scores.pattern) {
+    buyScore = Math.round((scores.pattern || 0) / 10)
+  }
+  
   return {
-    buy_score: buyScore || Math.round((scores.pattern || 0) / 10),
-    sell_score: sellScore || 0,
-    session: session || 'N/A',
-    trend: trend || signal.value.market_regime || 'RANGE',
+    buy_score: buyScore,
+    sell_score: sellScore,
+    session: session,
+    trend: trend,
     rsi: indicators.rsi || 50,
     atr: indicators.atr || 0
   }

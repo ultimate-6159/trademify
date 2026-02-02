@@ -1550,6 +1550,54 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
         if current_price == 0 and "market_data" in analysis:
             current_price = analysis["market_data"].get("close", 0)
         
+        # 🔥 Extract buy_score and sell_score from analysis
+        scores = analysis.get("scores", {})
+        
+        # Try to get buy_score/sell_score directly from analysis (technical mode)
+        # or from factors (pattern mode)
+        buy_score = 0
+        sell_score = 0
+        session = "N/A"
+        trend = analysis.get("market_regime", "UNKNOWN")
+        
+        # Check if analysis has direct scores (from technical signal)
+        factors = analysis.get("factors", {})
+        if factors.get("bullish"):
+            for f in factors["bullish"]:
+                if "Buy Score" in str(f):
+                    try:
+                        match = str(f).split(":")[1].split("/")[0].strip()
+                        buy_score = int(match)
+                    except:
+                        pass
+                if "Session" in str(f):
+                    try:
+                        session = str(f).split(":")[1].strip()
+                    except:
+                        pass
+        
+        if factors.get("bearish"):
+            for f in factors["bearish"]:
+                if "Sell Score" in str(f):
+                    try:
+                        match = str(f).split(":")[1].split("/")[0].strip()
+                        sell_score = int(match)
+                    except:
+                        pass
+        
+        # Fallback: calculate from pattern score
+        if buy_score == 0 and sell_score == 0:
+            pattern_score = scores.get("pattern", 0)
+            signal_type = analysis.get("signal", "WAIT")
+            if signal_type in ["BUY", "STRONG_BUY"]:
+                buy_score = max(1, pattern_score // 10) if pattern_score > 0 else 0
+            elif signal_type in ["SELL", "STRONG_SELL"]:
+                sell_score = max(1, pattern_score // 10) if pattern_score > 0 else 0
+        
+        # Get session from analysis
+        if session == "N/A":
+            session = analysis.get("session", analysis.get("market_data", {}).get("session", "N/A"))
+        
         signal_data = {
             "symbol": symbol,
             "signal": analysis.get("signal", "WAIT"),
@@ -1558,11 +1606,17 @@ async def _analyze_single_symbol(symbol: str, auto_trade: bool) -> Optional[Dict
             "current_price": current_price,
             "stop_loss": analysis.get("risk_management", {}).get("stop_loss", 0),
             "take_profit": analysis.get("risk_management", {}).get("take_profit", 0),
-            "scores": analysis.get("scores", {}),
+            "scores": scores,
             "indicators": analysis.get("indicators", {}),
-            "market_regime": analysis.get("market_regime", "UNKNOWN"),
+            "market_regime": trend,
             "market_data": analysis.get("market_data", {}),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            # 🔥 NEW: Add explicit fields for frontend
+            "buy_score": buy_score,
+            "sell_score": sell_score,
+            "session": session,
+            "trend": trend,
+            "factors": factors,  # 🔥 Pass factors to frontend
         }
         _bot_status["last_signal"][symbol] = signal_data
         
@@ -4204,7 +4258,12 @@ async def get_signal_for_symbol(symbol: str):
             "take_profit": float(signal.get("take_profit", 0)),
             "trade_status": signal.get("trade_status", "N/A"),
             "market_regime": signal.get("market_regime", "UNKNOWN"),
-            "timestamp": signal.get("timestamp", datetime.now().isoformat())
+            "timestamp": signal.get("timestamp", datetime.now().isoformat()),
+            # 🔥 NEW: Add explicit fields for frontend
+            "buy_score": signal.get("buy_score", 0),
+            "sell_score": signal.get("sell_score", 0),
+            "session": signal.get("session", "N/A"),
+            "trend": signal.get("trend", signal.get("market_regime", "UNKNOWN")),
         }
         
         # Add optional fields if present
@@ -4212,6 +4271,8 @@ async def get_signal_for_symbol(symbol: str):
             response["scores"] = _convert_to_json_serializable(signal["scores"])
         if "indicators" in signal:
             response["indicators"] = _convert_to_json_serializable(signal["indicators"])
+        if "factors" in signal:
+            response["factors"] = _convert_to_json_serializable(signal["factors"])
         
         return response
         

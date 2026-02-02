@@ -2056,7 +2056,68 @@ class AITradingBot:
             
             if tech_signal is None:
                 logger.info(f"   ⏸️ {symbol}: No technical signal generated")
-                # 🔥 FIX: Return default response WITH current_price and market data
+                # 🔥 FIX: Calculate and return basic technical data even without signal
+                
+                # Calculate basic indicators for display
+                close = df['close'].values
+                high = df['high'].values
+                low = df['low'].values
+                
+                # RSI calculation
+                rsi_period = 14
+                delta = np.diff(close)
+                gain = np.where(delta > 0, delta, 0)
+                loss = np.where(delta < 0, -delta, 0)
+                avg_gain = np.mean(gain[-rsi_period:]) if len(gain) >= rsi_period else 0.001
+                avg_loss = np.mean(loss[-rsi_period:]) if len(loss) >= rsi_period else 0.001
+                rs = avg_gain / max(avg_loss, 0.0001)
+                rsi = 100 - (100 / (1 + rs))
+                
+                # ATR calculation
+                atr_period = 14
+                if len(close) >= atr_period + 1:
+                    prev_close_arr = close[-(atr_period+1):-1]
+                    high_arr = high[-atr_period:]
+                    low_arr = low[-atr_period:]
+                    tr1 = high_arr - low_arr
+                    tr2 = np.abs(high_arr - prev_close_arr)
+                    tr3 = np.abs(low_arr - prev_close_arr)
+                    tr = np.maximum(np.maximum(tr1, tr2), tr3)
+                    atr = float(np.mean(tr))
+                else:
+                    atr = float(np.mean(high[-14:] - low[-14:])) if len(high) >= 14 else 1.0
+                
+                # EMA trend detection
+                ema_fast = self._ema(close, 5)
+                ema_mid = self._ema(close, 13)
+                ema_slow = self._ema(close, 21)
+                
+                # Determine trend
+                if ema_fast > ema_mid > ema_slow:
+                    trend = "UP"
+                    trend_score = 70
+                elif ema_fast < ema_mid < ema_slow:
+                    trend = "DOWN"
+                    trend_score = 70
+                else:
+                    trend = "RANGE"
+                    trend_score = 40
+                
+                # Session detection
+                hour = datetime.now().hour
+                if 13 <= hour <= 17:
+                    session = "OVERLAP"
+                    session_score = 90
+                elif 8 <= hour <= 16:
+                    session = "LONDON"
+                    session_score = 70
+                elif 13 <= hour <= 22:
+                    session = "NY"
+                    session_score = 70
+                else:
+                    session = "ASIAN"
+                    session_score = 30
+                
                 default_response["current_price"] = current_price
                 default_response["market_data"] = {
                     "open": float(df['open'].iloc[-1]),
@@ -2065,7 +2126,25 @@ class AITradingBot:
                     "close": current_price,
                     "volume": float(df['volume'].iloc[-1]),
                 }
+                default_response["indicators"] = {
+                    "rsi": float(rsi),
+                    "atr": atr,
+                }
+                default_response["scores"] = {
+                    "pattern": 0,  # No pattern match
+                    "trend": trend_score,
+                    "volume": 50,
+                    "momentum": 60 if 40 < rsi < 60 else 40,
+                    "session": session_score,
+                    "volatility": 50,
+                    "recency": 50,
+                }
+                default_response["market_regime"] = trend
+                default_response["session"] = session
                 default_response["factors"]["skip_reasons"] = ["Technical conditions not met - waiting for clear trend"]
+                
+                logger.info(f"   📊 {symbol}: WAIT | RSI={rsi:.1f} | ATR={atr:.5f} | Trend={trend} | Session={session}")
+                
                 return default_response
             
             # Build result from technical signal
