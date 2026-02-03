@@ -674,6 +674,122 @@ async def _check_trend_alignment(symbol: str, signal: str) -> tuple[bool, str]:
         logger.warning(f"Trend check error: {e}")
         return True, f"Trend check error: {e}"
 
+
+# =====================
+# 📊 ATR HELPER FUNCTIONS FOR TRAILING STOP
+# =====================
+
+async def _get_symbol_atr(symbol: str) -> float:
+    """
+    ดึง ATR สำหรับ symbol จาก cache หรือคำนวณใหม่
+    
+    Returns ATR in price units (e.g., $50 for Gold, 0.0030 for EURUSD)
+    """
+    global _symbol_atr_cache, _bot
+    
+    # Check cache (valid for 5 minutes)
+    if symbol in _symbol_atr_cache:
+        cached = _symbol_atr_cache[symbol]
+        if (datetime.now() - cached.get("updated_at", datetime.min)).total_seconds() < 300:
+            return cached.get("atr", 0)
+    
+    # Calculate ATR from recent data
+    try:
+        if not _bot or not _bot.data_provider:
+            return 0
+        
+        df = await _bot.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=20)
+        if df is None or len(df) < 15:
+            return 0
+        
+        import numpy as np
+        
+        high = df['high'].values.astype(np.float32)
+        low = df['low'].values.astype(np.float32)
+        close = df['close'].values.astype(np.float32)
+        
+        # Calculate True Range
+        tr1 = high[-14:] - low[-14:]
+        tr2 = np.abs(high[-14:] - close[-15:-1])
+        tr3 = np.abs(low[-14:] - close[-15:-1])
+        tr = np.maximum(np.maximum(tr1, tr2), tr3)
+        atr = float(np.mean(tr))
+        
+        # Cache it
+        _symbol_atr_cache[symbol] = {
+            "atr": atr,
+            "updated_at": datetime.now()
+        }
+        
+        return atr
+        
+    except Exception as e:
+        logger.debug(f"ATR calculation error for {symbol}: {e}")
+        return 0
+
+
+def _get_trailing_trigger_atr(balance: float, atr: float, symbol: str) -> float:
+    """Get trigger profit for trailing stop (ATR-based)"""
+    global _trailing_stop_config
+    
+    if atr > 0 and _trailing_stop_config.get("use_atr", True):
+        # ATR-based: 0.5x ATR converted to USD profit
+        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        atr_mult = _trailing_stop_config.get("activation_atr_mult", 0.5)
+        
+        if is_gold:
+            # Gold: $100 per $1 move per lot → for 0.01 lot, $1 profit per $1 move
+            # ATR $50 × 0.5 = $25 trigger (for 0.01 lot = $0.25 profit needed)
+            trigger = atr * atr_mult * 0.01 * 100  # 0.01 lot, $100 per point
+        else:
+            # Forex: ~$10 per pip per lot → for 0.01 lot, $0.10 per pip
+            trigger = atr * atr_mult * 10000 * 0.01 * 10  # Convert to pips * lot * pip value
+        
+        return max(1.0, trigger)
+    
+    # Fallback to percent-based
+    return _get_trailing_trigger(balance)
+
+
+def _get_trailing_distance_atr(atr: float, symbol: str) -> float:
+    """Get trail distance in price units (ATR-based)"""
+    global _trailing_stop_config
+    
+    if atr > 0 and _trailing_stop_config.get("use_atr", True):
+        distance_mult = _trailing_stop_config.get("trail_distance_atr_mult", 0.3)
+        return atr * distance_mult
+    
+    # Fallback: return 0 (will use percent-based)
+    return 0
+
+
+def _get_trailing_step_atr(atr: float) -> float:
+    """Get step size in price units (ATR-based)"""
+    global _trailing_stop_config
+    
+    if atr > 0 and _trailing_stop_config.get("use_atr", True):
+        step_mult = _trailing_stop_config.get("step_atr_mult", 0.1)
+        return atr * step_mult
+    
+    return 0
+
+
+def _get_trailing_lock_atr(atr: float, symbol: str) -> float:
+    """Get lock profit threshold in USD (ATR-based)"""
+    global _trailing_stop_config
+    
+    if atr > 0 and _trailing_stop_config.get("use_atr", True):
+        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        lock_mult = _trailing_stop_config.get("lock_profit_atr_mult", 1.0)
+        
+        if is_gold:
+            return atr * lock_mult * 0.01 * 100  # 0.01 lot, $100 per point
+        else:
+            return atr * lock_mult * 10000 * 0.01 * 10  # pips * lot * pip value
+    
+    return 0
+
+
 # =====================
 # 🎯 UNIVERSAL DYNAMIC CONFIG - รองรับ $100 ถึง $200,000,000!
 # =====================
@@ -704,14 +820,24 @@ def _get_adjusted_sl_for_micro(balance: float, sl_percent: float) -> float:
     multiplier = _small_account_config.get("micro_account_sl_multiplier", 1.5)
     return sl_percent * multiplier
 
-# 📈 AUTO TRAILING STOP - PERCENT BASED!
+# 📈 AUTO TRAILING STOP - ATR-BASED (Dynamic based on volatility!)
 _trailing_stop_config = {
     "enabled": True,
-    "trigger_profit_percent": 5.0,           # 🎯 เริ่ม trail เมื่อกำไร >= 5% ของ balance
-    "trail_distance_percent": 2.5,           # 🎯 ยก SL ห่าง 2.5% ของ balance
-    "step_size_percent": 0.5,                # 🎯 ยก SL ทีละ 0.5%
-    "lock_profit_percent": 10.0,             # 🎯 ล็อกกำไรเมื่อ >= 10%
+    # === ATR-BASED SETTINGS (NEW!) ===
+    "use_atr": True,                          # ใช้ ATR แทน fixed %
+    "activation_atr_mult": 0.5,               # 🎯 เริ่ม trail เมื่อกำไร >= 0.5x ATR
+    "trail_distance_atr_mult": 0.3,           # 🎯 ยก SL ห่าง 0.3x ATR จาก peak
+    "step_atr_mult": 0.1,                     # 🎯 ยก SL ทีละ 0.1x ATR
+    "lock_profit_atr_mult": 1.0,              # 🎯 ล็อกกำไรเมื่อ >= 1.0x ATR
+    # === FALLBACK PERCENT BASED (if ATR not available) ===
+    "trigger_profit_percent": 5.0,            # เริ่ม trail เมื่อกำไร >= 5% ของ balance
+    "trail_distance_percent": 2.5,            # ยก SL ห่าง 2.5% ของ balance
+    "step_size_percent": 0.5,                 # ยก SL ทีละ 0.5%
+    "lock_profit_percent": 10.0,              # ล็อกกำไรเมื่อ >= 10%
 }
+
+# Store ATR for each symbol (refreshed periodically)
+_symbol_atr_cache = {}  # {symbol: {"atr": 50.0, "updated_at": datetime}}
 
 # 🎯 SMART TRADING CONFIG - PERCENT BASED!
 _aggressive_config = {
@@ -2223,28 +2349,30 @@ async def _check_profit_protection() -> List[Dict]:
         return []
 
 
+
+
 # Track last SL position for each position (to avoid moving SL backwards)
 _last_trailing_sl = {}  # {position_id: last_sl_price}
 
 
 async def _auto_trailing_stop():
     """
-    📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
+    📈 AUTO TRAILING STOP - ATR-BASED (Dynamic based on volatility!)
     
     Logic:
-    1. เมื่อกำไร >= trigger_profit_usd → เริ่ม trail
-    2. ยก SL ให้ห่างจากราคาปัจจุบัน trail_distance_usd
-    3. ยกทีละ step_size_usd (ไม่ยกย้อนกลับ!)
-    4. เมื่อกำไร >= lock_profit_at_usd → ยก SL เข้ามากำไร (lock profit)
+    1. ดึง ATR สำหรับ symbol
+    2. เมื่อกำไร >= 0.5x ATR → เริ่ม trail
+    3. ยก SL ให้ห่างจากราคาปัจจุบัน 0.3x ATR
+    4. ยกทีละ 0.1x ATR (ไม่ยกย้อนกลับ!)
+    5. เมื่อกำไร >= 1.0x ATR → ยก SL เข้ามากำไร (lock profit)
     
-    🔥 GOLD Example:
-    - trigger: $100, distance: $50, step: $10, lock: $200
-    - Entry BUY @ 5500, SL @ 5400
-    - Price → 5600 (กำไร $100) → SL ยกเป็น 5550 (ห่าง $50)
-    - Price → 5650 (กำไร $150) → SL ยกเป็น 5600 (ห่าง $50)
-    - Price → 5700 (กำไร $200) → SL ยกเป็น 5650 (lock กำไร $150!)
+    🔥 GOLD Example (ATR = $50):
+    - Activation: 0.5x ATR = $25 profit (for 0.01 lot)
+    - Trail Distance: 0.3x ATR = $15 from peak
+    - Step: 0.1x ATR = $5 minimum move
+    - Lock Profit: 1.0x ATR = $50 profit → aggressive trailing
     """
-    global _bot, _trailing_stop_config, _last_trailing_sl
+    global _bot, _trailing_stop_config, _last_trailing_sl, _symbol_atr_cache
     
     if not _trailing_stop_config.get("enabled", False):
         return
@@ -2257,16 +2385,11 @@ async def _auto_trailing_stop():
         if not positions:
             return
         
-        # 🔥 DYNAMIC: Get balance for dynamic values
+        # 🔥 DYNAMIC: Get balance for fallback percent-based
         try:
             balance = await _bot.trading_engine.broker.get_balance() or 1000
         except:
             balance = 1000
-        
-        trigger_profit = _get_trailing_trigger(balance)
-        trail_distance = _get_trailing_distance(balance)
-        step_size = _get_trailing_step(balance)
-        lock_profit_at = _get_trailing_lock(balance)
         
         for pos in positions:
             try:
@@ -2293,9 +2416,9 @@ async def _auto_trailing_stop():
                 if not pos_id or not pos_symbol or pos_pnl <= 0:
                     continue
                 
-                # Skip if profit not enough to trigger
-                if pos_pnl < trigger_profit:
-                    continue
+                # 📊 Get ATR for this symbol
+                atr = await _get_symbol_atr(pos_symbol)
+                use_atr = atr > 0 and _trailing_stop_config.get("use_atr", True)
                 
                 # Get current price from MT5 if not in position
                 if current_price <= 0:
@@ -2303,28 +2426,47 @@ async def _auto_trailing_stop():
                     if current_price <= 0:
                         continue
                 
-                # Determine point value for this symbol (Gold = ~$1 per point)
-                point_value = 1.0  # Default
-                if 'XAU' in pos_symbol.upper() or 'GOLD' in pos_symbol.upper():
-                    point_value = 1.0  # Gold: $1 per point (0.01 lot = $0.01)
+                # Determine if Gold
+                is_gold = 'XAU' in pos_symbol.upper() or 'GOLD' in pos_symbol.upper()
                 
-                # Calculate new SL based on trailing distance
-                distance_points = trail_distance / point_value
+                # 📊 Get trigger, distance, step values
+                if use_atr:
+                    trigger_profit = _get_trailing_trigger_atr(balance, atr, pos_symbol)
+                    trail_distance = _get_trailing_distance_atr(atr, pos_symbol)
+                    step_size = _get_trailing_step_atr(atr)
+                    lock_profit_at = _get_trailing_lock_atr(atr, pos_symbol)
+                    
+                    logger.debug(f"📊 ATR Trailing [{pos_symbol}]: ATR=${atr:.2f}, Trigger=${trigger_profit:.2f}, Distance=${trail_distance:.2f}, Step=${step_size:.2f}")
+                else:
+                    # Fallback to percent-based
+                    trigger_profit = _get_trailing_trigger(balance)
+                    trail_distance = _get_trailing_distance(balance)
+                    step_size = _get_trailing_step(balance)
+                    lock_profit_at = _get_trailing_lock(balance)
+                
+                # Skip if profit not enough to trigger
+                if pos_pnl < trigger_profit:
+                    continue
+                
+                # Calculate new SL based on ATR distance
+                if use_atr:
+                    distance_price = trail_distance  # Already in price units
+                else:
+                    distance_price = trail_distance / (100.0 if is_gold else 10000.0)
                 
                 if pos_side == "BUY":
                     # BUY: SL ต่ำกว่าราคาปัจจุบัน
-                    new_sl = current_price - distance_points
+                    new_sl = current_price - distance_price
                     
-                    # ถ้ากำไร >= lock_profit_at → ยก SL เข้ามากำไร
-                    if pos_pnl >= lock_profit_at:
-                        # Lock กำไรขั้นต่ำ 50% ของ lock_profit_at
-                        min_lock_profit = lock_profit_at * 0.5 / point_value
-                        new_sl = max(new_sl, pos_entry + min_lock_profit)
+                    # ถ้ากำไรมาก → ยก SL เข้ามากำไร (lock)
+                    if pos_pnl >= lock_profit_at and lock_profit_at > 0:
+                        locked_distance = (current_price - pos_entry) * 0.5
+                        new_sl = max(new_sl, pos_entry + locked_distance)
                     
                     # ไม่ยก SL ย้อนกลับ!
                     last_sl = _last_trailing_sl.get(pos_id, 0)
                     if new_sl <= last_sl + step_size:
-                        continue  # ยังไม่ถึง step size
+                        continue
                     
                     # ต้องยกขึ้นเท่านั้น (ไม่ลง)
                     if pos_sl > 0 and new_sl <= pos_sl:
@@ -2332,28 +2474,32 @@ async def _auto_trailing_stop():
                     
                 else:  # SELL
                     # SELL: SL สูงกว่าราคาปัจจุบัน
-                    new_sl = current_price + distance_points
+                    new_sl = current_price + distance_price
                     
-                    # ถ้ากำไร >= lock_profit_at → ยก SL เข้ามากำไร
-                    if pos_pnl >= lock_profit_at:
-                        min_lock_profit = lock_profit_at * 0.5 / point_value
-                        new_sl = min(new_sl, pos_entry - min_lock_profit)
+                    # ถ้ากำไรมาก → ยก SL เข้ามากำไร (lock)
+                    if pos_pnl >= lock_profit_at and lock_profit_at > 0:
+                        locked_distance = (pos_entry - current_price) * 0.5
+                        new_sl = min(new_sl, pos_entry - locked_distance)
                     
                     # ไม่ยก SL ย้อนกลับ!
                     last_sl = _last_trailing_sl.get(pos_id, float('inf'))
                     if new_sl >= last_sl - step_size:
-                        continue  # ยังไม่ถึง step size
+                        continue
                     
                     # ต้องยกลงเท่านั้น (ไม่ขึ้น)
                     if pos_sl > 0 and new_sl >= pos_sl:
                         continue
                 
                 # Round SL to proper precision
-                new_sl = round(new_sl, 2)
+                new_sl = round(new_sl, 2 if is_gold else 5)
                 
                 # Modify position
-                logger.info(f"📈 TRAILING STOP: {pos_symbol} #{pos_id} | Profit: ${pos_pnl:.2f}")
-                logger.info(f"   Current SL: {pos_sl:.2f} → New SL: {new_sl:.2f} | Price: {current_price:.2f}")
+                mode_str = "ATR" if use_atr else "PCT"
+                logger.info(f"📈 TRAILING STOP [{mode_str}]: {pos_symbol} #{pos_id} | Profit: ${pos_pnl:.2f}")
+                if use_atr:
+                    logger.info(f"   ATR=${atr:.2f} | Distance=${trail_distance:.2f} | SL: {pos_sl:.2f} → {new_sl:.2f}")
+                else:
+                    logger.info(f"   Current SL: {pos_sl:.2f} → New SL: {new_sl:.2f} | Price: {current_price:.2f}")
                 
                 result = await _bot.trading_engine.broker.modify_position(
                     str(pos_id),

@@ -360,18 +360,27 @@ class AITradingBot:
             "date": datetime.now().date().isoformat()
         }
         
-        # 📈 Trailing Stop Config - ยก SL ตามราคาเพื่อล็อคกำไร
-        # (Enhanced: เหมือน backtest ที่ได้ win rate 91.7%)
+        # 📈 Trailing Stop Config - ATR-BASED (Dynamic based on volatility!)
+        # ยก SL ตามราคาเพื่อล็อคกำไร โดยใช้ ATR เป็นหลัก
         self._trailing_stop_config = {
             "enabled": True,                    # เปิด/ปิด Trailing Stop
-            "activation_profit_pct": 0.15,      # เริ่มทำงานเมื่อกำไร >= 0.15% (~15 pips)
-            "trail_distance_pct": 0.1,          # SL ตาม 0.1% จากราคาปัจจุบัน (lock 50% profit)
-            "min_trail_distance_gold": 0.5,     # Gold: SL ตาม $0.50 minimum
-            "min_trail_distance_forex": 0.0005, # Forex: SL ตาม 5 pips minimum
-            "step_pct": 0.05,                   # ยก SL ทีละ 0.05% (5 pips)
-            "lock_profit_pct": 0.5,             # Lock 50% ของกำไร (เหมือน backtest)
+            # === ATR-BASED SETTINGS (NEW!) ===
+            "use_atr": True,                    # ใช้ ATR แทน fixed %
+            "activation_atr_mult": 0.5,         # เริ่มทำงานเมื่อกำไร >= 0.5x ATR
+            "trail_atr_mult": 0.3,              # SL ห่าง 0.3x ATR จาก peak price
+            "step_atr_mult": 0.1,               # ขยับ SL ทีละ 0.1x ATR
+            "lock_profit_atr_mult": 0.5,        # Lock profit = 0.5x ATR distance
+            # === FALLBACK SETTINGS (if ATR not available) ===
+            "activation_profit_pct": 0.15,      # เริ่มทำงานเมื่อกำไร >= 0.15%
+            "trail_distance_pct": 0.1,          # SL ตาม 0.1% จาก peak
+            "step_pct": 0.05,                   # ยก SL ทีละ 0.05%
+            "lock_profit_pct": 0.5,             # Lock 50% ของกำไร
+            # === MINIMUM DISTANCES (absolute) ===
+            "min_trail_distance_gold": 5.0,     # Gold: SL ห่างขั้นต่ำ $5
+            "min_trail_distance_forex": 0.0010, # Forex: SL ห่างขั้นต่ำ 10 pips
         }
         self._position_highest_prices: Dict[str, float] = {}  # Track highest/lowest for trailing
+        self._position_atr: Dict[str, float] = {}  # Track ATR at entry for each position
         
         # 🎯 Floating TP Config - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
         self._floating_tp_config = {
