@@ -334,6 +334,55 @@ _contrarian_mode = {
     "reverse_strong_signal": False,
 }
 
+# =====================
+# 🏔️ PEAK DETECTION - หลีกเลี่ยงการเข้าที่ Peak/Bottom!
+# =====================
+# ปัญหา: สัญญาณ BUY มาแรง → ทุกคนเข้าพร้อมกัน → ราคาพุ่ง → PEAK → ราคาตก → โดน SL
+# Solution: ตรวจจับว่าราคาอยู่ใกล้ peak/bottom หรือไม่ ก่อนเข้าเทรด
+#
+# Techniques:
+# 1. RSI Divergence - ราคาขึ้น แต่ RSI ลง = peak
+# 2. Volume Exhaustion - ราคาขึ้น แต่ Volume ลด = buying exhaustion
+# 3. Price Extension - ห่างจาก EMA มากเกิน = mean reversion soon
+# 4. Candle Pattern - Shooting Star, Doji, Hammer ที่ extreme
+# 5. ATR Spike - Volatility สูงผิดปกติ = reversal likely
+# 6. Momentum Fading - MACD histogram ลดลง = momentum จบ
+
+_peak_detection_config = {
+    "enabled": True,                              # ✅ เปิด! ป้องกันเข้าที่ peak
+    "block_trade_at_peak": True,                  # 🚫 Block BUY ที่ peak
+    "block_trade_at_bottom": True,                # 🚫 Block SELL ที่ bottom
+    "wait_for_pullback_at_peak": True,            # ⏳ รอ pullback ถ้าเจอ peak
+    "wait_for_bounce_at_bottom": True,            # ⏳ รอ bounce ถ้าเจอ bottom
+    
+    # RSI Thresholds
+    "rsi_overbought": 70,                         # RSI > 70 = overbought
+    "rsi_oversold": 30,                           # RSI < 30 = oversold
+    "rsi_extreme_high": 80,                       # RSI > 80 = extreme peak
+    "rsi_extreme_low": 20,                        # RSI < 20 = extreme bottom
+    
+    # Extension from EMA (% of price)
+    "extension_threshold_pct": 1.5,               # 🔥 ห่าง EMA > 1.5% = overextended
+    "extension_threshold_gold": 1.0,              # 🥇 Gold: ห่าง EMA > 1.0% = overextended
+    
+    # ATR Spike Detection
+    "atr_spike_multiplier": 1.5,                  # ATR > 1.5x average = volatility spike
+    
+    # Volume Exhaustion
+    "volume_exhaustion_threshold": 0.5,           # Volume < 50% average = exhaustion
+    
+    # Confidence Adjustments
+    "confidence_penalty_at_peak": 20,             # 📉 ลด confidence 20% ถ้าเจอ peak
+    "confidence_penalty_near_peak": 10,           # 📉 ลด confidence 10% ถ้าใกล้ peak
+    
+    # Allow override for strong signals
+    "allow_premium_signal_at_peak": False,        # 🚫 แม้ PREMIUM ก็ไม่ให้เข้าที่ peak
+    "min_confidence_override": 95,                # 📈 ถ้า confidence >= 95% ให้เข้าได้ (หายาก)
+}
+
+# 🏔️ Peak Detection Results Cache
+_peak_detection_results = {}  # {symbol: {"extreme": "PEAK", "is_peak": True, "timestamp": datetime, ...}}
+
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
 # ❌ ปิดชั่วคราว! ทำให้พลาดโอกาสเทรดเมื่อราคาพุ่งตรงๆ
 _pullback_config = {
@@ -1047,6 +1096,432 @@ def _save_state():
         
     except Exception as e:
         logger.warning(f"Failed to save state: {e}")
+
+
+
+# =====================
+# 🏔️ PEAK DETECTION FUNCTIONS
+# =====================
+
+async def _run_peak_detection(symbol: str, df, signal: str) -> Dict[str, Any]:
+    """
+    🏔️ Run Peak Detection Analysis
+    
+    ตรวจจับว่าราคาอยู่ใกล้ peak/bottom หรือไม่
+    
+    Returns:
+    - is_peak: True if at peak (don't BUY)
+    - is_bottom: True if at bottom (don't SELL)
+    - can_trade: True if safe to trade in this direction
+    - confidence_adjustment: How much to adjust confidence
+    - reasons: List of detection reasons
+    """
+    global _peak_detection_config, _peak_detection_results, _bot
+    
+    if not _peak_detection_config.get("enabled", True):
+        return {"can_trade": True, "is_peak": False, "is_bottom": False, "reasons": ["Peak detection disabled"]}
+    
+    if df is None or len(df) < 30:
+        return {"can_trade": True, "is_peak": False, "is_bottom": False, "reasons": ["Insufficient data"]}
+    
+    try:
+        close = df['close'].values.astype(np.float32)
+        high = df['high'].values.astype(np.float32)
+        low = df['low'].values.astype(np.float32)
+        volume = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
+        
+        current_price = float(close[-1])
+        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        
+        peak_score = 0  # Positive = peak, Negative = bottom
+        reasons = []
+        indicators = {}
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 1. RSI ANALYSIS + DIVERGENCE
+        # ═══════════════════════════════════════════════════════════════════
+        rsi = _calculate_rsi_simple(close, 14)
+        indicators["rsi"] = float(rsi) if rsi else 50
+        
+        rsi_extreme_high = _peak_detection_config.get("rsi_extreme_high", 80)
+        rsi_extreme_low = _peak_detection_config.get("rsi_extreme_low", 20)
+        rsi_overbought = _peak_detection_config.get("rsi_overbought", 70)
+        rsi_oversold = _peak_detection_config.get("rsi_oversold", 30)
+        
+        if rsi >= rsi_extreme_high:
+            peak_score += 35
+            reasons.append(f"🔴 RSI extreme overbought ({rsi:.1f} > {rsi_extreme_high})")
+        elif rsi >= rsi_overbought:
+            peak_score += 20
+            reasons.append(f"⚠️ RSI overbought ({rsi:.1f} > {rsi_overbought})")
+        elif rsi <= rsi_extreme_low:
+            peak_score -= 35
+            reasons.append(f"🔴 RSI extreme oversold ({rsi:.1f} < {rsi_extreme_low})")
+        elif rsi <= rsi_oversold:
+            peak_score -= 20
+            reasons.append(f"⚠️ RSI oversold ({rsi:.1f} < {rsi_oversold})")
+        
+        # RSI Divergence
+        rsi_div = _detect_rsi_divergence_simple(close, 14)
+        if rsi_div == "BEARISH":
+            peak_score += 25
+            reasons.append("📉 Bearish RSI divergence (hidden peak)")
+        elif rsi_div == "BULLISH":
+            peak_score -= 25
+            reasons.append("📈 Bullish RSI divergence (hidden bottom)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 2. PRICE EXTENSION FROM EMA
+        # ═══════════════════════════════════════════════════════════════════
+        ema20 = _calculate_ema_simple(close, 20)
+        ema50 = _calculate_ema_simple(close, 50)
+        
+        if ema20 > 0 and ema50 > 0:
+            extension_threshold = _peak_detection_config.get("extension_threshold_gold" if is_gold else "extension_threshold_pct", 1.5)
+            
+            extension_from_ema20 = ((current_price - ema20) / ema20) * 100
+            extension_from_ema50 = ((current_price - ema50) / ema50) * 100
+            
+            indicators["extension_ema20_pct"] = extension_from_ema20
+            indicators["extension_ema50_pct"] = extension_from_ema50
+            
+            if extension_from_ema20 > extension_threshold:
+                peak_score += 25
+                reasons.append(f"📈 Price overextended above EMA20 ({extension_from_ema20:.2f}% > {extension_threshold}%)")
+            elif extension_from_ema20 < -extension_threshold:
+                peak_score -= 25
+                reasons.append(f"📉 Price overextended below EMA20 ({extension_from_ema20:.2f}%)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 3. VOLUME EXHAUSTION
+        # ═══════════════════════════════════════════════════════════════════
+        if volume is not None and len(volume) >= 20:
+            avg_volume = float(np.mean(volume[-20:-1]))
+            current_volume = float(volume[-1])
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            indicators["volume_ratio"] = volume_ratio
+            
+            exhaustion_threshold = _peak_detection_config.get("volume_exhaustion_threshold", 0.5)
+            
+            # Rising price + falling volume = buying exhaustion
+            price_rising = close[-1] > close[-5]
+            volume_falling = volume[-1] < volume[-3] < volume[-5] if len(volume) >= 5 else False
+            
+            if price_rising and volume_falling and volume_ratio < exhaustion_threshold:
+                peak_score += 20
+                reasons.append(f"📉 Volume exhaustion on rise (vol={volume_ratio:.2f}x avg)")
+            
+            # Falling price + falling volume = selling exhaustion
+            price_falling = close[-1] < close[-5]
+            if price_falling and volume_falling and volume_ratio < exhaustion_threshold:
+                peak_score -= 20
+                reasons.append(f"📈 Volume exhaustion on fall (vol={volume_ratio:.2f}x avg)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 4. ATR SPIKE DETECTION (Volatility)
+        # ═══════════════════════════════════════════════════════════════════
+        if len(close) >= 20:
+            atr = _calculate_atr_simple(high, low, close, 14)
+            if atr > 0:
+                indicators["atr"] = atr
+                
+                # Calculate average ATR
+                atr_values = []
+                for i in range(-20, -1):
+                    if len(high) >= abs(i):
+                        h_slice = high[i-14:i] if i-14 >= -len(high) else high[:i]
+                        l_slice = low[i-14:i] if i-14 >= -len(low) else low[:i]
+                        c_slice = close[i-14:i] if i-14 >= -len(close) else close[:i]
+                        if len(h_slice) > 0:
+                            atr_values.append(_calculate_atr_simple(h_slice, l_slice, c_slice, min(14, len(h_slice))))
+                
+                if atr_values:
+                    avg_atr = np.mean(atr_values)
+                    atr_ratio = atr / avg_atr if avg_atr > 0 else 1.0
+                    indicators["atr_ratio"] = atr_ratio
+                    
+                    atr_spike_mult = _peak_detection_config.get("atr_spike_multiplier", 1.5)
+                    if atr_ratio > atr_spike_mult:
+                        # ATR spike at high RSI = peak confirmation
+                        if rsi > 60:
+                            peak_score += 15
+                            reasons.append(f"⚡ ATR spike at high RSI (ATR={atr_ratio:.2f}x)")
+                        elif rsi < 40:
+                            peak_score -= 15
+                            reasons.append(f"⚡ ATR spike at low RSI (ATR={atr_ratio:.2f}x)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 5. MACD MOMENTUM
+        # ═══════════════════════════════════════════════════════════════════
+        macd_result = _calculate_macd_simple(close)
+        if macd_result:
+            histogram = macd_result.get("histogram", 0)
+            histogram_prev = macd_result.get("histogram_prev", 0)
+            histogram_prev2 = macd_result.get("histogram_prev2", 0)
+            
+            indicators["macd_histogram"] = histogram
+            
+            # Bullish but fading?
+            if histogram > 0:
+                if histogram < histogram_prev < histogram_prev2:
+                    peak_score += 20
+                    reasons.append("📉 Bullish momentum fading (MACD histogram shrinking)")
+            # Bearish but fading?
+            elif histogram < 0:
+                if histogram > histogram_prev > histogram_prev2:
+                    peak_score -= 20
+                    reasons.append("📈 Bearish momentum fading (MACD histogram recovering)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 6. CANDLE PATTERN DETECTION
+        # ═══════════════════════════════════════════════════════════════════
+        candle_pattern = _detect_extreme_candle_simple(high, low, close)
+        if candle_pattern == "SHOOTING_STAR":
+            peak_score += 15
+            reasons.append("🌠 Shooting star pattern (bearish reversal)")
+        elif candle_pattern == "HAMMER":
+            peak_score -= 15
+            reasons.append("🔨 Hammer pattern (bullish reversal)")
+        elif candle_pattern == "DOJI":
+            if rsi >= rsi_overbought:
+                peak_score += 10
+                reasons.append("⚫ Doji at overbought (indecision at top)")
+            elif rsi <= rsi_oversold:
+                peak_score -= 10
+                reasons.append("⚫ Doji at oversold (indecision at bottom)")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 7. SWING HIGH/LOW DETECTION
+        # ═══════════════════════════════════════════════════════════════════
+        if len(high) >= 20:
+            recent_high = float(np.max(high[-20:]))
+            recent_low = float(np.min(low[-20:]))
+            
+            # At swing high?
+            if current_price >= recent_high * 0.998:
+                peak_score += 20
+                reasons.append("🏔️ At recent swing high")
+            # At swing low?
+            elif current_price <= recent_low * 1.002:
+                peak_score -= 20
+                reasons.append("🏜️ At recent swing low")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # FINAL CALCULATION
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Determine extreme state
+        is_peak = peak_score >= 40
+        is_near_peak = peak_score >= 25
+        is_bottom = peak_score <= -40
+        is_near_bottom = peak_score <= -25
+        
+        # Determine if can trade
+        can_trade = True
+        confidence_adjustment = 0
+        
+        is_buy_signal = "BUY" in signal.upper()
+        is_sell_signal = "SELL" in signal.upper()
+        
+        if is_buy_signal:
+            if is_peak:
+                can_trade = not _peak_detection_config.get("block_trade_at_peak", True)
+                confidence_adjustment = -_peak_detection_config.get("confidence_penalty_at_peak", 20)
+                reasons.append("🚫 BLOCKED: BUY signal at PEAK!")
+            elif is_near_peak:
+                confidence_adjustment = -_peak_detection_config.get("confidence_penalty_near_peak", 10)
+                reasons.append("⚠️ WARNING: BUY signal near peak")
+        
+        if is_sell_signal:
+            if is_bottom:
+                can_trade = not _peak_detection_config.get("block_trade_at_bottom", True)
+                confidence_adjustment = -_peak_detection_config.get("confidence_penalty_at_peak", 20)
+                reasons.append("🚫 BLOCKED: SELL signal at BOTTOM!")
+            elif is_near_bottom:
+                confidence_adjustment = -_peak_detection_config.get("confidence_penalty_near_peak", 10)
+                reasons.append("⚠️ WARNING: SELL signal near bottom")
+        
+        # Calculate suggested wait (pullback/bounce amount)
+        atr_value = indicators.get("atr", current_price * 0.002)
+        suggested_wait = atr_value * 0.3  # Wait for 0.3 ATR pullback
+        
+        result = {
+            "symbol": symbol,
+            "is_peak": is_peak,
+            "is_near_peak": is_near_peak,
+            "is_bottom": is_bottom,
+            "is_near_bottom": is_near_bottom,
+            "can_trade": can_trade,
+            "peak_score": peak_score,
+            "confidence_adjustment": confidence_adjustment,
+            "wait_for_pullback": is_peak or is_near_peak,
+            "wait_for_bounce": is_bottom or is_near_bottom,
+            "suggested_wait": round(suggested_wait, 2),
+            "indicators": indicators,
+            "reasons": reasons,
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+        # Cache result
+        _peak_detection_results[symbol] = result
+        
+        # Log if peak/bottom detected
+        if is_peak or is_bottom:
+            logger.warning(f"🏔️ PEAK DETECTION: {symbol} | Score={peak_score} | Peak={is_peak} | Bottom={is_bottom}")
+            for reason in reasons[:3]:  # Log top 3 reasons
+                logger.warning(f"   {reason}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Peak detection error for {symbol}: {e}")
+        return {"can_trade": True, "is_peak": False, "is_bottom": False, "reasons": [f"Error: {e}"]}
+
+
+def _calculate_rsi_simple(close: np.ndarray, period: int = 14) -> float:
+    """Calculate current RSI value"""
+    if len(close) < period + 1:
+        return 50.0
+    
+    delta = np.diff(close[-period-1:])
+    gains = np.where(delta > 0, delta, 0)
+    losses = np.where(delta < 0, -delta, 0)
+    
+    avg_gain = np.mean(gains)
+    avg_loss = np.mean(losses)
+    
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def _calculate_ema_simple(close: np.ndarray, period: int) -> float:
+    """Calculate current EMA value"""
+    if len(close) < period:
+        return 0.0
+    
+    multiplier = 2 / (period + 1)
+    ema = float(np.mean(close[:period]))
+    
+    for price in close[period:]:
+        ema = (float(price) - ema) * multiplier + ema
+    
+    return ema
+
+
+def _calculate_atr_simple(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> float:
+    """Calculate current ATR value"""
+    if len(close) < period + 1:
+        return 0.0
+    
+    tr_values = []
+    for i in range(-period, 0):
+        if i-1 >= -len(close):
+            h = float(high[i])
+            l = float(low[i])
+            c_prev = float(close[i-1])
+            tr = max(h - l, abs(h - c_prev), abs(l - c_prev))
+            tr_values.append(tr)
+    
+    return float(np.mean(tr_values)) if tr_values else 0.0
+
+
+def _calculate_macd_simple(close: np.ndarray) -> Optional[Dict]:
+    """Calculate MACD histogram"""
+    if len(close) < 35:
+        return None
+    
+    ema12 = _calculate_ema_simple(close, 12)
+    ema26 = _calculate_ema_simple(close, 26)
+    macd_line = ema12 - ema26
+    
+    # Calculate signal line (9-period EMA of MACD)
+    macd_values = []
+    for i in range(-26, 0):
+        if i + 26 < len(close):
+            e12 = _calculate_ema_simple(close[:i] if i < 0 else close, 12)
+            e26 = _calculate_ema_simple(close[:i] if i < 0 else close, 26)
+            macd_values.append(e12 - e26)
+    
+    if len(macd_values) >= 9:
+        signal_line = float(np.mean(macd_values[-9:]))
+        histogram = macd_line - signal_line
+        
+        # Calculate previous histograms
+        hist_prev = macd_values[-2] - signal_line if len(macd_values) >= 2 else histogram
+        hist_prev2 = macd_values[-3] - signal_line if len(macd_values) >= 3 else hist_prev
+        
+        return {
+            "macd_line": macd_line,
+            "signal_line": signal_line,
+            "histogram": histogram,
+            "histogram_prev": hist_prev,
+            "histogram_prev2": hist_prev2,
+        }
+    
+    return None
+
+
+def _detect_rsi_divergence_simple(close: np.ndarray, period: int = 14) -> str:
+    """Detect RSI divergence (simplified)"""
+    if len(close) < period + 10:
+        return "NONE"
+    
+    # Compare current vs 10 bars ago
+    rsi_now = _calculate_rsi_simple(close, period)
+    rsi_10_ago = _calculate_rsi_simple(close[:-10], period)
+    
+    price_now = float(close[-1])
+    price_10_ago = float(close[-11])
+    
+    # Bearish divergence: Price up, RSI down
+    if price_now > price_10_ago * 1.005 and rsi_now < rsi_10_ago - 5:
+        return "BEARISH"
+    
+    # Bullish divergence: Price down, RSI up
+    if price_now < price_10_ago * 0.995 and rsi_now > rsi_10_ago + 5:
+        return "BULLISH"
+    
+    return "NONE"
+
+
+def _detect_extreme_candle_simple(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> str:
+    """Detect extreme candle patterns (last candle)"""
+    if len(close) < 2:
+        return "NONE"
+    
+    h = float(high[-1])
+    l = float(low[-1])
+    c = float(close[-1])
+    o = float(close[-2])  # Use previous close as approximate open
+    
+    body = abs(c - o)
+    upper_shadow = h - max(c, o)
+    lower_shadow = min(c, o) - l
+    total_range = h - l
+    
+    if total_range == 0:
+        return "NONE"
+    
+    body_ratio = body / total_range
+    upper_shadow_ratio = upper_shadow / total_range
+    lower_shadow_ratio = lower_shadow / total_range
+    
+    # Doji: Very small body
+    if body_ratio < 0.1:
+        return "DOJI"
+    
+    # Shooting Star: Small body at bottom, long upper shadow
+    if upper_shadow_ratio > 0.6 and body_ratio < 0.3 and lower_shadow_ratio < 0.1:
+        return "SHOOTING_STAR"
+    
+    # Hammer: Small body at top, long lower shadow
+    if lower_shadow_ratio > 0.6 and body_ratio < 0.3 and upper_shadow_ratio < 0.1:
+        return "HAMMER"
+    
+    return "NONE"
 
 
 def _load_state() -> Optional[Dict]:
@@ -4320,6 +4795,33 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
         logger.warning(f"🛡️ ANTI-WIPEOUT: {symbol} - {trend_reason}")
         return False, trend_reason
     
+    # 🆕 6.5. 🏔️ PEAK DETECTION CHECK - ห้ามเข้าที่ peak/bottom!
+    if _peak_detection_config.get("enabled", True):
+        # Get data for peak detection
+        try:
+            if _bot and _bot.data_provider:
+                df = await _bot.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+                if df is not None and len(df) >= 30:
+                    peak_result = await _run_peak_detection(symbol, df, signal)
+                    
+                    if not peak_result.get("can_trade", True):
+                        logger.warning(f"🏔️ PEAK DETECTION: {symbol} - Trade blocked!")
+                        for reason in peak_result.get("reasons", [])[:3]:
+                            logger.warning(f"   {reason}")
+                        return False, f"PEAK DETECTION: {'At PEAK' if peak_result.get('is_peak') else 'At BOTTOM'} - wait for {'pullback' if peak_result.get('is_peak') else 'bounce'}"
+                    
+                    # Adjust confidence if near peak/bottom
+                    confidence_adj = peak_result.get("confidence_adjustment", 0)
+                    if confidence_adj < 0:
+                        adjusted_confidence = confidence + confidence_adj
+                        logger.info(f"🏔️ {symbol}: Confidence adjusted {confidence:.1f}% → {adjusted_confidence:.1f}% (peak warning)")
+                        
+                        # Re-check confidence after adjustment
+                        if adjusted_confidence < min_confidence:
+                            return False, f"PEAK ADJUSTED: Confidence {adjusted_confidence:.1f}% < {min_confidence}% after peak penalty"
+        except Exception as e:
+            logger.warning(f"Peak detection error: {e}")
+    
     # 7. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า (ถ้าเปิดใช้งาน)
     if _pullback_config.get("enabled", False):
         current_price = signal_data.get("current_price", 0)
@@ -7511,4 +8013,342 @@ async def set_anti_wipeout_preset(preset: str):
             "$1000 port": f"max_lot={config['gold_max_lot_per_1000']:.2f}, max_risk=${1000 * config['max_risk_per_trade_percent'] / 100:.2f}",
             "$10000 port": f"max_lot={10 * config['gold_max_lot_per_1000']:.2f}, max_risk=${10000 * config['max_risk_per_trade_percent'] / 100:.2f}",
         }
+    }
+
+
+# =====================
+# 🏔️ PEAK DETECTION - หลีกเลี่ยงการเข้าที่ Peak!
+# =====================
+
+@router.get("/peak-detection")
+async def get_peak_detection_config():
+    """
+    🏔️ Get Peak Detection configuration
+    
+    Peak Detection = ตรวจจับว่าราคาอยู่ใกล้ peak/bottom หรือไม่
+    - ถ้าอยู่ที่ peak → ไม่ควร BUY (รอ pullback)
+    - ถ้าอยู่ที่ bottom → ไม่ควร SELL (รอ bounce)
+    
+    Techniques:
+    1. RSI Divergence - ราคาขึ้น แต่ RSI ลง = hidden peak
+    2. Volume Exhaustion - ราคาขึ้น แต่ Volume ลด = buying exhaustion
+    3. Price Extension - ห่างจาก EMA มากเกิน = mean reversion soon
+    4. ATR Spike - Volatility สูงผิดปกติ = reversal likely
+    5. MACD Momentum - histogram ลดลง = momentum จบ
+    """
+    global _peak_detection_config, _peak_detection_results
+    
+    return {
+        "config": _peak_detection_config,
+        "cached_results": _peak_detection_results,
+        "description": {
+            "enabled": "เปิด/ปิด Peak Detection",
+            "block_trade_at_peak": "Block BUY ถ้าอยู่ที่ peak",
+            "block_trade_at_bottom": "Block SELL ถ้าอยู่ที่ bottom",
+            "rsi_overbought": "RSI ที่ถือว่า overbought",
+            "rsi_extreme_high": "RSI ที่ถือว่า extreme peak",
+            "extension_threshold_pct": "% ห่างจาก EMA ที่ถือว่า overextended",
+            "atr_spike_multiplier": "ATR > Xx average = volatility spike",
+            "confidence_penalty_at_peak": "% ลด confidence ถ้าเจอ peak",
+        },
+        "techniques": [
+            "RSI Divergence",
+            "Volume Exhaustion",
+            "Price Extension from EMA",
+            "ATR Spike Detection",
+            "MACD Momentum Fading",
+            "Candle Patterns (Shooting Star, Hammer, Doji)",
+            "Swing High/Low Detection",
+        ],
+    }
+
+
+@router.post("/peak-detection/toggle")
+async def toggle_peak_detection(enabled: bool = True):
+    """
+    🏔️ Enable/Disable Peak Detection
+    
+    - enabled=true: ตรวจจับ peak/bottom ก่อนเทรด (แนะนำ!)
+    - enabled=false: ไม่ตรวจจับ (เสี่ยง!)
+    """
+    global _peak_detection_config
+    
+    _peak_detection_config["enabled"] = enabled
+    
+    status = "ENABLED ✅ (Safe)" if enabled else "DISABLED ⚠️ (Risky!)"
+    logger.info(f"🏔️ Peak Detection: {status}")
+    
+    return {
+        "status": "success",
+        "peak_detection_enabled": enabled,
+        "message": f"Peak Detection {status}",
+        "warning": "⚠️ May enter at peaks and get stopped out!" if not enabled else None
+    }
+
+
+@router.post("/peak-detection/configure")
+async def configure_peak_detection(
+    rsi_overbought: int = None,
+    rsi_oversold: int = None,
+    rsi_extreme_high: int = None,
+    rsi_extreme_low: int = None,
+    extension_threshold_pct: float = None,
+    extension_threshold_gold: float = None,
+    atr_spike_multiplier: float = None,
+    volume_exhaustion_threshold: float = None,
+    confidence_penalty_at_peak: int = None,
+    confidence_penalty_near_peak: int = None,
+    block_trade_at_peak: bool = None,
+    block_trade_at_bottom: bool = None,
+):
+    """
+    🏔️ Configure Peak Detection settings
+    
+    RSI Settings:
+    - rsi_overbought: RSI ที่ถือว่า overbought (default: 70)
+    - rsi_oversold: RSI ที่ถือว่า oversold (default: 30)
+    - rsi_extreme_high: RSI ที่ถือว่า extreme peak (default: 80)
+    - rsi_extreme_low: RSI ที่ถือว่า extreme bottom (default: 20)
+    
+    Extension:
+    - extension_threshold_pct: % ห่างจาก EMA ที่ถือว่า overextended (default: 1.5)
+    - extension_threshold_gold: % สำหรับ Gold โดยเฉพาะ (default: 1.0)
+    
+    Volatility:
+    - atr_spike_multiplier: ATR > Xx average = spike (default: 1.5)
+    - volume_exhaustion_threshold: Volume < X% average = exhaustion (default: 0.5)
+    
+    Actions:
+    - block_trade_at_peak: Block BUY ที่ peak
+    - block_trade_at_bottom: Block SELL ที่ bottom
+    - confidence_penalty_at_peak: % ลด confidence ที่ peak
+    - confidence_penalty_near_peak: % ลด confidence ใกล้ peak
+    """
+    global _peak_detection_config
+    
+    changes = []
+    
+    if rsi_overbought is not None:
+        _peak_detection_config["rsi_overbought"] = max(60, min(85, rsi_overbought))
+        changes.append(f"rsi_overbought: {_peak_detection_config['rsi_overbought']}")
+    
+    if rsi_oversold is not None:
+        _peak_detection_config["rsi_oversold"] = max(15, min(40, rsi_oversold))
+        changes.append(f"rsi_oversold: {_peak_detection_config['rsi_oversold']}")
+    
+    if rsi_extreme_high is not None:
+        _peak_detection_config["rsi_extreme_high"] = max(75, min(95, rsi_extreme_high))
+        changes.append(f"rsi_extreme_high: {_peak_detection_config['rsi_extreme_high']}")
+    
+    if rsi_extreme_low is not None:
+        _peak_detection_config["rsi_extreme_low"] = max(5, min(25, rsi_extreme_low))
+        changes.append(f"rsi_extreme_low: {_peak_detection_config['rsi_extreme_low']}")
+    
+    if extension_threshold_pct is not None:
+        _peak_detection_config["extension_threshold_pct"] = max(0.5, min(5.0, extension_threshold_pct))
+        changes.append(f"extension_threshold: {_peak_detection_config['extension_threshold_pct']}%")
+    
+    if extension_threshold_gold is not None:
+        _peak_detection_config["extension_threshold_gold"] = max(0.3, min(3.0, extension_threshold_gold))
+        changes.append(f"extension_gold: {_peak_detection_config['extension_threshold_gold']}%")
+    
+    if atr_spike_multiplier is not None:
+        _peak_detection_config["atr_spike_multiplier"] = max(1.2, min(3.0, atr_spike_multiplier))
+        changes.append(f"atr_spike: {_peak_detection_config['atr_spike_multiplier']}x")
+    
+    if volume_exhaustion_threshold is not None:
+        _peak_detection_config["volume_exhaustion_threshold"] = max(0.2, min(0.8, volume_exhaustion_threshold))
+        changes.append(f"volume_exhaustion: {_peak_detection_config['volume_exhaustion_threshold']}")
+    
+    if confidence_penalty_at_peak is not None:
+        _peak_detection_config["confidence_penalty_at_peak"] = max(5, min(40, confidence_penalty_at_peak))
+        changes.append(f"penalty_at_peak: -{_peak_detection_config['confidence_penalty_at_peak']}%")
+    
+    if confidence_penalty_near_peak is not None:
+        _peak_detection_config["confidence_penalty_near_peak"] = max(2, min(20, confidence_penalty_near_peak))
+        changes.append(f"penalty_near_peak: -{_peak_detection_config['confidence_penalty_near_peak']}%")
+    
+    if block_trade_at_peak is not None:
+        _peak_detection_config["block_trade_at_peak"] = block_trade_at_peak
+        changes.append(f"block_at_peak: {block_trade_at_peak}")
+    
+    if block_trade_at_bottom is not None:
+        _peak_detection_config["block_trade_at_bottom"] = block_trade_at_bottom
+        changes.append(f"block_at_bottom: {block_trade_at_bottom}")
+    
+    logger.info(f"🏔️ Peak Detection configured: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _peak_detection_config
+    }
+
+
+@router.get("/peak-detection/{symbol}")
+async def get_peak_detection_for_symbol(symbol: str):
+    """
+    🏔️ Get Peak Detection analysis for a specific symbol
+    
+    Returns:
+    - is_peak: True if at peak (don't BUY)
+    - is_bottom: True if at bottom (don't SELL)
+    - peak_score: Score indicating how "peak-like" the situation is
+    - reasons: List of reasons for the detection
+    - indicators: RSI, EMA extension, Volume ratio, ATR, etc.
+    """
+    global _bot, _peak_detection_config, _peak_detection_results
+    
+    # Check cache first
+    cached = _peak_detection_results.get(symbol)
+    if cached:
+        cache_age = (datetime.now() - datetime.fromisoformat(cached.get("timestamp", datetime.now().isoformat()))).total_seconds()
+        if cache_age < 60:  # Cache valid for 60 seconds
+            return {
+                "status": "ok",
+                "source": "cache",
+                "result": cached,
+            }
+    
+    # Run fresh analysis
+    if not _bot or not _bot.data_provider:
+        return {
+            "status": "error",
+            "message": "Bot not initialized. Start bot first.",
+            "symbol": symbol,
+        }
+    
+    try:
+        df = await _bot.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
+        
+        if df is None or len(df) < 30:
+            return {
+                "status": "error",
+                "message": "Insufficient data for analysis",
+                "symbol": symbol,
+            }
+        
+        # Get current signal for context
+        signal = _bot_status.get("last_signal", {}).get(symbol, {}).get("signal", "WAIT")
+        
+        # Run peak detection
+        result = await _run_peak_detection(symbol, df, signal)
+        
+        return {
+            "status": "ok",
+            "source": "fresh",
+            "symbol": symbol,
+            "result": result,
+            "recommendations": _get_peak_recommendations(result),
+        }
+        
+    except Exception as e:
+        logger.error(f"Peak detection error for {symbol}: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "symbol": symbol,
+        }
+
+
+def _get_peak_recommendations(result: Dict) -> List[str]:
+    """Generate trading recommendations based on peak detection"""
+    recommendations = []
+    
+    if result.get("is_peak"):
+        recommendations.append("🚫 Do NOT BUY now - price at PEAK")
+        recommendations.append(f"⏳ Wait for pullback of ~${result.get('suggested_wait', 0):.2f}")
+        recommendations.append("📉 Consider taking profit on existing longs")
+    elif result.get("is_near_peak"):
+        recommendations.append("⚠️ Caution with BUY - near peak")
+        recommendations.append("📊 Reduce position size if entering")
+        recommendations.append("🎯 Use tighter stop loss")
+    elif result.get("is_bottom"):
+        recommendations.append("🚫 Do NOT SELL now - price at BOTTOM")
+        recommendations.append(f"⏳ Wait for bounce of ~${result.get('suggested_wait', 0):.2f}")
+        recommendations.append("📈 Consider taking profit on existing shorts")
+    elif result.get("is_near_bottom"):
+        recommendations.append("⚠️ Caution with SELL - near bottom")
+        recommendations.append("📊 Reduce position size if entering")
+        recommendations.append("🎯 Use tighter stop loss")
+    else:
+        recommendations.append("✅ No extreme detected - normal trading")
+        recommendations.append("📊 Follow regular signal quality")
+    
+    return recommendations
+
+
+@router.post("/peak-detection/preset/{preset}")
+async def set_peak_detection_preset(preset: str):
+    """
+    🏔️ Set Peak Detection Preset
+    
+    Presets:
+    - strict: Block trades at any peak/bottom signal (safest)
+    - balanced: Block at strong peaks, warn at moderate (recommended)
+    - relaxed: Only warn, don't block (more trades, more risk)
+    """
+    global _peak_detection_config
+    
+    presets = {
+        "strict": {
+            "rsi_overbought": 65,
+            "rsi_oversold": 35,
+            "rsi_extreme_high": 75,
+            "rsi_extreme_low": 25,
+            "extension_threshold_pct": 1.0,
+            "extension_threshold_gold": 0.7,
+            "atr_spike_multiplier": 1.3,
+            "confidence_penalty_at_peak": 25,
+            "confidence_penalty_near_peak": 15,
+            "block_trade_at_peak": True,
+            "block_trade_at_bottom": True,
+            "description": "🔒 Strict: Block all peaks/bottoms (safest, fewer trades)"
+        },
+        "balanced": {
+            "rsi_overbought": 70,
+            "rsi_oversold": 30,
+            "rsi_extreme_high": 80,
+            "rsi_extreme_low": 20,
+            "extension_threshold_pct": 1.5,
+            "extension_threshold_gold": 1.0,
+            "atr_spike_multiplier": 1.5,
+            "confidence_penalty_at_peak": 20,
+            "confidence_penalty_near_peak": 10,
+            "block_trade_at_peak": True,
+            "block_trade_at_bottom": True,
+            "description": "⚖️ Balanced: Block strong peaks, warn at moderate (recommended)"
+        },
+        "relaxed": {
+            "rsi_overbought": 75,
+            "rsi_oversold": 25,
+            "rsi_extreme_high": 85,
+            "rsi_extreme_low": 15,
+            "extension_threshold_pct": 2.0,
+            "extension_threshold_gold": 1.5,
+            "atr_spike_multiplier": 1.8,
+            "confidence_penalty_at_peak": 15,
+            "confidence_penalty_near_peak": 5,
+            "block_trade_at_peak": False,  # Only warn, don't block
+            "block_trade_at_bottom": False,
+            "description": "📊 Relaxed: Warn only, more trades but higher risk"
+        }
+    }
+    
+    if preset not in presets:
+        return {"status": "error", "message": f"Unknown preset: {preset}. Available: {list(presets.keys())}"}
+    
+    config = presets[preset]
+    
+    for key, value in config.items():
+        if key != "description":
+            _peak_detection_config[key] = value
+    
+    logger.info(f"🏔️ Preset '{preset}' activated: {config['description']}")
+    
+    return {
+        "status": "success",
+        "preset": preset,
+        "description": config["description"],
+        "config": _peak_detection_config
     }
