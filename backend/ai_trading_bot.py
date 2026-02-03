@@ -1007,95 +1007,146 @@ class AITradingBot:
                     return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ SL/TP CALCULATION - FULLY DYNAMIC (Balance + ATR Adaptive!)
+            # 🛡️ SL/TP CALCULATION - SIGNAL-BASED DYNAMIC (Smart & Adaptive!)
             # ═══════════════════════════════════════════════════════════════════════════════
             # 
-            # 🎯 PHILOSOPHY:
-            # - SL ต้องกว้างพอให้ราคา "หายใจ" ได้ (>= ATR)
-            # - Lot size ลดลงเพื่อให้ risk คงที่ (1-2% of balance)
-            # - ไม่ clamp SL แคบ → ลด lot แทน!
+            # 🎯 NEW PHILOSOPHY: SL/TP ปรับตามความชัดเจนของสัญญาณ!
+            # 
+            # ยิ่งสัญญาณชัด → SL แคบลง, TP กว้างขึ้น (R:R ดีมาก)
+            # สัญญาณอ่อน → SL กว้างขึ้น, TP ก็ต้องกว้างตาม
             #
-            # 📊 FORMULA:
-            # - SL = 1.0-1.5x ATR (ขั้นต่ำที่ให้ราคา swing ได้)
-            # - TP = 1.5-2.0x SL (R:R >= 1.5)
-            # - Lot = (Balance × Risk%) / (SL × Point_Value)
+            # 📊 SIGNAL CLARITY FACTORS:
+            # 1. Score Gap: ยิ่ง gap มาก ยิ่งมั่นใจ
+            # 2. Quality Level: PREMIUM > HIGH > MEDIUM > LOW
+            # 3. Trend Strength: STRONG > MODERATE > WEAK
+            # 4. Session: OVERLAP > LONDON/NY > ASIAN
             #
-            # 💰 BALANCE SCALING:
-            # - Small balance ($200-$500): ใช้ minimum lot (0.01) + wide SL
-            # - Medium balance ($500-$5000): Risk 1% + ATR-based SL
-            # - Large balance ($5000+): Risk 1-2% + optimal SL
+            # 🎯 DYNAMIC MULTIPLIERS:
+            # | Quality  | Gap | SL Mult | TP Mult | R:R   |
+            # |----------|-----|---------|---------|-------|
+            # | PREMIUM  | 5+  | 0.5x    | 2.5x    | 1:5.0 |
+            # | HIGH     | 4   | 0.6x    | 2.0x    | 1:3.3 |
+            # | MEDIUM   | 3   | 0.7x    | 1.5x    | 1:2.1 |
+            # | LOW      | 2   | 0.8x    | 1.2x    | 1:1.5 |
             #
             
             if is_gold:
-                # 📊 DYNAMIC SL BASED ON ATR AND BALANCE
+                # ═══════════════════════════════════════════════════════════════════
+                # 🎯 SIGNAL-BASED SL/TP MULTIPLIERS
+                # ═══════════════════════════════════════════════════════════════════
                 
+                # 📊 Base multipliers by Quality
+                quality_multipliers = {
+                    "PREMIUM": {"sl": 0.5, "tp": 2.5},  # Best signals: tight SL, wide TP
+                    "HIGH":    {"sl": 0.6, "tp": 2.0},
+                    "MEDIUM":  {"sl": 0.7, "tp": 1.5},
+                    "LOW":     {"sl": 0.8, "tp": 1.2},
+                }
+                
+                base_mults = quality_multipliers.get(quality, {"sl": 0.8, "tp": 1.2})
+                sl_mult_from_quality = base_mults["sl"]
+                tp_mult_from_quality = base_mults["tp"]
+                
+                # 📊 Adjust by Score Gap (more gap = more confident)
+                if score_gap >= 6:
+                    gap_sl_adj = -0.1   # Reduce SL by 10%
+                    gap_tp_adj = 0.5    # Increase TP by 50%
+                elif score_gap >= 5:
+                    gap_sl_adj = -0.05
+                    gap_tp_adj = 0.3
+                elif score_gap >= 4:
+                    gap_sl_adj = 0
+                    gap_tp_adj = 0.2
+                elif score_gap >= 3:
+                    gap_sl_adj = 0.05   # Slightly wider SL
+                    gap_tp_adj = 0.1
+                else:  # Gap 2
+                    gap_sl_adj = 0.1    # Wider SL for uncertain signals
+                    gap_tp_adj = 0
+                
+                # 📊 Adjust by Trend Strength
+                if strong_uptrend or strong_downtrend:
+                    trend_tp_adj = 0.3  # Strong trend = extend TP
+                    trend_sl_adj = -0.05
+                elif has_uptrend or has_downtrend:
+                    trend_tp_adj = 0.1
+                    trend_sl_adj = 0
+                else:  # Ranging
+                    trend_tp_adj = -0.2  # No trend = reduce TP
+                    trend_sl_adj = 0.1   # And widen SL
+                
+                # 📊 Adjust by Session
+                if overlap_session:
+                    session_sl_adj = -0.1  # Best session = tighter SL
+                    session_tp_adj = 0.2
+                elif london_session or ny_session:
+                    session_sl_adj = 0
+                    session_tp_adj = 0.1
+                else:  # Asian
+                    session_sl_adj = 0.1   # Asian = wider SL
+                    session_tp_adj = -0.1
+                
+                # 📊 Calculate final multipliers
+                sl_multiplier = max(0.3, min(1.2, sl_mult_from_quality + gap_sl_adj + trend_sl_adj + session_sl_adj))
+                tp_multiplier = max(1.0, min(3.5, tp_mult_from_quality + gap_tp_adj + trend_tp_adj + session_tp_adj))
+                
+                # M15 adjustment: tighter for scalping
                 if is_m15:
-                    # 🥇 M15 SCALPING: Tighter SL but still respect ATR
-                    sl_multiplier = 1.2  # 1.2x ATR for SL
-                    tp_multiplier = 1.0  # TP = 1.0x SL (R:R = 1:1 for scalping)
-                else:
-                    # 🥇 H1: Use full ATR for SL (let price breathe!)
-                    sl_multiplier = 1.0  # 1.0x ATR for SL
-                    tp_multiplier = 1.5  # TP = 1.5x SL (R:R = 1:1.5)
+                    sl_multiplier = min(sl_multiplier * 1.2, 1.0)  # Slightly wider for M15
+                    tp_multiplier = max(tp_multiplier * 0.7, 1.0)  # Shorter TP for scalping
                 
                 # 📊 Calculate ATR-based SL/TP
                 sl_distance = atr * sl_multiplier
-                tp_distance = sl_distance * tp_multiplier
+                tp_distance = atr * tp_multiplier
+                
+                # 📊 Ensure minimum R:R based on quality
+                min_rr_by_quality = {
+                    "PREMIUM": 2.0,
+                    "HIGH": 1.5,
+                    "MEDIUM": 1.2,
+                    "LOW": 1.0,
+                }
+                min_rr = min_rr_by_quality.get(quality, 1.0)
+                
+                actual_rr = tp_distance / sl_distance if sl_distance > 0 else 1.0
+                if actual_rr < min_rr:
+                    tp_distance = sl_distance * min_rr
+                    logger.info(f"   📊 R:R boosted: {actual_rr:.2f} → {min_rr:.2f}")
                 
                 # ═══════════════════════════════════════════════════════════════════
-                # 💰 BALANCE-AWARE LIMITS - ยืดหยุ่นตาม port size!
+                # 💰 BALANCE-AWARE LIMITS
                 # ═══════════════════════════════════════════════════════════════════
-                # 
-                # Small balance: ให้ SL กว้างได้ (ลด lot แทน)
-                # Large balance: ให้ SL optimal ตาม ATR
-                #
-                # Max SL % ปรับตาม balance:
-                # - $200-$500: max 3% of price (รองรับ ATR สูง, lot = 0.01)
-                # - $500-$2000: max 2.5% of price
-                # - $2000-$10000: max 2% of price
-                # - $10000+: max 1.5% of price (มี lot พอ ไม่ต้อง SL กว้างมาก)
                 
                 if balance < 500:
-                    # 💸 Micro account: ให้ SL กว้างมาก (ลด lot เหลือ 0.01)
-                    min_sl_pct = 0.3   # min 0.3%
-                    max_sl_pct = 3.0   # max 3% (~$141 at $4700)
-                    logger.info(f"   💸 MICRO ACCOUNT (${balance:.0f}): Wide SL allowed (up to {max_sl_pct}%)")
-                elif balance < 2000:
-                    # 💵 Small account
-                    min_sl_pct = 0.25
-                    max_sl_pct = 2.5   # max 2.5% (~$117 at $4700)
-                elif balance < 10000:
-                    # 💰 Medium account
                     min_sl_pct = 0.2
-                    max_sl_pct = 2.0   # max 2% (~$94 at $4700)
-                else:
-                    # 🏦 Large account
+                    max_sl_pct = 1.5   # Reduced from 3% - prevent huge SL
+                elif balance < 2000:
                     min_sl_pct = 0.15
-                    max_sl_pct = 1.5   # max 1.5% (~$70 at $4700)
+                    max_sl_pct = 1.2
+                elif balance < 10000:
+                    min_sl_pct = 0.1
+                    max_sl_pct = 1.0
+                else:
+                    min_sl_pct = 0.1
+                    max_sl_pct = 0.8
                 
                 min_sl = current_price * (min_sl_pct / 100)
                 max_sl = current_price * (max_sl_pct / 100)
                 
-                # 📊 ATR Validation: ถ้า ATR > max_sl → log warning แต่ใช้ ATR
-                if sl_distance > max_sl:
-                    logger.warning(f"   ⚠️ ATR (${sl_distance:.2f}) > max_sl (${max_sl:.2f}) - Using ATR-based SL!")
-                    logger.warning(f"   ⚠️ Lot will be reduced to maintain risk. Wide SL = fewer SL hits!")
-                    # ไม่ clamp! ใช้ ATR-based SL แล้วลด lot แทน
-                    # sl_distance = max_sl  # ← ลบออก! ไม่ clamp
+                # Apply limits
+                sl_distance = max(min_sl, min(sl_distance, max_sl))
                 
-                # Apply only MINIMUM limit (ไม่ clamp maximum!)
-                sl_distance = max(min_sl, sl_distance)
-                tp_distance = sl_distance * tp_multiplier
+                # Recalculate TP to maintain R:R after SL clamping
+                actual_rr_after_clamp = tp_distance / sl_distance if sl_distance > 0 else 1.0
+                if actual_rr_after_clamp < min_rr:
+                    tp_distance = sl_distance * min_rr
                 
-                # 📊 Ensure minimum R:R of 1.0 (TP >= SL)
-                if tp_distance < sl_distance:
-                    tp_distance = sl_distance * 1.0  # Minimum 1:1 R:R
-                
-                # 🔔 Log the calculation for debugging
-                logger.info(f"   📊 SL/TP CALC: ATR=${atr:.2f}, Balance=${balance:.0f}")
-                logger.info(f"   📊 SL_mult={sl_multiplier}x, TP_mult={tp_multiplier}x")
-                logger.info(f"   📊 Limits: min_sl=${min_sl:.2f} ({min_sl_pct}%), max_sl=${max_sl:.2f} ({max_sl_pct}%)")
-                logger.info(f"   📊 Final: SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=1:{tp_distance/sl_distance:.2f}")
+                # 🔔 Log the calculation
+                logger.info(f"   🎯 SIGNAL-BASED SL/TP:")
+                logger.info(f"      Quality={quality}, Gap={score_gap}, Trend={'STRONG' if strong_uptrend or strong_downtrend else 'MODERATE' if has_uptrend or has_downtrend else 'RANGE'}")
+                logger.info(f"      SL_mult={sl_multiplier:.2f}x ATR, TP_mult={tp_multiplier:.2f}x ATR")
+                logger.info(f"      ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}")
+                logger.info(f"      R:R = 1:{tp_distance/sl_distance:.2f} (min required: 1:{min_rr:.1f})")
                 
                 # 💡 Calculate expected lot size (for info)
                 point_value = 100.0  # $100 per $1 move per lot for gold
