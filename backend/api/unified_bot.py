@@ -228,14 +228,16 @@ def _release_trade_lock(symbol: str):
 _last_traded_signal = {}      # {symbol: {"signal": "BUY", "timestamp": datetime, "signal_id": "hash"}}
 _open_positions = {}          # {symbol: True/False}
 _trade_cooldown_seconds = 300  # 🔥 5 นาที cooldown! (เทรดบ่อยขึ้น!)
+_loss_cooldown_multiplier = 2  # 🔥 NEW: หลังแพ้ cooldown เพิ่มเป็น 2 เท่า!
 
 # 🚨 MAX TRADES PER DAY - ป้องกันเทรดมากเกินไป!
 _daily_trade_limit = {
     "enabled": True,
-    "max_trades_per_day": 20,           # 🔥 เพิ่มเป็น 20 เทรด/วัน!
-    "max_losing_streak": 3,             # 🔥 แพ้ติดต่อกัน 3 ครั้ง = หยุด!
-    "max_daily_loss_percent": 5.0,      # 🔥 ขาดทุน 5% ของ balance = หยุด!
-    "pause_after_loss_minutes": 30,     # 🔥 หยุด 30 นาทีหลังแพ้ติดต่อกัน
+    "max_trades_per_day": 50,           # 🔥 เพิ่มเป็น 50 เทรด/วัน!
+    "max_losing_streak": 999,           # ❌ ปิด! ไม่ block เมื่อแพ้ติดกัน (เสียดายสัญญาณ)
+    "max_daily_loss_percent": 10.0,     # 🔥 ขาดทุน 10% ของ balance = หยุด!
+    "pause_after_loss_minutes": 0,      # ❌ ปิด! ไม่ pause หลังแพ้ (ให้เทรดต่อได้)
+    "block_on_loss_streak": False,      # ❌ ปิด! ไม่ block เมื่อแพ้ติดกัน
 }
 _consecutive_losses = 0
 _daily_trade_count = 0
@@ -282,9 +284,21 @@ _signal_weakening_config = {
 }
 
 # =====================
-# 🔔 SIGNAL FADE ALERT - Early Warning System (NEW!)
 # =====================
-# ตรวจจับเมื่อ confidence เริ่มลดลง ก่อนที่สัญญาณจะหายไป!
+# 🔔 SIGNAL FADE ALERT - Early Warning System (MAIN PROFIT PROTECTION!)
+# =====================
+# ⭐ นี่คือระบบหลักสำหรับ Profit Protection!
+# 
+# 📋 PRIORITY ORDER (ลำดับการทำงาน):
+#   1️⃣ Trailing Stop (_auto_trailing_stop) - ยก SL ตาม ATR ทุก cycle
+#   2️⃣ Signal Fade (นี่!) - ตรวจ confidence ลดลง → ย้าย SL หรือ ปิด
+#   3️⃣ WAIT Signal Close - ปิดเมื่อ signal เป็น WAIT + กำไรดี
+#   4️⃣ Reverse Signal Close - ปิดเมื่อ signal ตรงข้าม
+#
+# 🎯 LOGIC:
+#   - OK: ไม่ทำอะไร
+#   - WARNING (confidence ลด 10-30%): ย้าย SL มา break-even
+#   - DANGER (confidence ลด >30%): ปิด position ที่มีกำไร >= 5%
 
 _signal_fade_config = {
     "enabled": True,                              # ✅ เปิด Early Warning
@@ -296,7 +310,7 @@ _signal_fade_config = {
     "trend_detection_enabled": True,              # 🔄 ตรวจจับ trend ของ confidence
     
     # 🤖 AUTO-ACTION SETTINGS - จัดการ position อัตโนมัติเมื่อ signal fading!
-    "auto_action_enabled": True,                  # ✅ เปิด auto-action
+    "auto_action_enabled": True,                  # ✅ เปิด auto-action (ระบบหลัก!)
     "block_new_trades_on_warning": True,          # ❌ Block เปิด position ใหม่เมื่อ WARNING
     "block_new_trades_on_danger": True,           # ❌ Block เปิด position ใหม่เมื่อ DANGER
     "move_sl_to_breakeven_on_warning": True,      # 🔄 ย้าย SL มา break-even เมื่อ WARNING (ต้องมีกำไร)
@@ -777,27 +791,31 @@ async def _get_symbol_atr(symbol: str) -> float:
         return 0
 
 
+
+
 def _get_trailing_trigger_atr(balance: float, atr: float, symbol: str) -> float:
-    """Get trigger profit for trailing stop (ATR-based)"""
+    """
+    Get trigger profit for trailing stop (ATR-based)
+    
+    🔥 FIX: ใช้ % ของ balance แทน lot-based calculation
+    เพราะ lot size ไม่แน่นอน และเราต้องการ trigger เร็วๆ
+    
+    Logic:
+    - Small balance ($100-$500): trigger at $3-$15 (3% of balance)
+    - Medium balance ($500-$5000): trigger at $15-$150 (3% of balance)
+    - Large balance ($5000+): trigger at $150+ (3% of balance)
+    
+    ATR ใช้เป็น reference สำหรับ SL distance เท่านั้น
+    """
     global _trailing_stop_config
     
-    if atr > 0 and _trailing_stop_config.get("use_atr", True):
-        # ATR-based: 0.5x ATR converted to USD profit
-        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        atr_mult = _trailing_stop_config.get("activation_atr_mult", 0.5)
-        
-        if is_gold:
-            # Gold: $100 per $1 move per lot → for 0.01 lot, $1 profit per $1 move
-            # ATR $50 × 0.5 = $25 trigger (for 0.01 lot = $0.25 profit needed)
-            trigger = atr * atr_mult * 0.01 * 100  # 0.01 lot, $100 per point
-        else:
-            # Forex: ~$10 per pip per lot → for 0.01 lot, $0.10 per pip
-            trigger = atr * atr_mult * 10000 * 0.01 * 10  # Convert to pips * lot * pip value
-        
-        return max(1.0, trigger)
+    # 🔥 ใช้ % ของ balance แทน ATR-based trigger
+    # เพราะ trigger ต้องขึ้นกับ risk ที่รับได้ ไม่ใช่ volatility
+    trigger_percent = _trailing_stop_config.get("trigger_profit_percent", 3.0)
+    trigger = balance * (trigger_percent / 100.0)
     
-    # Fallback to percent-based
-    return _get_trailing_trigger(balance)
+    # Minimum $3 trigger (for very small accounts)
+    return max(3.0, trigger)
 
 
 def _get_trailing_distance_atr(atr: float, symbol: str) -> float:
@@ -824,25 +842,24 @@ def _get_trailing_step_atr(atr: float) -> float:
 
 
 def _get_trailing_lock_atr(atr: float, symbol: str) -> float:
-    """Get lock profit threshold in USD (ATR-based)"""
+    """
+    Get lock profit threshold in USD (% of balance based)
+    
+    🔥 FIX: ใช้ % ของ balance แทน ATR × lot calculation
+    เพราะ lock profit ควรขึ้นกับ risk ที่รับได้ ไม่ใช่ volatility
+    """
     global _trailing_stop_config
     
-    if atr > 0 and _trailing_stop_config.get("use_atr", True):
-        is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        lock_mult = _trailing_stop_config.get("lock_profit_atr_mult", 1.0)
-        
-        if is_gold:
-            return atr * lock_mult * 0.01 * 100  # 0.01 lot, $100 per point
-        else:
-            return atr * lock_mult * 10000 * 0.01 * 10  # pips * lot * pip value
-    
-    return 0
+    # ใช้ fallback percent-based เพราะแม่นยำกว่า
+    # จะถูกคำนวณจาก balance ใน _auto_trailing_stop() function
+    return 0  # Return 0 to use percent-based calculation in main function
 
 
 # =====================
 # 🎯 UNIVERSAL DYNAMIC CONFIG - รองรับ $100 ถึง $200,000,000!
 # =====================
 # ใช้ % แทน $ เพื่อ scale อัตโนมัติตามขนาด port
+
 
 def _calc_dynamic(balance: float, percent: float, min_val: float = 1.0) -> float:
     """คำนวณค่า dynamic จาก % ของ balance"""
@@ -869,20 +886,35 @@ def _get_adjusted_sl_for_micro(balance: float, sl_percent: float) -> float:
     multiplier = _small_account_config.get("micro_account_sl_multiplier", 1.5)
     return sl_percent * multiplier
 
-# 📈 AUTO TRAILING STOP - ATR-BASED (Dynamic based on volatility!)
+# =====================
+# 📈 AUTO TRAILING STOP - ATR-BASED (PRIORITY #1!)
+# =====================
+# 🥇 นี่คือระบบแรกที่ทำงาน - ยก SL ทุก cycle!
+# 
+# 📋 PRIORITY ORDER:
+#   1️⃣ Trailing Stop (นี่!) - ยก SL ตาม ATR ทุก cycle ⬅️
+#   2️⃣ Signal Fade - ตรวจ confidence ลดลง → ย้าย SL หรือ ปิด
+#   3️⃣ WAIT Signal Close - ปิดเมื่อ signal เป็น WAIT + กำไรดี
+#   4️⃣ Reverse Signal Close - ปิดเมื่อ signal ตรงข้าม
+#
+# 🎯 LOGIC:
+#   - เมื่อ profit >= 0.5x ATR (~$25 Gold) → เริ่ม trail
+#   - ยก SL ให้ห่างราคาปัจจุบัน 0.3x ATR (~$15 Gold)
+#   - เมื่อ profit >= 1.0x ATR (~$50 Gold) → lock 50% ของกำไร
+
 _trailing_stop_config = {
-    "enabled": True,
-    # === ATR-BASED SETTINGS (NEW!) ===
+    "enabled": True,                          # ✅ เปิด! ระบบหลักยก SL
+    # === ATR-BASED SETTINGS (RECOMMENDED) ===
     "use_atr": True,                          # ใช้ ATR แทน fixed %
-    "activation_atr_mult": 0.5,               # 🎯 เริ่ม trail เมื่อกำไร >= 0.5x ATR
-    "trail_distance_atr_mult": 0.3,           # 🎯 ยก SL ห่าง 0.3x ATR จาก peak
-    "step_atr_mult": 0.1,                     # 🎯 ยก SL ทีละ 0.1x ATR
-    "lock_profit_atr_mult": 1.0,              # 🎯 ล็อกกำไรเมื่อ >= 1.0x ATR
+    "activation_atr_mult": 0.3,               # 🎯 เริ่ม trail เมื่อกำไร >= 0.3x ATR (~$15 Gold) - ลดจาก 0.5
+    "trail_distance_atr_mult": 0.3,           # 🎯 ยก SL ห่าง 0.3x ATR จาก peak (~$15 Gold)
+    "step_atr_mult": 0.1,                     # 🎯 ยก SL ทีละ 0.1x ATR (~$5 Gold)
+    "lock_profit_atr_mult": 0.7,              # 🎯 ล็อกกำไรเมื่อ >= 0.7x ATR (~$35 Gold) - ลดจาก 1.0
     # === FALLBACK PERCENT BASED (if ATR not available) ===
-    "trigger_profit_percent": 5.0,            # เริ่ม trail เมื่อกำไร >= 5% ของ balance
-    "trail_distance_percent": 2.5,            # ยก SL ห่าง 2.5% ของ balance
+    "trigger_profit_percent": 3.0,            # เริ่ม trail เมื่อกำไร >= 3% ของ balance - ลดจาก 5%
+    "trail_distance_percent": 2.0,            # ยก SL ห่าง 2% ของ balance - ลดจาก 2.5%
     "step_size_percent": 0.5,                 # ยก SL ทีละ 0.5%
-    "lock_profit_percent": 10.0,              # ล็อกกำไรเมื่อ >= 10%
+    "lock_profit_percent": 7.0,               # ล็อกกำไรเมื่อ >= 7% - ลดจาก 10%
 }
 
 # Store ATR for each symbol (refreshed periodically)
@@ -923,8 +955,10 @@ _dca_tracking = {}
 _signal_strength_tracker = {}  # {symbol: {"confidence_history": [80, 78, 75], "quality_history": ["HIGH", "HIGH", "MEDIUM"], "direction_changes": 0}}
 
 # 💰 SMART PROFIT PROTECTION - PERCENT BASED!
+# ❌ ปิด! ซ้ำกับ Signal Fade Auto-Action
+# 📌 ให้ใช้ Signal Fade (DANGER mode) แทน - ทำงานเหมือนกันแต่ฉลาดกว่า
 _profit_protection_config = {
-    "enabled": True,
+    "enabled": False,                        # ❌ ปิด! ซ้ำกับ Signal Fade Auto-Action
     "profit_drawdown_percent": 25,           # ปิดเมื่อกำไรลดลง 25% จาก peak
     "min_profit_to_protect_percent": 2.0,    # 🎯 เริ่ม protect เมื่อกำไร >= 2% ของ balance
     "trailing_trigger_percent": 5.0,         # 🎯 เริ่ม trailing เมื่อกำไร >= 5%
@@ -2001,7 +2035,28 @@ async def _sync_positions_with_mt5():
                     if len(_trade_history) > 100:
                         _trade_history.pop(0)
                 else:
-                    logger.warning(f"⚠️ Could not get PnL for closed position #{ticket} - stats not updated")
+                    # 🔥 FIX: Even if we can't get PnL, still record this as a potential loss!
+                    # This ensures loss streak protection works even when MT5 history fails
+                    logger.warning(f"⚠️ Could not get PnL for closed position #{ticket} - ASSUMING LOSS for safety!")
+                    
+                    # Assume loss and update streak (better safe than sorry)
+                    _bot_status["daily_stats"]["trades"] += 1
+                    _bot_status["daily_stats"]["losses"] += 1
+                    _update_loss_streak(is_win=False)  # 🔥 Count as loss!
+                    
+                    # Add to trade history with unknown PnL
+                    _trade_history.append({
+                        "ticket": ticket,
+                        "symbol": closed_symbol,
+                        "side": closed_side,
+                        "pnl": 0,
+                        "close_reason": "UNKNOWN",
+                        "close_time": datetime.now().isoformat(),
+                        "is_win": False,
+                        "note": "PnL not retrieved from MT5 history"
+                    })
+                    
+                    logger.warning(f"❓ UNKNOWN: #{ticket} {closed_symbol} {closed_side} - counted as LOSS for safety")
                 
                 closed_externally.append({
                     "ticket": ticket,
@@ -2018,14 +2073,29 @@ async def _sync_positions_with_mt5():
                 if ticket in _peak_profit_by_position:
                     del _peak_profit_by_position[ticket]
                 
-                # 🔥 CRITICAL: Reset cooldown for this symbol so bot can trade again
-                if closed_symbol and closed_symbol in _last_traded_signal:
-                    del _last_traded_signal[closed_symbol]
-                    logger.info(f"🔓 Reset cooldown for {closed_symbol} - position closed externally")
-                
-                # Also try uppercase version
-                if closed_symbol and closed_symbol.upper() in _last_traded_signal:
-                    del _last_traded_signal[closed_symbol.upper()]
+                # 🔥 FIX: ไม่ block เมื่อแพ้ - เสียดายสัญญาณ!
+                # เพียงแค่ log และ track streak สำหรับสถิติ
+                is_loss = actual_pnl < 0
+                if is_loss:
+                    # Log loss แต่ไม่ขยาย cooldown
+                    current_streak = _loss_streak_tracker.get("current_streak", 0)
+                    logger.info(f"📊 LOSS detected for {closed_symbol} (streak: {current_streak}) - NO blocking!")
+                    
+                    # ❌ ไม่ extend cooldown - ให้เทรดต่อได้เลย
+                    # Reset cooldown ให้เทรดใหม่ได้ทันที
+                    if closed_symbol in _last_traded_signal:
+                        del _last_traded_signal[closed_symbol]
+                        logger.info(f"🔓 Cooldown cleared for {closed_symbol} - ready for new signal")
+                    if closed_symbol.upper() in _last_traded_signal:
+                        del _last_traded_signal[closed_symbol.upper()]
+                else:
+                    # Only reset cooldown for wins/breakeven
+                    if closed_symbol and closed_symbol in _last_traded_signal:
+                        del _last_traded_signal[closed_symbol]
+                        logger.info(f"🔓 Reset cooldown for {closed_symbol} - profitable close")
+                    
+                    if closed_symbol and closed_symbol.upper() in _last_traded_signal:
+                        del _last_traded_signal[closed_symbol.upper()]
         
         # Log summary of closed positions
         if closed_externally:
@@ -2436,7 +2506,18 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # 🔥 VALIDATE TRACKING DATA - ตรวจสอบว่า tracking ตรงกับ MT5 จริง
             await _validate_and_cleanup_tracking()
             
+            # =====================================================
+            # 🥇 PRIORITY #1: AUTO TRAILING STOP - ทำก่อนการวิเคราะห์!
+            # =====================================================
+            # ⚠️ สำคัญมาก: ต้องยก SL ก่อนที่ระบบอื่นจะปิด position
+            # ถ้าทำหลัง analysis → position อาจถูกปิดก่อนยก SL
+            await _auto_trailing_stop()
+            
             # 🚀 PARALLEL ANALYSIS - วิเคราะห์ทุก symbol พร้อมกัน!
+            # ⚠️ ข้างในมีระบบ Priority #2-#4 ที่อาจปิด position:
+            #   - Signal Fade (Priority #2) - ย้าย SL หรือปิดเมื่อ confidence ลด
+            #   - WAIT Signal Close (Priority #3) - ปิดเมื่อ WAIT + กำไรดี
+            #   - Reverse Signal Close (Priority #4) - ปิดเมื่อสัญญาณตรงข้าม
             analysis_tasks = [
                 _analyze_single_symbol(symbol, auto_trade) 
                 for symbol in _bot_status["symbols"]
@@ -2451,10 +2532,8 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # 📈 UPDATE DCA TRACKING - ล้าง tracking ของ symbols ที่ไม่มี position แล้ว
             await _update_dca_tracking_from_positions()
             
-            # 📈 AUTO TRAILING STOP - ยก SL ตามราคาอัตโนมัติ!
-            await _auto_trailing_stop()
-            
-            # 💰 SMART PROFIT PROTECTION - ตรวจสอบทุก cycle
+            # 💰 SMART PROFIT PROTECTION - DISABLED (ซ้ำกับ Signal Fade)
+            # ถูกแทนที่ด้วย Signal Fade Auto-Action ใน Priority #2
             closed = await _check_profit_protection()
             if closed:
                 for pos in closed:
@@ -2905,19 +2984,20 @@ async def _auto_trailing_stop():
                 is_gold = 'XAU' in pos_symbol.upper() or 'GOLD' in pos_symbol.upper()
                 
                 # 📊 Get trigger, distance, step values
+                # 🔥 FIX: trigger และ lock ใช้ % ของ balance (แม่นยำกว่า ATR-based)
+                # ATR ใช้สำหรับ distance และ step เท่านั้น
+                trigger_profit = _get_trailing_trigger_atr(balance, atr, pos_symbol)  # Uses % of balance
+                lock_profit_at = _get_trailing_lock(balance)  # Uses % of balance
+                
                 if use_atr:
-                    trigger_profit = _get_trailing_trigger_atr(balance, atr, pos_symbol)
                     trail_distance = _get_trailing_distance_atr(atr, pos_symbol)
                     step_size = _get_trailing_step_atr(atr)
-                    lock_profit_at = _get_trailing_lock_atr(atr, pos_symbol)
                     
-                    logger.debug(f"📊 ATR Trailing [{pos_symbol}]: ATR=${atr:.2f}, Trigger=${trigger_profit:.2f}, Distance=${trail_distance:.2f}, Step=${step_size:.2f}")
+                    logger.debug(f"📊 ATR Trailing [{pos_symbol}]: ATR=${atr:.2f}, Trigger=${trigger_profit:.2f}, Distance=${trail_distance:.2f}, Lock=${lock_profit_at:.2f}")
                 else:
                     # Fallback to percent-based
-                    trigger_profit = _get_trailing_trigger(balance)
                     trail_distance = _get_trailing_distance(balance)
                     step_size = _get_trailing_step(balance)
-                    lock_profit_at = _get_trailing_lock(balance)
                 
                 # Skip if profit not enough to trigger
                 if pos_pnl < trigger_profit:
@@ -2995,16 +3075,29 @@ async def _auto_trailing_stop():
         logger.error(f"Error in auto trailing stop: {e}")
 
 
+
+
 async def _close_profitable_on_wait_signal(symbol: str) -> bool:
     """
-    🚨 WAIT SIGNAL = CLOSE PROFITABLE
+    🚨 WAIT SIGNAL = CLOSE PROFITABLE (PRIORITY #3)
+    
+    📋 ลำดับการทำงาน (Priority Order):
+       1️⃣ Trailing Stop - ยก SL อัตโนมัติ
+       2️⃣ Signal Fade - ย้าย SL หรือปิดเมื่อ confidence ลดลง
+       3️⃣ WAIT Signal Close (นี่!) - ปิดเมื่อ WAIT + กำไรดี ⬅️
+       4️⃣ Reverse Signal Close - ปิดเมื่อสัญญาณตรงข้าม
     
     เมื่อสัญญาณเปลี่ยนเป็น WAIT (ไม่แน่ใจทิศทาง) → ปิด position ที่มีกำไรทันที
     
     Logic:
     - สัญญาณ WAIT = ตลาดไม่มีทิศทางชัดเจน
-    - ถ้ามี position ที่กำไร → ปิดทันที เพื่อ lock กำไร
+    - ถ้ามี position ที่กำไร >= 5% balance → ปิดทันที เพื่อ lock กำไร
     - ถ้าขาดทุน → ไม่ปิด รอ SL/TP
+    
+    🎯 ทำไม logic นี้ดี:
+    - Signal WAIT = uncertainty = ควร lock กำไรที่มี
+    - ไม่รอ SL ถูก hit = ได้กำไรเต็มๆ
+    - ระบบจะยังยก SL ไว้ (Trailing Stop) เป็น backup
     
     Returns: True if position was closed, False otherwise
     """
@@ -3081,12 +3174,9 @@ async def _close_profitable_on_wait_signal(symbol: str) -> bool:
         
         return closed_any
         
-        
     except Exception as e:
         logger.error(f"Error in WAIT signal close: {e}")
         return False
-
-
 
 
 async def _check_and_close_opposite_positions(symbol: str, new_signal: str) -> bool:
@@ -3959,16 +4049,28 @@ def _get_health_recommendations(health: Dict) -> List[str]:
 
 
 # =====================
-# 🤖 SIGNAL FADE AUTO-ACTION - จัดการ position อัตโนมัติ!
+# 🤖 SIGNAL FADE AUTO-ACTION (PRIORITY #2) - จัดการ position อัตโนมัติ!
 # =====================
+# 📋 ลำดับการทำงาน (Priority Order):
+#   1️⃣ Trailing Stop - ยก SL อัตโนมัติ
+#   2️⃣ Signal Fade (นี่!) - ย้าย SL หรือปิดเมื่อ confidence ลดลง ⬅️
+#   3️⃣ WAIT Signal Close - ปิดเมื่อ WAIT + กำไรดี
+#   4️⃣ Reverse Signal Close - ปิดเมื่อสัญญาณตรงข้าม
 
 async def _handle_signal_fade_auto_action(symbol: str, signal_health: Dict):
     """
-    🤖 AUTO-ACTION เมื่อ Signal Fading
+    🤖 AUTO-ACTION เมื่อ Signal Fading (PRIORITY #2)
+    
+    ระบบนี้ตรวจจับเมื่อ confidence ลดลง และจัดการ position อัตโนมัติ:
     
     Actions:
-    1. WARNING → ย้าย SL มา break-even (ถ้ามีกำไร)
-    2. DANGER → ปิด position ที่มีกำไร >= X%
+    1. WARNING (confidence ลด 10-30%) → ย้าย SL มา break-even (ถ้ามีกำไร)
+    2. DANGER (confidence ลด >30%) → ปิด position ที่มีกำไร >= 5%
+    
+    🎯 ทำไม logic นี้ดี:
+    - ตรวจจับ early warning ก่อนที่ signal จะเปลี่ยนเป็น WAIT
+    - WARNING = ย้าย SL เพื่อป้องกันกำไร (ไม่ปิด)
+    - DANGER = ปิดเลยเพราะ signal กำลังจะหายไป
     
     Returns: Dict with actions taken
     """
@@ -4654,9 +4756,9 @@ def _check_daily_limit(symbol: str) -> tuple[bool, str]:
     🚨 CHECK DAILY LIMIT - ตรวจสอบว่าเทรดเกินลิมิตหรือยัง
     
     🔥 Features:
-    - Max 20 trades per day
-    - Pause 30 mins after 3 consecutive losses
-    - Stop if daily loss > 5% of balance
+    - Max trades per day
+    - Loss streak tracking (optional blocking)
+    - Daily loss limit
     
     Returns: (can_trade: bool, reason: str)
     """
@@ -4669,32 +4771,37 @@ def _check_daily_limit(symbol: str) -> tuple[bool, str]:
     trades_today = daily_stats.get("trades", 0)
     pnl_today = daily_stats.get("pnl", 0)
     
-    max_trades = _daily_trade_limit.get("max_trades_per_day", 20)
-    max_loss_streak = _daily_trade_limit.get("max_losing_streak", 3)
-    pause_minutes = _daily_trade_limit.get("pause_after_loss_minutes", 30)
+    max_trades = _daily_trade_limit.get("max_trades_per_day", 50)
+    block_on_loss_streak = _daily_trade_limit.get("block_on_loss_streak", False)
+    max_loss_streak = _daily_trade_limit.get("max_losing_streak", 999)
+    pause_minutes = _daily_trade_limit.get("pause_after_loss_minutes", 0)
     
     # 1. Check max trades per day
     if trades_today >= max_trades:
         return False, f"Daily limit reached: {trades_today}/{max_trades} trades"
     
-    # 2. Check if paused after loss streak
-    paused_until = _loss_streak_tracker.get("paused_until")
-    if paused_until and datetime.now() < paused_until:
-        remaining = int((paused_until - datetime.now()).total_seconds() / 60)
-        return False, f"Paused for {remaining}m after loss streak"
-    
-    # 3. Check current loss streak
+    # 2. Get current loss streak (for logging only if blocking disabled)
     current_streak = _loss_streak_tracker.get("current_streak", 0)
-    if current_streak >= max_loss_streak:
-        # Pause trading
-        _loss_streak_tracker["paused_until"] = datetime.now() + timedelta(minutes=pause_minutes)
-        _loss_streak_tracker["current_streak"] = 0  # Reset after pause
-        logger.warning(f"🚨 LOSS STREAK {current_streak} >= {max_loss_streak} - PAUSING {pause_minutes} minutes!")
-        return False, f"Loss streak {current_streak} >= {max_loss_streak} - pausing {pause_minutes}m"
     
-    # 4. Check daily loss limit (% of balance) - async so we skip here
-    # Will be checked in trade execution
+    # ❌ DISABLED: Loss streak blocking - ไม่ block เมื่อแพ้ติดกัน (เสียดายสัญญาณ)
+    if block_on_loss_streak:
+        # Only check if blocking is enabled
+        paused_until = _loss_streak_tracker.get("paused_until")
+        if paused_until and datetime.now() < paused_until:
+            remaining = int((paused_until - datetime.now()).total_seconds() / 60)
+            return False, f"Paused for {remaining}m after loss streak"
+        
+        if current_streak >= max_loss_streak and pause_minutes > 0:
+            _loss_streak_tracker["paused_until"] = datetime.now() + timedelta(minutes=pause_minutes)
+            _loss_streak_tracker["current_streak"] = 0
+            logger.warning(f"🚨 LOSS STREAK {current_streak} >= {max_loss_streak} - PAUSING {pause_minutes} minutes!")
+            return False, f"Loss streak {current_streak} >= {max_loss_streak} - pausing {pause_minutes}m"
+    else:
+        # 📊 Just log the streak for info, don't block
+        if current_streak > 0:
+            logger.info(f"📊 Loss streak: {current_streak} (blocking disabled - continuing to trade)")
     
+    # 3. Log status (streak still tracked for stats even if not blocking)
     logger.debug(f"📊 Daily limit OK: {trades_today}/{max_trades} trades, streak: {current_streak}")
     return True, f"OK: {trades_today}/{max_trades} trades, streak: {current_streak}"
 
@@ -4733,7 +4840,7 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
     
     Returns: (can_trade: bool, reason: str)
     """
-    global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config, _symbol_whitelist
+    global _last_traded_signal, _open_positions, _trade_cooldown_seconds, _aggressive_config, _symbol_whitelist, _loss_streak_tracker, _loss_cooldown_multiplier
     
     signal = signal_data.get("signal", "WAIT")
     confidence = signal_data.get("confidence", 0)
@@ -4848,12 +4955,21 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
         if last_signal_id == signal_id:
             return False, f"Already traded this signal (ID: {signal_id})"
         
-        # Check cooldown (5 minutes)
+        # Check cooldown (5 minutes base, 2x after loss)
         if last_time:
             elapsed = (datetime.now() - last_time).total_seconds()
-            if elapsed < _trade_cooldown_seconds:
-                remaining = int(_trade_cooldown_seconds - elapsed)
-                return False, f"Cooldown active ({remaining}s remaining)"
+            
+            # 🔥 FIX: Use extended cooldown if we have a loss streak
+            current_streak = _loss_streak_tracker.get("current_streak", 0)
+            effective_cooldown = _trade_cooldown_seconds
+            if current_streak > 0:
+                effective_cooldown = _trade_cooldown_seconds * _loss_cooldown_multiplier
+                logger.info(f"⏱️ Loss streak {current_streak}: Cooldown extended to {effective_cooldown}s")
+            
+            if elapsed < effective_cooldown:
+                remaining = int(effective_cooldown - elapsed)
+                streak_note = f" (extended due to {current_streak} losses)" if current_streak > 0 else ""
+                return False, f"Cooldown active ({remaining}s remaining{streak_note})"
     
     return True, "OK"
 
@@ -4981,6 +5097,30 @@ async def _execute_signal_trade(symbol: str, signal_data: Dict, skip_position_ch
                         "opened_at": datetime.now().isoformat()
                     }
                     logger.info(f"📍 Position tracked: #{ticket} {symbol} {side}")
+                else:
+                    # 🔥 FIX: If ticket not in result, try to get from MT5 positions
+                    logger.warning(f"⚠️ Ticket not in result - will get from MT5 sync")
+                    try:
+                        positions = await _bot.trading_engine.broker.get_positions()
+                        for pos in (positions or []):
+                            if isinstance(pos, dict):
+                                pos_symbol = pos.get("symbol", "")
+                                pos_ticket = pos.get("ticket") or pos.get("id")
+                            else:
+                                pos_symbol = getattr(pos, "symbol", "")
+                                pos_ticket = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                            
+                            if pos_symbol.upper() == symbol.upper() and pos_ticket:
+                                if str(pos_ticket) not in _known_positions:
+                                    _known_positions[str(pos_ticket)] = {
+                                        "symbol": symbol,
+                                        "side": side,
+                                        "opened_at": datetime.now().isoformat()
+                                    }
+                                    logger.info(f"📍 Position tracked from MT5: #{pos_ticket} {symbol} {side}")
+                                    break
+                    except Exception as e:
+                        logger.warning(f"Could not get ticket from MT5: {e}")
                 
                 contrarian_tag = " [CONTRARIAN]" if original_signal != final_signal else ""
                 logger.info(f"✅ Trade executed: {symbol} {side}{contrarian_tag} (ID: {signal_id}) - Cooldown {_trade_cooldown_seconds}s started")
