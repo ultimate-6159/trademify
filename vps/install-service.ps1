@@ -85,21 +85,65 @@ if (-not (Test-Path $NssmPath)) {
         New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
     }
     
-    # Download NSSM
-    $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
-    $nssmZip = "$env:TEMP\nssm.zip"
+    # ?? Force TLS 1.2 for secure download
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    
+    # Download NSSM from GitHub mirror (more reliable)
+    $nssmUrl = "https://github.com/kirillkovalenko/nssm/releases/download/2.24.101-rc/nssm-2.24.101-rc.zip"
+    $nssmZipPath = "$env:TEMP\nssm.zip"
+    $nssmExtractPath = "$env:TEMP\nssm_extract"
     
     try {
-        Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -UseBasicParsing
-        Expand-Archive -Path $nssmZip -DestinationPath "$env:TEMP\nssm" -Force
-        Copy-Item "$env:TEMP\nssm\nssm-2.24\win64\nssm.exe" -Destination $NssmPath -Force
-        Remove-Item $nssmZip -Force
-        Remove-Item "$env:TEMP\nssm" -Recurse -Force
-        Write-Host "   ? NSSM installed to $NssmPath" -ForegroundColor Green
+        Write-Host "   Downloading from GitHub mirror..." -ForegroundColor Gray
+        Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZipPath -UseBasicParsing -TimeoutSec 60
+        
+        # Extract
+        if (Test-Path $nssmExtractPath) { Remove-Item $nssmExtractPath -Recurse -Force }
+        Expand-Archive -Path $nssmZipPath -DestinationPath $nssmExtractPath -Force
+        
+        # Find and copy nssm.exe
+        $nssmExe = Get-ChildItem -Path $nssmExtractPath -Recurse -Filter "nssm.exe" | Where-Object { $_.Directory.Name -eq "win64" } | Select-Object -First 1
+        if (-not $nssmExe) {
+            $nssmExe = Get-ChildItem -Path $nssmExtractPath -Recurse -Filter "nssm.exe" | Select-Object -First 1
+        }
+        
+        if ($nssmExe) {
+            Copy-Item $nssmExe.FullName -Destination $NssmPath -Force
+            Write-Host "   ? NSSM installed to $NssmPath" -ForegroundColor Green
+        } else {
+            throw "nssm.exe not found in archive"
+        }
+        
+        # Cleanup
+        Remove-Item $nssmZipPath -Force -ErrorAction SilentlyContinue
+        Remove-Item $nssmExtractPath -Recurse -Force -ErrorAction SilentlyContinue
     } catch {
         Write-Host "   ? Failed to download NSSM: $_" -ForegroundColor Red
-        Write-Host "   Please download manually from https://nssm.cc/download" -ForegroundColor Yellow
-        exit 1
+        Write-Host ""
+        Write-Host "   ?? Please download manually:" -ForegroundColor Yellow
+        Write-Host "      1. Go to: https://nssm.cc/download" -ForegroundColor White
+        Write-Host "      2. Download nssm-2.24.zip" -ForegroundColor White
+        Write-Host "      3. Extract win64\nssm.exe to C:\nssm\" -ForegroundColor White
+        Write-Host ""
+        
+        # Try alternate download from nssm.cc with TLS fix
+        Write-Host "   ?? Trying alternate download..." -ForegroundColor Yellow
+        try {
+            $altUrl = "https://nssm.cc/release/nssm-2.24.zip"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
+            $webClient = New-Object System.Net.WebClient
+            $webClient.DownloadFile($altUrl, $nssmZipPath)
+            
+            Expand-Archive -Path $nssmZipPath -DestinationPath $nssmExtractPath -Force
+            Copy-Item "$nssmExtractPath\nssm-2.24\win64\nssm.exe" -Destination $NssmPath -Force
+            Remove-Item $nssmZipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item $nssmExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ? NSSM installed successfully!" -ForegroundColor Green
+        } catch {
+            Write-Host "   ? Alternate download also failed" -ForegroundColor Red
+            Write-Host "   Please download manually from https://nssm.cc/download" -ForegroundColor Yellow
+            exit 1
+        }
     }
 }
 
