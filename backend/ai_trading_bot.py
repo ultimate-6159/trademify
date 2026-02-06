@@ -872,20 +872,30 @@ class AITradingBot:
                 price_low_idx = np.argmin(price_recent)
                 
                 # Bearish Divergence: Price higher high, RSI lower high
+                # 🛡️ FIX: ไม่ให้ bonus ถ้าอยู่ใน Strong Uptrend (false positive)
                 if price_high_idx > lookback // 2:
                     if price_recent[-1] >= price_recent[0] * 0.999:
                         if rsi_recent[-1] < rsi_recent[price_high_idx]:
                             divergence_type = "BEARISH_DIV"
-                            sell_score += 2  # Bonus for bearish divergence
-                            logger.info(f"   🛡️ RSI Bearish Divergence detected! (+2 SELL)")
+                            # 🛡️ FIX: Only give bonus if NOT in strong uptrend
+                            if not strong_uptrend:
+                                sell_score += 2  # Bonus for bearish divergence
+                                logger.info(f"   🛡️ RSI Bearish Divergence detected! (+2 SELL)")
+                            else:
+                                logger.info(f"   ⚠️ RSI Bearish Divergence detected but IGNORED (strong uptrend)")
                 
                 # Bullish Divergence: Price lower low, RSI higher low
+                # 🛡️ FIX: ไม่ให้ bonus ถ้าอยู่ใน Strong Downtrend (false positive)
                 if price_low_idx > lookback // 2:
                     if price_recent[-1] <= price_recent[0] * 1.001:
                         if rsi_recent[-1] > rsi_recent[price_low_idx]:
                             divergence_type = "BULLISH_DIV"
-                            buy_score += 2  # Bonus for bullish divergence
-                            logger.info(f"   🛡️ RSI Bullish Divergence detected! (+2 BUY)")
+                            # 🛡️ FIX: Only give bonus if NOT in strong downtrend
+                            if not strong_downtrend:
+                                buy_score += 2  # Bonus for bullish divergence
+                                logger.info(f"   🛡️ RSI Bullish Divergence detected! (+2 BUY)")
+                            else:
+                                logger.info(f"   ⚠️ RSI Bullish Divergence detected but IGNORED (strong downtrend)")
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 📈 MTF CONFIRMATION - Higher Timeframe Alignment
@@ -950,13 +960,13 @@ class AITradingBot:
             extra_str = f" | {' | '.join(extra_info)}" if extra_info else ""
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}{extra_str}")
             
-            # 🥇 GOLD: ต้องมี gap ที่ชัดเจน
+            # 🥇 GOLD: ต้องมี gap ที่ชัดเจนมาก (FIX: เพิ่มจาก 2 เป็น 4)
             if is_gold:
-                min_score_gap = 2  # Gold ต้องต่างกันอย่างน้อย 2 points
-                min_dominant_score = 7  # Score ที่ชนะต้อง >= 7 (ไม่ใช่แค่ 6)
+                min_score_gap = 4  # Gold ต้องต่างกันอย่างน้อย 4 points (80% confidence)
+                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8 (ไม่ใช่แค่ 7)
             else:
-                min_score_gap = 3  # Forex ต้องต่างกันอย่างน้อย 3 points
-                min_dominant_score = 7  # Score ที่ชนะต้อง >= 7
+                min_score_gap = 4  # Forex ต้องต่างกันอย่างน้อย 4 points
+                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8
             
             # ❌ BLOCK if score gap too small
             if score_gap < min_score_gap:
@@ -969,6 +979,26 @@ class AITradingBot:
             if dominant_score < min_dominant_score:
                 logger.info(f"   🚫 LOW SCORE FILTER: Dominant score={dominant_score} < {min_dominant_score} required")
                 logger.info(f"      → Signal BLOCKED: Not enough confirmations!")
+                return None
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🛡️ TREND FILTER - บล็อกการเทรดสวนเทรนด์ที่แข็งแกร่ง (FIX CRITICAL BUG)
+            # ═══════════════════════════════════════════════════════════════════════════════
+            is_sell_signal = sell_score > buy_score
+            is_buy_signal = buy_score > sell_score
+            
+            # ❌ BLOCK SELL during STRONG UPTREND (EMA เรียงขึ้นทั้งหมด)
+            if is_sell_signal and strong_uptrend:
+                logger.info(f"   🛡️ TREND FILTER: SELL blocked during STRONG UPTREND!")
+                logger.info(f"      → EMA: fast={ema_fast:.2f} > mid={ema_mid:.2f} > slow={ema_slow:.2f}")
+                logger.info(f"      → ห้าม SELL เมื่อเทรนด์ขึ้นแข็งแกร่ง! รอ BUY แทน")
+                return None
+            
+            # ❌ BLOCK BUY during STRONG DOWNTREND (EMA เรียงลงทั้งหมด)
+            if is_buy_signal and strong_downtrend:
+                logger.info(f"   🛡️ TREND FILTER: BUY blocked during STRONG DOWNTREND!")
+                logger.info(f"      → EMA: fast={ema_fast:.2f} < mid={ema_mid:.2f} < slow={ema_slow:.2f}")
+                logger.info(f"      → ห้าม BUY เมื่อเทรนด์ลงแข็งแกร่ง! รอ SELL แทน")
                 return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
