@@ -98,6 +98,7 @@ class SignalDuration:
             return f"{hours}:{mins:02d} ชั่วโมง"
 
 
+
 @dataclass
 class VoteResult:
     """Result of voting analysis"""
@@ -112,6 +113,44 @@ class VoteResult:
     take_profit: Optional[float] = None
     duration: Optional[SignalDuration] = None  # Signal duration estimation
     
+    @property
+    def buy_score(self) -> int:
+        """Buy score out of 20 (scaled from bullish votes)"""
+        if self.total_votes == 0:
+            return 10  # Neutral when no data
+        # Scale to 20 points total: buy_score + sell_score = 20
+        return round((self.bullish_votes / self.total_votes) * 20)
+    
+    @property
+    def sell_score(self) -> int:
+        """Sell score out of 20 (scaled from bearish votes)"""
+        return 20 - self.buy_score
+    
+    @property
+    def net_score(self) -> int:
+        """Net score: positive = bullish, negative = bearish (-20 to +20)"""
+        return self.buy_score - self.sell_score
+    
+    @property
+    def score_strength(self) -> str:
+        """Score strength description"""
+        net = abs(self.net_score)
+        if net >= 16:
+            return "EXTREME"  # 18-2 or stronger
+        elif net >= 12:
+            return "STRONG"   # 16-4 or stronger
+        elif net >= 8:
+            return "MODERATE" # 14-6 or stronger
+        elif net >= 4:
+            return "WEAK"     # 12-8 or stronger
+        else:
+            return "NEUTRAL"  # 10-10 to 11-9
+    
+    @property
+    def score_display(self) -> str:
+        """Human-readable score display"""
+        return f"BUY {self.buy_score} : {self.sell_score} SELL"
+    
     def to_dict(self) -> dict:
         return {
             "signal": self.signal.value,
@@ -119,6 +158,12 @@ class VoteResult:
             "bullish_votes": self.bullish_votes,
             "bearish_votes": self.bearish_votes,
             "total_votes": self.total_votes,
+            # New: Clear 20-point scoring system
+            "buy_score": self.buy_score,
+            "sell_score": self.sell_score,
+            "net_score": self.net_score,
+            "score_strength": self.score_strength,
+            "score_display": f"BUY {self.buy_score} : {self.sell_score} SELL",
             "average_movement": self.average_movement.tolist() if self.average_movement is not None else None,
             "projected_price": self.projected_price,
             "stop_loss": self.stop_loss,
@@ -703,30 +748,36 @@ class PatternAnalyzer:
         return {
             "status": "success",
             "signal": vote_result.signal.value,
-            "confidence": vote_result.confidence,
-            "vote_details": {
-                "bullish": vote_result.bullish_votes,
-                "bearish": vote_result.bearish_votes,
-                "total": vote_result.total_votes,
-            },
-            "price_projection": {
-                "current": current_price,
-                "projected": vote_result.projected_price,
-                "stop_loss": vote_result.stop_loss,
-                "take_profit": vote_result.take_profit,
-            },
-            "average_movement": vote_result.average_movement.tolist(),
-            "matched_patterns": [
-                {
-                    "index": m["index"],
-                    "correlation": m.get("correlation", 0),
-                    "distance": m.get("distance", 0),
-                }
-                for m in valid_matches
-            ],
-            "n_matches": len(valid_matches),
-            "duration": vote_result.duration.to_dict() if vote_result.duration else None,
-        }
+                "confidence": vote_result.confidence,
+                "vote_details": {
+                    "bullish": vote_result.bullish_votes,
+                    "bearish": vote_result.bearish_votes,
+                    "total": vote_result.total_votes,
+                },
+                # New: 20-point scoring system
+                "buy_score": vote_result.buy_score,
+                "sell_score": vote_result.sell_score,
+                "net_score": vote_result.net_score,
+                "score_display": f"BUY {vote_result.buy_score} : {vote_result.sell_score} SELL",
+                "score_strength": vote_result.score_strength,
+                "price_projection": {
+                    "current": current_price,
+                    "projected": vote_result.projected_price,
+                    "stop_loss": vote_result.stop_loss,
+                    "take_profit": vote_result.take_profit,
+                },
+                "average_movement": vote_result.average_movement.tolist(),
+                "matched_patterns": [
+                    {
+                        "index": m["index"],
+                        "correlation": m.get("correlation", 0),
+                        "distance": m.get("distance", 0),
+                    }
+                    for m in valid_matches
+                ],
+                "n_matches": len(valid_matches),
+                "duration": vote_result.duration.to_dict() if vote_result.duration else None,
+            }
 
 
 def analyze_patterns(top_10_future_movements: List[np.ndarray]) -> Tuple[str, float, np.ndarray]:

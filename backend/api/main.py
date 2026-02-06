@@ -334,7 +334,12 @@ class SignalResponse(BaseModel):
     n_matches: int
     timestamp: str
     message: Optional[str] = None
-    duration: Optional[Dict[str, Any]] = None  # Signal duration estimation
+    duration: Optional[Dict[str, Any]] = None
+    buy_score: int = 10
+    sell_score: int = 10
+    net_score: int = 0
+    score_display: str = "BUY 10 : 10 SELL"
+    score_strength: str = "NEUTRAL"
 
 
 class BuildIndexRequest(BaseModel):
@@ -735,7 +740,13 @@ async def analyze_pattern(request: AnalyzeRequest):
             n_matches=result.get("n_matches", 0),
             timestamp=datetime.now().isoformat(),
             message=result.get("message"),
-            duration=result.get("duration")
+            duration=result.get("duration"),
+            # New: 20-point scoring system from vote_details
+            buy_score=result.get("buy_score", 10),
+            sell_score=result.get("sell_score", 10),
+            net_score=result.get("net_score", 0),
+            score_display=result.get("score_display", "BUY 10 : 10 SELL"),
+            score_strength=result.get("score_strength", "NEUTRAL"),
         )
         
     except Exception as e:
@@ -1011,6 +1022,11 @@ class MultiFactorResponse(BaseModel):
     reasons: Dict[str, List[str]]
     trading_mode: str
     timestamp: str
+    buy_score: int = 10
+    sell_score: int = 10
+    net_score: int = 0
+    score_display: str = "BUY 10 : 10 SELL"
+    score_strength: str = "NEUTRAL"
 
 
 @app.post("/api/v1/analyze-multi-factor", response_model=MultiFactorResponse)
@@ -1167,6 +1183,12 @@ async def analyze_multi_factor(request: MultiFactorAnalyzeRequest):
             },
             trading_mode=trading_mode.value,
             timestamp=datetime.now().isoformat(),
+            # New: 20-point scoring system
+            buy_score=mf_result.buy_score,
+            sell_score=mf_result.sell_score,
+            net_score=mf_result.net_score,
+            score_display=mf_result.score_display,
+            score_strength=mf_result.score_strength,
         )
         
     except Exception as e:

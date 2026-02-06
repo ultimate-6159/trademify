@@ -107,6 +107,56 @@ class MultiFactorResult:
     bearish_reasons: List[str] = field(default_factory=list)
     skip_reasons: List[str] = field(default_factory=list)
     
+    # Vote details for scoring
+    bullish_votes: int = 0
+    bearish_votes: int = 0
+    total_votes: int = 0
+    
+    @property
+    def buy_score(self) -> int:
+        """Buy score out of 20 - based on multi-factor analysis"""
+        if self.signal in [Signal.STRONG_BUY, Signal.BUY]:
+            # Bullish signal: map final_score to 11-20
+            score = 10 + round((self.final_score / 100) * 10)
+            return min(20, max(11, score))
+        elif self.signal in [Signal.STRONG_SELL, Signal.SELL]:
+            # Bearish signal: map final_score to 0-9
+            score = round((1 - self.final_score / 100) * 10)
+            return min(9, max(0, score))
+        else:
+            # WAIT signal: neutral
+            return 10
+    
+    @property
+    def sell_score(self) -> int:
+        """Sell score out of 20 - always sums to 20 with buy_score"""
+        return 20 - self.buy_score
+    
+    @property
+    def net_score(self) -> int:
+        """Net score: positive = bullish, negative = bearish (-20 to +20)"""
+        return self.buy_score - self.sell_score
+    
+    @property
+    def score_display(self) -> str:
+        """Human-readable score display"""
+        return f"BUY {self.buy_score} : {self.sell_score} SELL"
+    
+    @property
+    def score_strength(self) -> str:
+        """Score strength based on net score"""
+        net = abs(self.net_score)
+        if net >= 16:
+            return "EXTREME"  # 18-2 or stronger
+        elif net >= 12:
+            return "STRONG"   # 16-4 or stronger  
+        elif net >= 8:
+            return "MODERATE" # 14-6 or stronger
+        elif net >= 4:
+            return "WEAK"     # 12-8 or stronger
+        else:
+            return "NEUTRAL"  # 10-10 to 11-9
+    
     def to_dict(self) -> dict:
         return {
             "signal": self.signal.value,
@@ -114,6 +164,12 @@ class MultiFactorResult:
             "final_score": round(self.final_score, 2),
             "quality": self.quality.value if isinstance(self.quality, SignalQuality) else self.quality,
             "recommendation": self.recommendation,
+            # New: Clear 20-point scoring system
+            "buy_score": self.buy_score,
+            "sell_score": self.sell_score,
+            "net_score": self.net_score,
+            "score_display": self.score_display,
+            "score_strength": self.score_strength,
             "factors": [f.to_dict() for f in self.factors],
             "scores": {
                 "pattern": round(self.pattern_score, 2),
