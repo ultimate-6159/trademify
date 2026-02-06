@@ -74,6 +74,7 @@ from trading.parallel_layers import (
     ParallelAnalysisResult,
     format_parallel_results
 )
+from trading.peak_detector import PeakDetector, get_peak_detector
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
 from services.mt5_service import get_mt5_service, MT5Service
@@ -845,10 +846,109 @@ class AITradingBot:
                     sell_score += 1
             
             # ═══════════════════════════════════════════════════════════════════════════════
+            # 🛡️ RSI DIVERGENCE DETECTION - Detect Hidden Reversals
+            # ═══════════════════════════════════════════════════════════════════════════════
+            rsi_values = np.zeros(min(20, len(close)))
+            for i in range(len(rsi_values)):
+                idx = -(len(rsi_values) - i)
+                delta_i = np.diff(close[:idx+1] if idx < -1 else close)
+                if len(delta_i) >= rsi_period:
+                    gain_i = np.where(delta_i > 0, delta_i, 0)
+                    loss_i = np.where(delta_i < 0, -delta_i, 0)
+                    ag = np.mean(gain_i[-rsi_period:])
+                    al = np.mean(loss_i[-rsi_period:])
+                    rs_i = ag / max(al, 0.0001)
+                    rsi_values[i] = 100 - (100 / (1 + rs_i))
+                else:
+                    rsi_values[i] = 50
+            
+            # Detect RSI Divergence
+            divergence_type = "NONE"
+            lookback = 10
+            if len(close) >= lookback and len(rsi_values) >= lookback:
+                price_recent = close[-lookback:]
+                rsi_recent = rsi_values[-lookback:]
+                price_high_idx = np.argmax(price_recent)
+                price_low_idx = np.argmin(price_recent)
+                
+                # Bearish Divergence: Price higher high, RSI lower high
+                if price_high_idx > lookback // 2:
+                    if price_recent[-1] >= price_recent[0] * 0.999:
+                        if rsi_recent[-1] < rsi_recent[price_high_idx]:
+                            divergence_type = "BEARISH_DIV"
+                            sell_score += 2  # Bonus for bearish divergence
+                            logger.info(f"   🛡️ RSI Bearish Divergence detected! (+2 SELL)")
+                
+                # Bullish Divergence: Price lower low, RSI higher low
+                if price_low_idx > lookback // 2:
+                    if price_recent[-1] <= price_recent[0] * 1.001:
+                        if rsi_recent[-1] > rsi_recent[price_low_idx]:
+                            divergence_type = "BULLISH_DIV"
+                            buy_score += 2  # Bonus for bullish divergence
+                            logger.info(f"   🛡️ RSI Bullish Divergence detected! (+2 BUY)")
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 📈 MTF CONFIRMATION - Higher Timeframe Alignment
+            # ═══════════════════════════════════════════════════════════════════════════════
+            mtf_aligned = False
+            mtf_direction = "NEUTRAL"
+            
+            # Calculate EMA on higher timeframe equivalent (use more bars)
+            if len(close) >= 100:
+                # H4 equivalent (4x H1 bars)
+                h4_close = close[::4][-25:] if len(close) >= 100 else close[-25:]
+                h4_ema_fast = np.mean(h4_close[-5:]) if len(h4_close) >= 5 else h4_close[-1]
+                h4_ema_slow = np.mean(h4_close[-20:]) if len(h4_close) >= 20 else h4_close[-1]
+                
+                # D1 equivalent (24x H1 bars)
+                d1_close = close[::24][-5:] if len(close) >= 120 else close[-5:]
+                d1_ema = np.mean(d1_close) if len(d1_close) >= 3 else close[-1]
+                
+                # Check MTF alignment
+                h1_bullish = current_price > ema_mid
+                h1_bearish = current_price < ema_mid
+                h4_bullish = h4_ema_fast > h4_ema_slow
+                h4_bearish = h4_ema_fast < h4_ema_slow
+                d1_bullish = current_price > d1_ema
+                d1_bearish = current_price < d1_ema
+                
+                if h1_bullish and h4_bullish and d1_bullish:
+                    mtf_aligned = True
+                    mtf_direction = "BULLISH"
+                    buy_score += 2  # Strong MTF confirmation
+                    logger.info(f"   📈 MTF Aligned BULLISH (H1+H4+D1) (+2 BUY)")
+                elif h1_bearish and h4_bearish and d1_bearish:
+                    mtf_aligned = True
+                    mtf_direction = "BEARISH"
+                    sell_score += 2  # Strong MTF confirmation
+                    logger.info(f"   📈 MTF Aligned BEARISH (H1+H4+D1) (+2 SELL)")
+                elif h1_bullish and h4_bullish:
+                    buy_score += 1  # Partial alignment
+                    logger.info(f"   📈 MTF Partial BULLISH (H1+H4) (+1 BUY)")
+                elif h1_bearish and h4_bearish:
+                    sell_score += 1  # Partial alignment
+                    logger.info(f"   📈 MTF Partial BEARISH (H1+H4) (+1 SELL)")
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SCORE GAP FILTER - ป้องกันสัญญาณไม่ชัดเจน (NEW!)
             # ═══════════════════════════════════════════════════════════════════════════════
             
             score_gap = abs(buy_score - sell_score)
+            
+            # Convert to 20-point for display
+            total_score = buy_score + sell_score
+            buy_20 = int(buy_score * 20 / max(total_score, 1)) if total_score > 0 else 10
+            sell_20 = 20 - buy_20
+            score_display = f"BUY {buy_20} : {sell_20} SELL"
+            
+            # Log with divergence and MTF info
+            extra_info = []
+            if divergence_type != "NONE":
+                extra_info.append(f"Div={divergence_type}")
+            if mtf_aligned:
+                extra_info.append(f"MTF={mtf_direction}")
+            extra_str = f" | {' | '.join(extra_info)}" if extra_info else ""
+            logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}{extra_str}")
             
             # 🥇 GOLD: ต้องมี gap ที่ชัดเจน
             if is_gold:
@@ -860,7 +960,7 @@ class AITradingBot:
             
             # ❌ BLOCK if score gap too small
             if score_gap < min_score_gap:
-                logger.info(f"   🚫 SCORE GAP FILTER: Buy={buy_score} vs Sell={sell_score}, Gap={score_gap} < {min_score_gap} required")
+                logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < {min_score_gap} required")
                 logger.info(f"      → Signal BLOCKED: Scores too close, no clear direction!")
                 return None
             
@@ -1206,7 +1306,13 @@ class AITradingBot:
                 "rsi": rsi,
                 "buy_score": buy_score,
                 "sell_score": sell_score,
-                "score_gap": score_gap,  # 🆕 เพิ่ม score gap
+                "buy_score_20": buy_20,
+                "sell_score_20": sell_20,
+                "score_display": score_display,
+                "score_gap": score_gap,
+                "divergence": divergence_type,
+                "mtf_aligned": mtf_aligned,
+                "mtf_direction": mtf_direction,
                 "session": "OVERLAP" if overlap_session else "LONDON" if london_session else "NY" if ny_session else "ASIAN",
                 "trend": market_regime,
                 "market_regime": market_regime,
@@ -1997,7 +2103,16 @@ class AITradingBot:
         logger.info("   - Dynamic Mode Selection")
         logger.info("   - Context-Aware Sizing")
         
-        # 22. 🚀 PARALLEL LAYER PROCESSOR - เร็วขึ้น 3-5x
+        # 22. 🎯 Peak Detector - Divergence & Extreme Detection
+        self.peak_detector = get_peak_detector()
+        logger.info("✓ Peak Detector initialized:")
+        logger.info("   - RSI Divergence Detection (Bullish/Bearish)")
+        logger.info("   - Price Extension Analysis")
+        logger.info("   - Volume Exhaustion Detection")
+        logger.info("   - Candle Pattern Recognition (Doji, Hammer, Shooting Star)")
+        logger.info("   - Peak/Bottom Detection")
+        
+        # 23. 🚀 PARALLEL LAYER PROCESSOR - เร็วขึ้น 3-5x
         if self.use_parallel_processing:
             self.parallel_processor = ParallelLayerProcessor(
                 ultra_intelligence=self.ultra_intelligence,
@@ -2380,10 +2495,13 @@ class AITradingBot:
                     "atr": tech_signal["atr"],
                 },
                 "factors": {
-                    "bullish": [f"Buy Score: {tech_signal['buy_score']}/10", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "BUY" else [],
-                    "bearish": [f"Sell Score: {tech_signal['sell_score']}/10", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "SELL" else [],
+                    "bullish": [f"Score: {score_display}", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "BUY" else [],
+                    "bearish": [f"Score: {score_display}", f"Session: {tech_signal['session']}", f"Trend: {tech_signal['trend']}"] if tech_signal["signal"] == "SELL" else [],
                     "skip_reasons": [],
                 },
+                "buy_score_20": buy_20,
+                "sell_score_20": sell_20,
+                "score_display": score_display,
                 "factor_details": [],
                 "vote_details": None,
                 "n_matches": 0,
@@ -2399,9 +2517,14 @@ class AITradingBot:
                 "signal_mode": "technical",
             }
             
+            # 🔄 Convert to 20-point scoring system
+            buy_20 = int(tech_signal['buy_score'] * 20 / 12)  # Convert from /12 to /20
+            sell_20 = 20 - buy_20  # Total always = 20
+            score_display = f"BUY {buy_20} : {sell_20} SELL"
+            
             logger.info(f"🔥 {symbol}: TECHNICAL Signal={tech_signal['signal']} | Confidence={tech_signal['confidence']:.1f}% | Quality={tech_signal['quality']}")
-            logger.info(f"   Scores: Buy={tech_signal['buy_score']}/10 Sell={tech_signal['sell_score']}/10 | Session={tech_signal['session']} | Trend={tech_signal['trend']}")
-            logger.info(f"   SL=${tech_signal['stop_loss']:.5f} | TP=${tech_signal['take_profit']:.5f}")
+            logger.info(f"   📊 Scores: {score_display} | Session={tech_signal['session']} | Trend={tech_signal['trend']}")
+            logger.info(f"   🎯 SL=${tech_signal['stop_loss']:.5f} | TP=${tech_signal['take_profit']:.5f}")
             
             # Store last analysis
             self._last_analysis = result
