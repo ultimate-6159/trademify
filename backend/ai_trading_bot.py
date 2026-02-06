@@ -2459,6 +2459,11 @@ class AITradingBot:
                 
                 return default_response
             
+            # 🔄 Convert to 20-point scoring system BEFORE building result
+            buy_20 = int(tech_signal['buy_score'] * 20 / 12)  # Convert from /12 to /20
+            sell_20 = 20 - buy_20  # Total always = 20
+            score_display = f"BUY {buy_20} : {sell_20} SELL"
+            
             # Build result from technical signal
             result = {
                 "symbol": symbol,
@@ -2516,11 +2521,6 @@ class AITradingBot:
                 "timestamp": datetime.now().isoformat(),
                 "signal_mode": "technical",
             }
-            
-            # 🔄 Convert to 20-point scoring system
-            buy_20 = int(tech_signal['buy_score'] * 20 / 12)  # Convert from /12 to /20
-            sell_20 = 20 - buy_20  # Total always = 20
-            score_display = f"BUY {buy_20} : {sell_20} SELL"
             
             logger.info(f"🔥 {symbol}: TECHNICAL Signal={tech_signal['signal']} | Confidence={tech_signal['confidence']:.1f}% | Quality={tech_signal['quality']}")
             logger.info(f"   📊 Scores: {score_display} | Session={tech_signal['session']} | Trend={tech_signal['trend']}")
