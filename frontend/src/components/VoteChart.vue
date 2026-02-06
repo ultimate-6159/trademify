@@ -11,13 +11,29 @@ const props = defineProps({
   voteDetails: {
     type: Object,
     default: () => ({ bullish: 0, bearish: 0, total: 0 })
+  },
+  buyScore: {
+    type: Number,
+    default: 10
+  },
+  sellScore: {
+    type: Number,
+    default: 10
+  },
+  scoreDisplay: {
+    type: String,
+    default: ''
   }
 })
 
 const chartOption = computed(() => {
-  const bullish = props.voteDetails.bullish || 0
-  const bearish = props.voteDetails.bearish || 0
-  const total = bullish + bearish || 1
+  // Use new 20-point scoring if available, fallback to vote details
+  const buy = props.buyScore || props.voteDetails.bullish || 10
+  const sell = props.sellScore || props.voteDetails.bearish || 10
+  const total = buy + sell || 20
+  
+  // Determine display text based on score
+  const displayText = props.scoreDisplay || `BUY ${buy} : ${sell} SELL`
   
   return {
     backgroundColor: 'transparent',
@@ -28,11 +44,11 @@ const chartOption = computed(() => {
       textStyle: {
         color: '#F8FAFC'
       },
-      formatter: '{b}: {c} ({d}%)'
+      formatter: '{b}: {c}/20 ({d}%)'
     },
     series: [
       {
-        name: 'Votes',
+        name: 'Score',
         type: 'pie',
         radius: ['50%', '70%'],
         center: ['50%', '50%'],
@@ -46,9 +62,7 @@ const chartOption = computed(() => {
           show: true,
           position: 'center',
           formatter: () => {
-            const winningVotes = Math.max(bullish, bearish)
-            const percentage = Math.round((winningVotes / total) * 100)
-            return `{value|${percentage}%}\n{label|Confidence}`
+            return `{value|${buy}:${sell}}\n{label|BUY : SELL}`
           },
           rich: {
             value: {
@@ -75,8 +89,8 @@ const chartOption = computed(() => {
         },
         data: [
           {
-            value: bullish,
-            name: 'Bullish',
+            value: buy,
+            name: 'BUY',
             itemStyle: {
               color: {
                 type: 'linear',
@@ -92,8 +106,8 @@ const chartOption = computed(() => {
             }
           },
           {
-            value: bearish,
-            name: 'Bearish',
+            value: sell,
+            name: 'SELL',
             itemStyle: {
               color: {
                 type: 'linear',

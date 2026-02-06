@@ -74,19 +74,43 @@
       <p class="text-red-300 text-xs mt-1">Wait for new signal</p>
     </div>
 
-    <!-- Vote Summary -->
-    <div class="flex justify-center space-x-6 sm:space-x-8 mb-3 sm:mb-4">
-      <div class="text-center">
-        <div class="text-lg sm:text-2xl font-bold text-green-500">
-          {{ bullishVotes }}
-        </div>
-        <div class="text-gray-500 text-xs sm:text-sm">Bullish</div>
+    <!-- Vote Summary - 20-Point Scoring System -->
+    <div class="mb-3 sm:mb-4">
+      <!-- Score Display -->
+      <div class="text-center mb-2">
+        <span class="text-sm sm:text-base font-mono px-3 py-1 rounded-lg" :class="scoreDisplayBgClass">
+          {{ scoreDisplay }}
+        </span>
       </div>
-      <div class="text-center">
-        <div class="text-lg sm:text-2xl font-bold text-red-500">
-          {{ bearishVotes }}
+      
+      <!-- Visual Score Bar -->
+      <div class="flex items-center justify-center gap-2 mb-2">
+        <div class="text-lg sm:text-2xl font-bold text-green-500 w-10 text-right">
+          {{ buyScore }}
         </div>
-        <div class="text-gray-500 text-xs sm:text-sm">Bearish</div>
+        <div class="flex-1 max-w-32 sm:max-w-48 h-3 sm:h-4 bg-gray-700 rounded-full overflow-hidden flex">
+          <div 
+            class="h-full bg-green-500 transition-all duration-500"
+            :style="{ width: (buyScore / 20 * 100) + '%' }"
+          ></div>
+          <div 
+            class="h-full bg-red-500 transition-all duration-500"
+            :style="{ width: (sellScore / 20 * 100) + '%' }"
+          ></div>
+        </div>
+        <div class="text-lg sm:text-2xl font-bold text-red-500 w-10 text-left">
+          {{ sellScore }}
+        </div>
+      </div>
+      
+      <!-- Score Strength Badge -->
+      <div class="flex justify-center gap-4">
+        <span 
+          class="px-2 py-0.5 rounded text-xs font-semibold"
+          :class="scoreStrengthClass"
+        >
+          {{ scoreStrengthText }}
+        </span>
       </div>
     </div>
 
@@ -273,6 +297,65 @@ const bullishVotes = computed(() => {
 
 const bearishVotes = computed(() => {
   return props.signal?.vote_details?.bearish || 0;
+});
+
+// New: 20-point scoring system
+const buyScore = computed(() => {
+  return props.signal?.buy_score ?? 10;
+});
+
+const sellScore = computed(() => {
+  return props.signal?.sell_score ?? 10;
+});
+
+const netScore = computed(() => {
+  return props.signal?.net_score ?? 0;
+});
+
+const scoreDisplay = computed(() => {
+  return props.signal?.score_display || `BUY ${buyScore.value} : ${sellScore.value} SELL`;
+});
+
+const scoreStrength = computed(() => {
+  return props.signal?.score_strength || 'NEUTRAL';
+});
+
+const scoreStrengthText = computed(() => {
+  switch (scoreStrength.value) {
+    case 'EXTREME':
+      return '🔥 EXTREME';
+    case 'STRONG':
+      return '💪 STRONG';
+    case 'MODERATE':
+      return '👌 MODERATE';
+    case 'WEAK':
+      return '👋 WEAK';
+    default:
+      return '⚖️ NEUTRAL';
+  }
+});
+
+const scoreStrengthClass = computed(() => {
+  switch (scoreStrength.value) {
+    case 'EXTREME':
+      return netScore.value > 0 ? 'bg-green-600 text-white animate-pulse' : 'bg-red-600 text-white animate-pulse';
+    case 'STRONG':
+      return netScore.value > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white';
+    case 'MODERATE':
+      return 'bg-yellow-500 text-gray-900';
+    case 'WEAK':
+      return 'bg-gray-500 text-white';
+    default:
+      return 'bg-gray-600 text-white';
+  }
+});
+
+const scoreDisplayBgClass = computed(() => {
+  if (netScore.value >= 12) return 'bg-green-900/50 text-green-400 border border-green-500/30';
+  if (netScore.value >= 4) return 'bg-green-900/30 text-green-300';
+  if (netScore.value <= -12) return 'bg-red-900/50 text-red-400 border border-red-500/30';
+  if (netScore.value <= -4) return 'bg-red-900/30 text-red-300';
+  return 'bg-gray-800 text-gray-300';
 });
 
 const timestamp = computed(() => {

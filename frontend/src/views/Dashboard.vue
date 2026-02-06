@@ -92,9 +92,23 @@
       <!-- Vote Details -->
       <div class="card p-3 sm:p-4">
         <h3 class="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
-          Vote Analysis
+          Score Analysis
         </h3>
-        <VoteChart :vote-details="voteDetails" />
+        <VoteChart 
+          :vote-details="voteDetails" 
+          :buy-score="currentSignal?.buy_score || 10"
+          :sell-score="currentSignal?.sell_score || 10"
+          :score-display="currentSignal?.score_display || ''"
+        />
+        <!-- Score Strength Display -->
+        <div v-if="currentSignal?.score_strength" class="text-center mt-3">
+          <span 
+            class="px-3 py-1 rounded-lg text-sm font-semibold"
+            :class="scoreStrengthClass"
+          >
+            {{ scoreStrengthDisplay }}
+          </span>
+        </div>
       </div>
 
       <!-- Matched Patterns List -->
@@ -178,6 +192,42 @@ const voteDetails = computed(() => {
   return (
     currentSignal.value?.vote_details || { bullish: 0, bearish: 0, total: 0 }
   );
+});
+
+// New: Score strength display helpers
+const scoreStrengthClass = computed(() => {
+  const strength = currentSignal.value?.score_strength;
+  const netScore = currentSignal.value?.net_score || 0;
+  switch (strength) {
+    case 'EXTREME':
+      return netScore > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white';
+    case 'STRONG':
+      return netScore > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white';
+    case 'MODERATE':
+      return 'bg-yellow-500 text-gray-900';
+    case 'WEAK':
+      return 'bg-gray-500 text-white';
+    default:
+      return 'bg-gray-600 text-white';
+  }
+});
+
+const scoreStrengthDisplay = computed(() => {
+  const strength = currentSignal.value?.score_strength;
+  const netScore = currentSignal.value?.net_score || 0;
+  const direction = netScore > 0 ? '?? BUY' : netScore < 0 ? '?? SELL' : '??';
+  switch (strength) {
+    case 'EXTREME':
+      return `?? ${direction} EXTREME`;
+    case 'STRONG':
+      return `?? ${direction} STRONG`;
+    case 'MODERATE':
+      return `?? ${direction} MODERATE`;
+    case 'WEAK':
+      return `?? ${direction} WEAK`;
+    default:
+      return '?? NEUTRAL';
+  }
 });
 
 const matchedPatternsList = computed(() => {

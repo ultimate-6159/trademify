@@ -80,24 +80,54 @@
 
     <!-- Voting Analysis -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Vote Distribution -->
+      <!-- Vote Distribution - Updated with 20-point scoring -->
       <div class="card">
-        <h3 class="text-lg font-semibold text-white mb-4">Vote Distribution</h3>
-        <div class="h-64">
+        <h3 class="text-lg font-semibold text-white mb-4">Score Analysis</h3>
+        
+        <!-- 20-Point Score Display -->
+        <div class="text-center mb-4">
+          <div class="text-2xl font-mono font-bold mb-2" :class="scoreDisplayClass">
+            {{ scoreDisplay }}
+          </div>
+          <span 
+            class="px-3 py-1 rounded-lg text-sm font-semibold"
+            :class="scoreStrengthClass"
+          >
+            {{ scoreStrengthText }}
+          </span>
+        </div>
+        
+        <!-- Visual Score Bar -->
+        <div class="flex items-center justify-center gap-3 mb-4">
+          <div class="text-2xl font-bold text-green-500 w-12 text-right">
+            {{ buyScore }}
+          </div>
+          <div class="flex-1 max-w-48 h-5 bg-gray-700 rounded-full overflow-hidden flex">
+            <div 
+              class="h-full bg-green-500 transition-all duration-500"
+              :style="{ width: (buyScore / 20 * 100) + '%' }"
+            ></div>
+            <div 
+              class="h-full bg-red-500 transition-all duration-500"
+              :style="{ width: (sellScore / 20 * 100) + '%' }"
+            ></div>
+          </div>
+          <div class="text-2xl font-bold text-red-500 w-12 text-left">
+            {{ sellScore }}
+          </div>
+        </div>
+        
+        <div class="h-48">
           <v-chart :option="voteChartOption" autoresize />
         </div>
-        <div class="mt-4 grid grid-cols-3 gap-4 text-center">
-          <div>
-            <p class="text-sm text-gray-400">Bullish</p>
-            <p class="text-xl font-bold text-success">{{ votes.bullish }}</p>
+        <div class="mt-4 grid grid-cols-2 gap-4 text-center">
+          <div class="bg-green-900/20 rounded-lg p-3">
+            <p class="text-sm text-gray-400">BUY Score</p>
+            <p class="text-2xl font-bold text-success">{{ buyScore }}/20</p>
           </div>
-          <div>
-            <p class="text-sm text-gray-400">Bearish</p>
-            <p class="text-xl font-bold text-danger">{{ votes.bearish }}</p>
-          </div>
-          <div>
-            <p class="text-sm text-gray-400">Neutral</p>
-            <p class="text-xl font-bold text-gray-400">{{ votes.neutral }}</p>
+          <div class="bg-red-900/20 rounded-lg p-3">
+            <p class="text-sm text-gray-400">SELL Score</p>
+            <p class="text-2xl font-bold text-danger">{{ sellScore }}/20</p>
           </div>
         </div>
       </div>
@@ -243,6 +273,52 @@ const votes = computed(() => {
     bullish: vd.bullish || 0,
     bearish: vd.bearish || 0,
     neutral: vd.total ? vd.total - (vd.bullish || 0) - (vd.bearish || 0) : 0
+  }
+})
+
+// New: 20-point scoring system
+const buyScore = computed(() => analysis.value?.buy_score ?? 10)
+const sellScore = computed(() => analysis.value?.sell_score ?? 10)
+const netScore = computed(() => analysis.value?.net_score ?? 0)
+const scoreDisplay = computed(() => analysis.value?.score_display || `BUY ${buyScore.value} : ${sellScore.value} SELL`)
+const scoreStrength = computed(() => analysis.value?.score_strength || 'NEUTRAL')
+
+const scoreDisplayClass = computed(() => {
+  if (netScore.value >= 12) return 'text-green-400'
+  if (netScore.value >= 4) return 'text-green-300'
+  if (netScore.value <= -12) return 'text-red-400'
+  if (netScore.value <= -4) return 'text-red-300'
+  return 'text-gray-300'
+})
+
+const scoreStrengthClass = computed(() => {
+  switch (scoreStrength.value) {
+    case 'EXTREME':
+      return netScore.value > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+    case 'STRONG':
+      return netScore.value > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+    case 'MODERATE':
+      return 'bg-yellow-500 text-gray-900'
+    case 'WEAK':
+      return 'bg-gray-500 text-white'
+    default:
+      return 'bg-gray-600 text-white'
+  }
+})
+
+const scoreStrengthText = computed(() => {
+  const direction = netScore.value > 0 ? '📈 BUY' : netScore.value < 0 ? '📉 SELL' : ''
+  switch (scoreStrength.value) {
+    case 'EXTREME':
+      return `🔥 ${direction} EXTREME`
+    case 'STRONG':
+      return `💪 ${direction} STRONG`
+    case 'MODERATE':
+      return `👌 ${direction} MODERATE`
+    case 'WEAK':
+      return `👋 ${direction} WEAK`
+    default:
+      return '⚖️ NEUTRAL'
   }
 })
 
@@ -394,27 +470,25 @@ const voteChartOption = computed(() => ({
       center: ['50%', '50%'],
       data: [
         { 
-          value: votes.value.bullish, 
-          name: 'Bullish',
+          value: buyScore.value, 
+          name: 'BUY',
           itemStyle: { color: '#10b981' }
         },
         { 
-          value: votes.value.bearish, 
-          name: 'Bearish',
+          value: sellScore.value, 
+          name: 'SELL',
           itemStyle: { color: '#ef4444' }
-        },
-        { 
-          value: votes.value.neutral, 
-          name: 'Neutral',
-          itemStyle: { color: '#6b7280' }
         }
       ],
       label: {
         show: true,
-        formatter: '{b}: {c}',
-        color: '#9ca3af'
+        position: 'center',
+        formatter: () => `${buyScore.value}:${sellScore.value}`,
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#f8fafc'
       },
-      labelLine: { lineStyle: { color: '#374151' } }
+      labelLine: { show: false }
     }
   ]
 }))
