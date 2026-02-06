@@ -397,6 +397,51 @@ _peak_detection_config = {
 # 🏔️ Peak Detection Results Cache
 _peak_detection_results = {}  # {symbol: {"extreme": "PEAK", "is_peak": True, "timestamp": datetime, ...}}
 
+# =====================
+# 🏔️💰 PEAK/BOTTOM PROFIT LOCK - ปิดกำไรทันทีเมื่อเจอ Peak/Bottom!
+# =====================
+# 🎯 ปัญหา: Position กำไรอยู่ แต่ถือต่อ → เจอ reversal → หายหมด!
+# 🔥 Solution: ตรวจจับ peak/bottom → ปิดทันทีเพื่อล็อกกำไร!
+#
+# Logic:
+#   - BUY position + กำไร + เจอ PEAK → ปิดทันที! (ก่อนราคาลง)
+#   - SELL position + กำไร + เจอ BOTTOM → ปิดทันที! (ก่อนราคาขึ้น)
+#
+# 📋 PRIORITY ORDER (เพิ่มใหม่!):
+#   1️⃣ Trailing Stop - ยก SL ตาม ATR
+#   2️⃣ Peak/Bottom Profit Lock (นี่!) - ปิดเมื่อเจอ peak/bottom ⬅️ NEW!
+#   3️⃣ Signal Fade - ย้าย SL หรือปิดเมื่อ confidence ลด
+#   4️⃣ WAIT Signal Close - ปิดเมื่อ WAIT + กำไรดี
+#   5️⃣ Reverse Signal Close - ปิดเมื่อสัญญาณตรงข้าม
+
+_peak_profit_lock_config = {
+    "enabled": True,                              # ✅ เปิด! ล็อกกำไรเมื่อเจอ peak/bottom
+    
+    # 💰 PROFIT REQUIREMENTS
+    "min_profit_to_lock_percent": 1.0,            # 🎯 ต้องมีกำไร >= 1% ของ balance ถึงจะล็อก
+    "min_profit_to_lock_usd": 5.0,                # 🎯 หรือ >= $5 (สำหรับ port เล็ก)
+    
+    # 🏔️ PEAK/BOTTOM THRESHOLDS
+    "peak_score_threshold": 40,                   # 📈 Peak score >= 40 = เจอ peak
+    "bottom_score_threshold": -40,                # 📉 Peak score <= -40 = เจอ bottom
+    "near_peak_score_threshold": 25,              # ⚠️ Near peak >= 25
+    "near_bottom_score_threshold": -25,           # ⚠️ Near bottom <= -25
+    
+    # 🎯 ACTIONS
+    "close_on_peak": True,                        # ✅ ปิด BUY เมื่อเจอ peak
+    "close_on_bottom": True,                      # ✅ ปิด SELL เมื่อเจอ bottom
+    "close_on_near_peak": False,                  # ❌ ไม่ปิดเมื่อใกล้ peak (แค่ warning)
+    "close_on_near_bottom": False,                # ❌ ไม่ปิดเมื่อใกล้ bottom (แค่ warning)
+    
+    # ⏱️ COOLDOWN
+    "min_hold_time_seconds": 60,                  # 🔒 ต้องถือ position >= 60 วินาทีก่อนปิด
+    "check_interval_seconds": 30,                 # 🔄 ตรวจสอบทุก 30 วินาที
+    "cooldown_seconds": 300,                      # 🔒 หลังปิด รอ 5 นาทีก่อนปิด symbol เดิมอีก
+    
+    # 📊 LOGGING
+    "log_detections": True,                       # 📝 Log เมื่อเจอ peak/bottom
+}
+
 # 🎯 PULLBACK ENTRY STRATEGY - รอ pullback ก่อนเข้าเทรด
 # ❌ ปิดชั่วคราว! ทำให้พลาดโอกาสเทรดเมื่อราคาพุ่งตรงๆ
 _pullback_config = {
@@ -1577,6 +1622,186 @@ def _detect_extreme_candle_simple(high: np.ndarray, low: np.ndarray, close: np.n
     return "NONE"
 
 
+# =====================
+# 💰 PEAK/BOTTOM PROFIT LOCK - ล็อกกำไรเมื่อเจอ Peak/Bottom!
+# =====================
+# 🏆 PRIORITY #1.5: ทำงานหลัง Trailing Stop แต่ก่อน Signal Fade
+# 
+# Logic:
+#   - BUY position + profit + PEAK detected → CLOSE ทันที!
+#   - SELL position + profit + BOTTOM detected → CLOSE ทันที!
+#
+# 🎯 ทำไม logic นี้ดี:
+#   - Peak = ราคาสูงสุดแล้ว → ถ้ามี BUY ที่กำไร ควรปิดก่อนราคาลง
+#   - Bottom = ราคาต่ำสุดแล้ว → ถ้ามี SELL ที่กำไร ควรปิดก่อนราคาขึ้น
+
+# Track last peak lock to prevent spam closing
+_peak_lock_last_close = {}  # {symbol: datetime}
+
+
+async def _check_and_close_on_peak_bottom():
+    """
+    💰 PEAK/BOTTOM PROFIT LOCK - ล็อกกำไรเมื่อเจอ Peak/Bottom!
+    
+    🏆 Priority: #1.5 (หลัง Trailing Stop, ก่อน Signal Fade)
+    
+    Logic:
+    - ดึง positions ทั้งหมด
+    - ตรวจสอบว่ามีกำไรหรือไม่
+    - รัน Peak Detection สำหรับ symbol นั้น
+    - ถ้า BUY + peak_score >= threshold → ปิดทันที
+    - ถ้า SELL + peak_score <= -threshold → ปิดทันที
+    
+    Returns: List of closed positions
+    """
+    global _bot, _peak_profit_lock_config, _bot_status, _peak_lock_last_close
+    
+    if not _peak_profit_lock_config.get("enabled", True):
+        return []
+    
+    if not _bot or not _bot.trading_engine:
+        return []
+    
+    closed_positions = []
+    
+    try:
+        # Get current positions
+        positions = await _bot.trading_engine.broker.get_positions()
+        if not positions:
+            return []
+        
+        # Get balance for % calculations
+        try:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+        except:
+            balance = 1000
+        
+        # Calculate minimum profit thresholds
+        min_profit_pct = _peak_profit_lock_config.get("min_profit_to_lock_percent", 1.0)
+        min_profit_usd = _peak_profit_lock_config.get("min_profit_to_lock_usd", 5.0)
+        min_profit = max(balance * (min_profit_pct / 100), min_profit_usd)
+        
+        peak_threshold = _peak_profit_lock_config.get("peak_score_threshold", 40)
+        bottom_threshold = _peak_profit_lock_config.get("bottom_score_threshold", -40)
+        min_hold_time = _peak_profit_lock_config.get("min_hold_time_seconds", 60)
+        cooldown_seconds = _peak_profit_lock_config.get("cooldown_seconds", 300)
+        
+        for pos in positions:
+            try:
+                # Extract position info
+                if isinstance(pos, dict):
+                    pos_id = pos.get("ticket") or pos.get("id")
+                    pos_symbol = pos.get("symbol", "")
+                    pos_side = pos.get("side", "").upper()
+                    pos_pnl = float(pos.get("profit", 0) or 0)
+                    pos_time = pos.get("time", None)
+                else:
+                    pos_id = getattr(pos, "ticket", None) or getattr(pos, "id", None)
+                    pos_symbol = getattr(pos, "symbol", "")
+                    pos_side = getattr(pos, "side", "")
+                    if hasattr(pos_side, "value"):
+                        pos_side = pos_side.value.upper()
+                    pos_pnl = float(getattr(pos, "profit", 0) or 0)
+                    pos_time = getattr(pos, "time", None)
+                
+                if not pos_id or not pos_symbol:
+                    continue
+                
+                # Skip if no profit or below threshold
+                if pos_pnl < min_profit:
+                    continue
+                
+                # Check cooldown (prevent spam closing)
+                last_close = _peak_lock_last_close.get(pos_symbol)
+                if last_close:
+                    elapsed = (datetime.now() - last_close).total_seconds()
+                    if elapsed < cooldown_seconds:
+                        logger.debug(f"💰 Peak lock cooldown active for {pos_symbol}: {int(cooldown_seconds - elapsed)}s remaining")
+                        continue
+                
+                # Get data for peak detection
+                if not _bot.data_provider:
+                    continue
+                
+                df = await _bot.data_provider.get_klines(symbol=pos_symbol, timeframe="H1", limit=100)
+                if df is None or len(df) < 30:
+                    continue
+                
+                # Determine signal based on position side (for peak detection context)
+                signal_for_detection = "BUY" if pos_side == "BUY" else "SELL"
+                
+                # Run peak detection
+                peak_result = await _run_peak_detection(pos_symbol, df, signal_for_detection)
+                
+                if not peak_result:
+                    continue
+                
+                peak_score = peak_result.get("peak_score", 0)
+                is_peak = peak_result.get("is_peak", False)
+                is_bottom = peak_result.get("is_bottom", False)
+                
+                should_close = False
+                close_reason = ""
+                
+                # Check if BUY position at PEAK
+                if pos_side == "BUY" and _peak_profit_lock_config.get("close_on_peak", True):
+                    if peak_score >= peak_threshold or is_peak:
+                        should_close = True
+                        close_reason = f"🏔️ BUY at PEAK (score={peak_score}, profit=${pos_pnl:.2f})"
+                
+                # Check if SELL position at BOTTOM
+                elif pos_side == "SELL" and _peak_profit_lock_config.get("close_on_bottom", True):
+                    if peak_score <= bottom_threshold or is_bottom:
+                        should_close = True
+                        close_reason = f"🏜️ SELL at BOTTOM (score={peak_score}, profit=${pos_pnl:.2f})"
+                
+                if should_close:
+                    logger.warning(f"💰 PEAK PROFIT LOCK: {pos_symbol} #{pos_id}")
+                    logger.warning(f"   {close_reason}")
+                    logger.warning(f"   Position: {pos_side} | Profit: ${pos_pnl:.2f}")
+                    logger.warning(f"   ACTION: Closing to LOCK PROFIT!")
+                    
+                    # Log peak detection reasons
+                    reasons = peak_result.get("reasons", [])[:3]
+                    for reason in reasons:
+                        logger.info(f"   📊 {reason}")
+                    
+                    try:
+                        result = await _bot.trading_engine.broker.close_position(pos_id)
+                        if result:
+                            logger.info(f"✅ Position #{pos_id} closed! Locked profit: ${pos_pnl:.2f}")
+                            
+                            # Update stats
+                            _bot_status["daily_stats"]["trades"] += 1
+                            _bot_status["daily_stats"]["pnl"] += pos_pnl
+                            _bot_status["daily_stats"]["wins"] += 1
+                            
+                            # Update cooldown
+                            _peak_lock_last_close[pos_symbol] = datetime.now()
+                            
+                            closed_positions.append({
+                                "ticket": pos_id,
+                                "symbol": pos_symbol,
+                                "side": pos_side,
+                                "pnl": pos_pnl,
+                                "peak_score": peak_score,
+                                "reason": close_reason,
+                            })
+                        else:
+                            logger.error(f"❌ Failed to close position #{pos_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Error closing position #{pos_id}: {e}")
+                        
+            except Exception as e:
+                logger.warning(f"Error checking position for peak lock: {e}")
+        
+        return closed_positions
+        
+    except Exception as e:
+        logger.error(f"Error in peak/bottom profit lock: {e}")
+        return []
+
+
 def _load_state() -> Optional[Dict]:
     """📂 Load bot state from file for recovery"""
     global _stability_config
@@ -2531,6 +2756,15 @@ async def _run_bot_loop(interval: int, auto_trade: bool):
             # ⚠️ สำคัญมาก: ต้องยก SL ก่อนที่ระบบอื่นจะปิด position
             # ถ้าทำหลัง analysis → position อาจถูกปิดก่อนยก SL
             await _auto_trailing_stop()
+            
+            # =====================================================
+            # 🏆 PRIORITY #1.5: PEAK/BOTTOM PROFIT LOCK - ปิดเมื่อเจอ peak/bottom!
+            # =====================================================
+            # 💰 ถ้ามีกำไร + เจอ peak/bottom → ปิดทันทีเพื่อล็อกกำไร
+            peak_locked = await _check_and_close_on_peak_bottom()
+            if peak_locked:
+                for pos in peak_locked:
+                    logger.info(f"💰 PEAK PROFIT LOCKED: {pos['symbol']} ${pos['pnl']:.2f}")
             
             # 🚀 PARALLEL ANALYSIS - วิเคราะห์ทุก symbol พร้อมกัน!
             # ⚠️ ข้างในมีระบบ Priority #2-#4 ที่อาจปิด position:
@@ -8555,4 +8789,236 @@ async def set_peak_detection_preset(preset: str):
         "preset": preset,
         "description": config["description"],
         "config": _peak_detection_config
+    }
+
+
+# =====================
+# 💰 PEAK/BOTTOM PROFIT LOCK - ล็อกกำไรเมื่อเจอ Peak/Bottom!
+# =====================
+
+@router.get("/peak-profit-lock")
+async def get_peak_profit_lock_config():
+    """
+    💰 Get Peak/Bottom Profit Lock configuration
+    
+    ระบบล็อกกำไรอัตโนมัติเมื่อเจอ peak/bottom:
+    - BUY position + กำไร + เจอ PEAK → ปิดทันที!
+    - SELL position + กำไร + เจอ BOTTOM → ปิดทันที!
+    
+    🎯 ทำไมต้องใช้:
+    - กำไรอยู่ดีๆ แต่ไม่ปิด → เจอ reversal → หายหมด!
+    - ระบบนี้ช่วยล็อกกำไรก่อนราคากลับตัว
+    """
+    global _peak_profit_lock_config, _peak_lock_last_close, _bot
+    
+    # Get current balance for examples
+    balance = 1000
+    try:
+        if _bot and _bot.trading_engine:
+            balance = await _bot.trading_engine.broker.get_balance() or 1000
+    except:
+        pass
+    
+    min_profit_pct = _peak_profit_lock_config.get("min_profit_to_lock_percent", 1.0)
+    min_profit_usd = _peak_profit_lock_config.get("min_profit_to_lock_usd", 5.0)
+    min_profit = max(balance * (min_profit_pct / 100), min_profit_usd)
+    
+    return {
+        "config": _peak_profit_lock_config,
+        "current_balance": balance,
+        "current_min_profit": f"${min_profit:.2f}",
+        "last_closes": {k: v.isoformat() for k, v in _peak_lock_last_close.items()},
+        "description": {
+            "enabled": "เปิด/ปิด Peak Profit Lock",
+            "min_profit_to_lock_percent": "กำไรขั้นต่ำ (% ของ balance)",
+            "min_profit_to_lock_usd": "กำไรขั้นต่ำ ($) - ใช้ค่าที่มากกว่า",
+            "peak_score_threshold": "Peak score ที่ถือว่าเป็น peak",
+            "bottom_score_threshold": "Peak score ที่ถือว่าเป็น bottom",
+            "close_on_peak": "ปิด BUY เมื่อเจอ peak",
+            "close_on_bottom": "ปิด SELL เมื่อเจอ bottom",
+            "cooldown_seconds": "รอกี่วินาทีหลังปิดก่อนปิดอีก",
+        },
+        "examples": {
+            "$100 port": f"min_profit: ${max(100 * min_profit_pct / 100, min_profit_usd):.2f}",
+            "$1,000 port": f"min_profit: ${max(1000 * min_profit_pct / 100, min_profit_usd):.2f}",
+            "$10,000 port": f"min_profit: ${max(10000 * min_profit_pct / 100, min_profit_usd):.2f}",
+        },
+        "priority": "🏆 Priority #1.5: หลัง Trailing Stop, ก่อน Signal Fade"
+    }
+
+
+@router.post("/peak-profit-lock/toggle")
+async def toggle_peak_profit_lock(enabled: bool = True):
+    """
+    💰 Enable/Disable Peak/Bottom Profit Lock
+    
+    - enabled=true: ปิดกำไรอัตโนมัติเมื่อเจอ peak/bottom (แนะนำ!)
+    - enabled=false: ไม่ปิดอัตโนมัติ
+    """
+    global _peak_profit_lock_config
+    
+    _peak_profit_lock_config["enabled"] = enabled
+    
+    status = "ENABLED ✅" if enabled else "DISABLED ❌"
+    logger.info(f"💰 Peak Profit Lock: {status}")
+    
+    return {
+        "status": "success",
+        "peak_profit_lock_enabled": enabled,
+        "message": f"Peak Profit Lock {status}",
+        "note": "ปิดกำไรทันทีเมื่อเจอ peak/bottom!" if enabled else "ไม่ปิดกำไรอัตโนมัติ"
+    }
+
+
+@router.post("/peak-profit-lock/configure")
+async def configure_peak_profit_lock(
+    min_profit_percent: float = None,
+    min_profit_usd: float = None,
+    peak_score_threshold: int = None,
+    bottom_score_threshold: int = None,
+    close_on_peak: bool = None,
+    close_on_bottom: bool = None,
+    cooldown_seconds: int = None,
+    min_hold_time: int = None,
+):
+    """
+    💰 Configure Peak/Bottom Profit Lock
+    
+    - min_profit_percent: กำไรขั้นต่ำ % ของ balance (default: 1.0)
+    - min_profit_usd: กำไรขั้นต่ำ $ สำหรับ port เล็ก (default: 5.0)
+    - peak_score_threshold: Peak score ที่ถือว่าเป็น peak (default: 40)
+    - bottom_score_threshold: Peak score ที่ถือว่าเป็น bottom (default: -40)
+    - close_on_peak: ปิด BUY เมื่อเจอ peak
+    - close_on_bottom: ปิด SELL เมื่อเจอ bottom
+    - cooldown_seconds: รอกี่วินาทีหลังปิดก่อนปิด symbol เดิมอีก
+    - min_hold_time: ถือ position กี่วินาทีก่อนปิด
+    """
+    global _peak_profit_lock_config
+    
+    changes = []
+    
+    if min_profit_percent is not None:
+        _peak_profit_lock_config["min_profit_to_lock_percent"] = max(0.5, min(10, min_profit_percent))
+        changes.append(f"min_profit_percent: {_peak_profit_lock_config['min_profit_to_lock_percent']}%")
+    
+    if min_profit_usd is not None:
+        _peak_profit_lock_config["min_profit_to_lock_usd"] = max(1, min(1000, min_profit_usd))
+        changes.append(f"min_profit_usd: ${_peak_profit_lock_config['min_profit_to_lock_usd']}")
+    
+    if peak_score_threshold is not None:
+        _peak_profit_lock_config["peak_score_threshold"] = max(20, min(80, peak_score_threshold))
+        changes.append(f"peak_threshold: {_peak_profit_lock_config['peak_score_threshold']}")
+    
+    if bottom_score_threshold is not None:
+        _peak_profit_lock_config["bottom_score_threshold"] = min(-20, max(-80, bottom_score_threshold))
+        changes.append(f"bottom_threshold: {_peak_profit_lock_config['bottom_score_threshold']}")
+    
+    if close_on_peak is not None:
+        _peak_profit_lock_config["close_on_peak"] = close_on_peak
+        changes.append(f"close_on_peak: {close_on_peak}")
+    
+    if close_on_bottom is not None:
+        _peak_profit_lock_config["close_on_bottom"] = close_on_bottom
+        changes.append(f"close_on_bottom: {close_on_bottom}")
+    
+    if cooldown_seconds is not None:
+        _peak_profit_lock_config["cooldown_seconds"] = max(60, min(3600, cooldown_seconds))
+        changes.append(f"cooldown: {_peak_profit_lock_config['cooldown_seconds']}s")
+    
+    if min_hold_time is not None:
+        _peak_profit_lock_config["min_hold_time_seconds"] = max(10, min(600, min_hold_time))
+        changes.append(f"min_hold_time: {_peak_profit_lock_config['min_hold_time_seconds']}s")
+    
+    logger.info(f"💰 Peak Profit Lock configured: {changes}")
+    
+    return {
+        "status": "success",
+        "changes": changes,
+        "config": _peak_profit_lock_config
+    }
+
+
+@router.post("/peak-profit-lock/reset-cooldown")
+async def reset_peak_lock_cooldown(symbol: str = None):
+    """
+    💰 Reset Peak Lock Cooldown
+    
+    - symbol: Reset cooldown สำหรับ symbol นี้
+    - ถ้าไม่ระบุ: Reset ทั้งหมด
+    """
+    global _peak_lock_last_close
+    
+    if symbol:
+        if symbol in _peak_lock_last_close:
+            del _peak_lock_last_close[symbol]
+            return {"status": "reset", "symbol": symbol}
+        else:
+            return {"status": "not_found", "symbol": symbol}
+    else:
+        count = len(_peak_lock_last_close)
+        _peak_lock_last_close.clear()
+        return {"status": "reset_all", "cleared_count": count}
+
+
+@router.post("/peak-profit-lock/preset/{preset}")
+async def set_peak_profit_lock_preset(preset: str):
+    """
+    💰 Set Peak Profit Lock Preset
+    
+    Presets:
+    - aggressive: ปิดกำไรเร็ว (score >= 30, profit >= 0.5%)
+    - balanced: สมดุล (score >= 40, profit >= 1%) - แนะนำ!
+    - conservative: ปิดเมื่อชัดเจน (score >= 50, profit >= 2%)
+    """
+    global _peak_profit_lock_config
+    
+    presets = {
+        "aggressive": {
+            "min_profit_to_lock_percent": 0.5,
+            "min_profit_to_lock_usd": 3.0,
+            "peak_score_threshold": 30,
+            "bottom_score_threshold": -30,
+            "close_on_peak": True,
+            "close_on_bottom": True,
+            "cooldown_seconds": 180,
+            "description": "⚡ Aggressive: ปิดกำไรเร็ว (score >= 30, profit >= 0.5%)"
+        },
+        "balanced": {
+            "min_profit_to_lock_percent": 1.0,
+            "min_profit_to_lock_usd": 5.0,
+            "peak_score_threshold": 40,
+            "bottom_score_threshold": -40,
+            "close_on_peak": True,
+            "close_on_bottom": True,
+            "cooldown_seconds": 300,
+            "description": "⚖️ Balanced: สมดุล (score >= 40, profit >= 1%) - แนะนำ!"
+        },
+        "conservative": {
+            "min_profit_to_lock_percent": 2.0,
+            "min_profit_to_lock_usd": 10.0,
+            "peak_score_threshold": 50,
+            "bottom_score_threshold": -50,
+            "close_on_peak": True,
+            "close_on_bottom": True,
+            "cooldown_seconds": 600,
+            "description": "🔒 Conservative: ปิดเมื่อชัดเจน (score >= 50, profit >= 2%)"
+        }
+    }
+    
+    if preset not in presets:
+        return {"status": "error", "message": f"Unknown preset: {preset}. Available: {list(presets.keys())}"}
+    
+    config = presets[preset]
+    
+    for key, value in config.items():
+        if key != "description":
+            _peak_profit_lock_config[key] = value
+    
+    logger.info(f"💰 Preset '{preset}' activated: {config['description']}")
+    
+    return {
+        "status": "success",
+        "preset": preset,
+        "description": config["description"],
+        "config": _peak_profit_lock_config
     }

@@ -46,8 +46,16 @@ from api.trading_routes import router as trading_router, init_trading_system
 # Import unified bot router
 from api.unified_bot import router as unified_router
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup enterprise logging with rotation
+try:
+    from config.logging_config import setup_logging
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("✅ Enterprise logging configured with rotation")
+except ImportError:
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.warning("⚠️ Using basic logging (logging_config.py not found)")
 
 # Bot settings file for auto-start
 BOT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'bot_settings.json')
