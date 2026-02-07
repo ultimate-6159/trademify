@@ -75,15 +75,15 @@ class BacktestConfig:
     leverage: int = 100
     currency: str = "USD"
     
-    # Risk settings - 🔥 ULTRA EXTREME!
-    max_risk_per_trade: float = 5.0  # % (ULTRA EXTREME - 5%)
-    max_daily_loss: float = 50.0  # % (ULTRA EXTREME - 50%)
-    max_drawdown: float = 30.0  # % (ULTRA EXTREME - 30%)
+    # Risk settings - 🎯 SNIPER 90+
+    max_risk_per_trade: float = 1.5  # % (SNIPER - conservative)
+    max_daily_loss: float = 8.0  # % (SNIPER - tight)
+    max_drawdown: float = 10.0  # % (SNIPER - strict)
     
-    # Signal settings - 🔥 ULTRA EXTREME!
-    min_quality: str = "LOW"  # PREMIUM, HIGH, MEDIUM, LOW (LOW = 40+, MEDIUM = 65+, HIGH = 75+, PREMIUM = 85+)
-    min_confidence: float = 50.0  # Minimum confidence score (ULTRA EXTREME - 50)
-    min_layer_pass_rate: float = 0.15  # 🔥 ULTRA EXTREME: Only 15% layers need to pass (3/20)
+    # Signal settings - 🎯 SNIPER 90+
+    min_quality: str = "MEDIUM"  # PREMIUM, HIGH, MEDIUM, LOW
+    min_confidence: float = 75.0  # Minimum confidence score
+    min_layer_pass_rate: float = 0.60  # 🎯 SNIPER 90+: 60% layers need to pass (12/20)
     
     # Execution settings
     slippage_pips: float = 1.0
@@ -99,16 +99,16 @@ class BacktestConfig:
     # "technical" = Use technical indicators only (no pattern database needed)
     signal_mode: str = "technical"
     
-    # 🔥 ULTRA EXTREME: Live Trading Realism Settings
+    # 🎯 SNIPER 90+: Live Trading Realism Settings
     use_live_trading_logic: bool = True  # Use exact same logic as Live Trading
-    min_high_quality_passes: int = 0  # 🔥 ULTRA EXTREME: No minimum required
-    min_key_agreement: float = 0.0  # 🔥 ULTRA EXTREME: No agreement required
+    min_high_quality_passes: int = 5  # 🎯 SNIPER 90+: Need 5 high quality passes
+    min_key_agreement: float = 0.60  # 🎯 SNIPER 90+: 60% key agreement required
     realistic_execution: bool = True  # Apply realistic slippage/spread model
     
-    # 🥇 TRAILING STOP SETTINGS - TIGHT FOR MAX PROFIT!
+    # 🎯 TRAILING STOP SETTINGS - TIGHT FOR SNIPER
     use_trailing_stop: bool = True  # Enable trailing stop
-    trailing_activation_pct: float = 0.10  # 🔥 ULTRA EXTREME: Activate after 10% of TP reached
-    trailing_distance_pct: float = 0.20  # 🔥 ULTRA EXTREME: Trail at 20% of profit
+    trailing_activation_pct: float = 0.08  # 🎯 SNIPER: Activate after 8% of TP reached
+    trailing_distance_pct: float = 0.15  # 🎯 SNIPER: Trail at 15% of profit
     
     # Output settings
     save_trades: bool = True
@@ -598,11 +598,12 @@ class BacktestEngine:
                 # 4. RSI CONFIRMATION (More relaxed for M15)
                 # ─────────────────────────────────────────────────────────────────
                 if is_m15:
-                    rsi_ok_buy = 30 <= rsi <= 70  # Wider range
-                    rsi_ok_sell = 30 <= rsi <= 70
+                    rsi_ok_buy = 35 <= rsi <= 60
+                    rsi_ok_sell = 40 <= rsi <= 65
                 else:
-                    rsi_ok_buy = 35 <= rsi <= 65
-                    rsi_ok_sell = 35 <= rsi <= 65
+                    # 🎯 SNIPER 90+: Ultra-tight RSI for Gold
+                    rsi_ok_buy = 40 <= rsi <= 55
+                    rsi_ok_sell = 45 <= rsi <= 60
                 
                 rsi_rising = rsi > rsi_prev
                 rsi_falling = rsi < rsi_prev
@@ -610,7 +611,8 @@ class BacktestEngine:
                 # ─────────────────────────────────────────────────────────────────
                 # 5. CANDLE CONFIRMATION (Relaxed for more signals)
                 # ─────────────────────────────────────────────────────────────────
-                min_body_ratio = 0.25 if is_m15 else 0.3
+                # 🎯 SNIPER 90+: Strong candle confirmation
+                min_body_ratio = 0.35 if is_m15 else 0.5
                 bullish_candle = is_bullish and body_ratio > min_body_ratio
                 bearish_candle = is_bearish and body_ratio > min_body_ratio
                 
@@ -620,15 +622,31 @@ class BacktestEngine:
                 # ─────────────────────────────────────────────────────────────────
                 # 6. PULLBACK ZONE (Wider for more signals)
                 # ─────────────────────────────────────────────────────────────────
+                # 🎯 SNIPER 90+: Tighter pullback zone
                 distance_to_ema = abs(current_price - ema_slow)
-                pullback_atr_mult = 3.0 if is_m15 else 2.5
+                pullback_atr_mult = 3.0 if is_m15 else 2.0
                 in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
                 
                 # ─────────────────────────────────────────────────────────────────
-                # 7. VOLATILITY CHECK (Relaxed)
+                # 7. VOLATILITY CHECK
                 # ─────────────────────────────────────────────────────────────────
-                max_volatility = 4.0 if is_m15 else 3.0
+                max_volatility = 3.0 if is_m15 else 2.0  # 🎯 SNIPER: Stricter
                 volatility_ok = atr_pct <= max_volatility
+                
+                # 🎯 SNIPER 90+: VOLUME CONFIRMATION
+                vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
+                avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
+                current_vol = vol_data[-1]
+                volume_ratio = current_vol / max(avg_volume_20, 1)
+                volume_confirmed = volume_ratio >= 1.3
+                
+                # 🎯 SNIPER 90+: VWAP FILTER
+                vwap_period = min(50, len(close))
+                typical_price = (high[-vwap_period:] + low[-vwap_period:] + close[-vwap_period:]) / 3
+                vwap_vol = vol_data[-vwap_period:]
+                vwap = np.sum(typical_price * vwap_vol) / max(np.sum(vwap_vol), 1)
+                price_above_vwap = current_price > vwap
+                price_below_vwap = current_price < vwap
                 
                 # ─────────────────────────────────────────────────────────────────
                 # 8. SUPPORT/RESISTANCE
@@ -642,7 +660,7 @@ class BacktestEngine:
                 near_resistance = current_price >= recent_high - price_range * 0.35
                 
                 # ═══════════════════════════════════════════════════════════════════════════════
-                # 🎯 SIGNAL SCORING (Relaxed for M15)
+                # 🎯 SNIPER 90+ SIGNAL SCORING
                 # ═══════════════════════════════════════════════════════════════════════════════
                 
                 buy_conditions = [
@@ -654,6 +672,8 @@ class BacktestEngine:
                     bullish_candle or bullish_engulf,   # 6. Candle
                     in_pullback_zone or near_support,   # 7. Entry zone
                     volatility_ok,                      # 8. Volatility
+                    volume_confirmed,                   # 9. 🎯 Volume > 1.3x
+                    price_above_vwap,                   # 10. 🎯 Price above VWAP
                 ]
                 
                 sell_conditions = [
@@ -665,6 +685,8 @@ class BacktestEngine:
                     bearish_candle or bearish_engulf,   # 6. Candle
                     in_pullback_zone or near_resistance,# 7. Entry zone
                     volatility_ok,                      # 8. Volatility
+                    volume_confirmed,                   # 9. 🎯 Volume > 1.3x
+                    price_below_vwap,                   # 10. 🎯 Price below VWAP
                 ]
                 
                 buy_score = sum(buy_conditions)
@@ -679,37 +701,48 @@ class BacktestEngine:
                     buy_score += 1
                     sell_score += 1
                 
-                # M15: Need only 3/10 conditions (very relaxed)
-                # H1: Need 4/10 conditions
-                min_conditions = 3 if is_m15 else 4
+                # 🎯 SNIPER 90+: Need 7/12 conditions (H1) or 5/12 (M15)
+                min_conditions = 5 if is_m15 else 7
+                
+                # 🎯 SNIPER 90+: Score gap filter
+                score_gap = abs(buy_score - sell_score)
+                if score_gap < 4:
+                    return None  # ไม่ชัดเจนพอ
                 
             else:
                 # ─────────────────────────────────────────────────────────────────
-                # FOREX STRATEGY (Original)
+                # 🎯 SNIPER 90+ FOREX STRATEGY
                 # ─────────────────────────────────────────────────────────────────
                 uptrend = sma_20 > sma_50 and current_price > sma_20
                 downtrend = sma_20 < sma_50 and current_price < sma_20
                 
-                pullback_zone = abs(current_price - sma_20) / sma_20 * 100 <= 0.5
+                pullback_zone = abs(current_price - sma_20) / sma_20 * 100 <= 0.3  # Tighter
                 
-                rsi_ok_buy = 30 <= rsi <= 60
-                rsi_ok_sell = 40 <= rsi <= 70
+                rsi_ok_buy = 38 <= rsi <= 58  # 🎯 SNIPER: Tighter
+                rsi_ok_sell = 42 <= rsi <= 62
                 
                 hour = current_time.hour
-                good_session = 4 <= hour <= 22
+                good_session = 8 <= hour <= 20  # 🎯 Only London/NY
                 is_friday_late = current_time.weekday() == 4 and hour >= 20
                 
                 volatility_ok = atr_pct < 2.0
                 
-                bullish_reversal = is_bullish and body_ratio > 0.4
-                bearish_reversal = is_bearish and body_ratio > 0.4
+                bullish_reversal = is_bullish and body_ratio > 0.45  # 🎯 Stronger candle
+                bearish_reversal = is_bearish and body_ratio > 0.45
                 
-                buy_conditions = [uptrend, pullback_zone, rsi_ok_buy, good_session, bullish_reversal, volatility_ok, not is_friday_late]
-                sell_conditions = [downtrend, pullback_zone, rsi_ok_sell, good_session, bearish_reversal, volatility_ok, not is_friday_late]
+                # 🎯 SNIPER 90+: Volume confirmation for Forex
+                vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
+                avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
+                current_vol = vol_data[-1]
+                volume_ratio = current_vol / max(avg_volume_20, 1)
+                volume_confirmed = volume_ratio >= 1.3
+                
+                buy_conditions = [uptrend, pullback_zone, rsi_ok_buy, good_session, bullish_reversal, volatility_ok, not is_friday_late, volume_confirmed]
+                sell_conditions = [downtrend, pullback_zone, rsi_ok_sell, good_session, bearish_reversal, volatility_ok, not is_friday_late, volume_confirmed]
                 
                 buy_score = sum(buy_conditions)
                 sell_score = sum(sell_conditions)
-                min_conditions = 5
+                min_conditions = 6  # 🎯 SNIPER: Need 6/8
                 
                 is_m15 = False
                 overlap_session = False

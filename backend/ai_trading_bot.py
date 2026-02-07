@@ -361,24 +361,23 @@ class AITradingBot:
             "date": datetime.now().date().isoformat()
         }
         
-        # 📈 Trailing Stop Config - ATR-BASED (Dynamic based on volatility!)
-        # ยก SL ตามราคาเพื่อล็อคกำไร โดยใช้ ATR เป็นหลัก
+        # 📈 🎯 SNIPER 90+ Trailing Stop Config - TIGHT for max profit lock
         self._trailing_stop_config = {
             "enabled": True,                    # เปิด/ปิด Trailing Stop
-            # === ATR-BASED SETTINGS (NEW!) ===
+            # === ATR-BASED SETTINGS (SNIPER 90+) ===
             "use_atr": True,                    # ใช้ ATR แทน fixed %
-            "activation_atr_mult": 0.5,         # เริ่มทำงานเมื่อกำไร >= 0.5x ATR
-            "trail_atr_mult": 0.3,              # SL ห่าง 0.3x ATR จาก peak price
-            "step_atr_mult": 0.1,               # ขยับ SL ทีละ 0.1x ATR
-            "lock_profit_atr_mult": 0.5,        # Lock profit = 0.5x ATR distance
+            "activation_atr_mult": 0.3,         # 🎯 เริ่มทำงานเร็วขึ้น: 0.3x ATR
+            "trail_atr_mult": 0.2,              # 🎯 SL ห่าง 0.2x ATR จาก peak (tight)
+            "step_atr_mult": 0.05,              # 🎯 ขยับ SL ทีละ 0.05x ATR (smooth)
+            "lock_profit_atr_mult": 0.4,        # Lock profit = 0.4x ATR distance
             # === FALLBACK SETTINGS (if ATR not available) ===
-            "activation_profit_pct": 0.15,      # เริ่มทำงานเมื่อกำไร >= 0.15%
-            "trail_distance_pct": 0.1,          # SL ตาม 0.1% จาก peak
-            "step_pct": 0.05,                   # ยก SL ทีละ 0.05%
-            "lock_profit_pct": 0.5,             # Lock 50% ของกำไร
+            "activation_profit_pct": 0.08,      # 🎯 เริ่มทำงานเมื่อกำไร >= 0.08%
+            "trail_distance_pct": 0.06,         # 🎯 SL ตาม 0.06% จาก peak (tight)
+            "step_pct": 0.03,                   # ยก SL ทีละ 0.03%
+            "lock_profit_pct": 0.6,             # Lock 60% ของกำไร
             # === MINIMUM DISTANCES (absolute) ===
-            "min_trail_distance_gold": 5.0,     # Gold: SL ห่างขั้นต่ำ $5
-            "min_trail_distance_forex": 0.0010, # Forex: SL ห่างขั้นต่ำ 10 pips
+            "min_trail_distance_gold": 3.0,     # 🎯 Gold: SL ห่างขั้นต่ำ $3 (tight)
+            "min_trail_distance_forex": 0.0006, # 🎯 Forex: SL ห่างขั้นต่ำ 6 pips
         }
         self._position_highest_prices: Dict[str, float] = {}  # Track highest/lowest for trailing
         self._position_atr: Dict[str, float] = {}  # Track ATR at entry for each position
@@ -395,35 +394,32 @@ class AITradingBot:
         # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
         # 🚀 UPDATED: Optimized for 10-15 trades/day while maintaining efficiency
         self._smart_features = {
-            # Break-Even: ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
+            # 🎯 SNIPER 90+: Break-Even ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
             "break_even": {
                 "enabled": True,
-                "activation_pct": 0.5,  # เปิดใช้เมื่อกำไร >= 0.5%
-                "offset_pct": 0.05,     # SL = entry + 0.05% (เผื่อ spread)
+                "activation_pct": 0.3,  # 🎯 เปิดใช้เมื่อกำไร >= 0.3% (เร็วขึ้น)
+                "offset_pct": 0.03,     # SL = entry + 0.03% (เผื่อ spread)
             },
-            # Max Daily Trades: จำกัดจำนวนเทรดต่อวัน
-            # 🚀 CHANGED: 5 → 15 trades/day for high-frequency trading
+            # 🎯 SNIPER 90+: จำกัดจำนวนเทรดต่อวัน (น้อยแต่แม่น)
             "max_daily_trades": {
                 "enabled": True,
-                "limit": int(os.getenv("MAX_DAILY_TRADES", "15")),  # เทรดได้ไม่เกิน 15 ครั้งต่อวัน
+                "limit": int(os.getenv("MAX_DAILY_TRADES", "5")),  # 🎯 เทรดได้ไม่เกิน 5 ครั้งต่อวัน
             },
-            # Consecutive Loss Protection: หยุดเทรดหลังขาดทุนติดต่อกัน
-            # 🚀 CHANGED: ลด cooldown จาก 60 → 30 นาที
+            # 🎯 SNIPER 90+: หยุดเทรดหลังขาดทุนติดต่อกัน
             "loss_protection": {
                 "enabled": True,
-                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "4")),  # หยุดหลังขาดทุน 4 ครั้งติด
-                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "30")),  # พักเทรด 30 นาที
+                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2")),  # 🎯 หยุดหลังขาดทุน 2 ครั้งติด
+                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "60")),  # 🎯 พักเทรด 60 นาที
             },
             # Time-based Exit: ปิดออเดอร์ที่ค้างนานเกินไป
             "time_exit": {
                 "enabled": True,
                 "max_hours": 24,  # ปิดออเดอร์ที่ค้าง > 24 ชม.
             },
-            # Correlation Protection: ไม่เปิดหลาย position ที่ correlated
-            # 🚀 CHANGED: 2 → 3 positions same direction
+            # 🎯 SNIPER 90+: Correlation Protection
             "correlation_protection": {
                 "enabled": True,
-                "max_same_direction": int(os.getenv("MAX_SAME_DIRECTION", "3")),  # เปิดทิศเดียวกันได้ไม่เกิน 3 position
+                "max_same_direction": int(os.getenv("MAX_SAME_DIRECTION", "2")),  # 🎯 เปิดทิศเดียวกันได้ไม่เกิน 2 position
             },
         }
         self._consecutive_losses = 0
@@ -677,44 +673,61 @@ class AITradingBot:
             rsi_falling = rsi < rsi_prev
             
             if is_gold:
-                # Gold RSI more strict - avoid extremes
-                rsi_ok_buy = 35 <= rsi <= 60  # ไม่ซื้อเมื่อ RSI สูงเกินไป
-                rsi_ok_sell = 40 <= rsi <= 65  # ไม่ขายเมื่อ RSI ต่ำเกินไป
-                rsi_divergence_buy = rsi < 45 and rsi_rising  # RSI ต่ำแต่กำลังขึ้น
-                rsi_divergence_sell = rsi > 55 and rsi_falling  # RSI สูงแต่กำลังลง
+                # 🎯 SNIPER 90+: Ultra-tight RSI for Gold
+                rsi_ok_buy = 40 <= rsi <= 55  # ไม่ซื้อเมื่อ RSI สูงเกินไป
+                rsi_ok_sell = 45 <= rsi <= 60  # ไม่ขายเมื่อ RSI ต่ำเกินไป
+                rsi_divergence_buy = rsi < 42 and rsi_rising  # RSI ต่ำแต่กำลังขึ้น
+                rsi_divergence_sell = rsi > 58 and rsi_falling  # RSI สูงแต่กำลังลง
             elif is_m15:
-                rsi_ok_buy = 30 <= rsi <= 70
-                rsi_ok_sell = 30 <= rsi <= 70
+                rsi_ok_buy = 35 <= rsi <= 60
+                rsi_ok_sell = 40 <= rsi <= 65
                 rsi_divergence_buy = rsi_divergence_sell = False
             else:
-                rsi_ok_buy = 35 <= rsi <= 65
-                rsi_ok_sell = 35 <= rsi <= 65
+                # 🎯 SNIPER 90+: Tighter RSI for Forex
+                rsi_ok_buy = 38 <= rsi <= 58
+                rsi_ok_sell = 42 <= rsi <= 62
                 rsi_divergence_buy = rsi_divergence_sell = False
             
-            # 5. CANDLE CONFIRMATION - 🔥 GOLD ต้องมีแท่งเทียน Strong
-            min_body_ratio = 0.4 if is_gold else (0.25 if is_m15 else 0.3)
+            # 5. CANDLE CONFIRMATION - 🎯 SNIPER 90+: ต้องมีแท่งเทียน Strong
+            min_body_ratio = 0.5 if is_gold else (0.35 if is_m15 else 0.4)
             bullish_candle = is_bullish and body_ratio > min_body_ratio
             bearish_candle = is_bearish and body_ratio > min_body_ratio
             
             bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
             bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
             
-            # 🥇 GOLD: Require engulfing or strong candle
+            # 🎯 SNIPER 90+: Require engulfing or very strong candle
             if is_gold:
-                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.5)
-                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.5)
+                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.55)
+                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.55)
             else:
-                bullish_candle_ok = bullish_candle or bullish_engulf
-                bearish_candle_ok = bearish_candle or bearish_engulf
+                bullish_candle_ok = (bullish_candle and body_ratio > 0.45) or bullish_engulf
+                bearish_candle_ok = (bearish_candle and body_ratio > 0.45) or bearish_engulf
             
             # 6. PULLBACK ZONE
             distance_to_ema = abs(current_price - ema_slow)
             pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Tighter for Gold
             in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
             
-            # 7. VOLATILITY CHECK - 🔥 GOLD ต้องไม่ volatile เกินไป
-            max_volatility = 2.5 if is_gold else (4.0 if is_m15 else 3.0)  # Stricter for Gold
+            # 7. VOLATILITY CHECK - 🎯 SNIPER 90+: ต้องไม่ volatile เกินไป
+            max_volatility = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Stricter for SNIPER
             volatility_ok = atr_pct <= max_volatility
+            
+            # 7.5. 🎯 SNIPER 90+: VOLUME CONFIRMATION (mandatory)
+            vol_data = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
+            avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
+            current_vol = vol_data[-1]
+            volume_ratio = current_vol / max(avg_volume_20, 1)
+            volume_confirmed = volume_ratio >= 1.3  # ปริมาณต้องมากกว่าค่าเฉลี่ย 30%+
+            
+            # 7.6. 🎯 SNIPER 90+: VWAP FILTER
+            # VWAP = sum(price * volume) / sum(volume) - ราคาเฉลี่ยถ่วงน้ำหนักด้วย volume
+            vwap_period = min(50, len(close))
+            typical_price = (high[-vwap_period:] + low[-vwap_period:] + close[-vwap_period:]) / 3
+            vwap_vol = vol_data[-vwap_period:]
+            vwap = np.sum(typical_price * vwap_vol) / max(np.sum(vwap_vol), 1)
+            price_above_vwap = current_price > vwap
+            price_below_vwap = current_price < vwap
             
             # 8. SUPPORT/RESISTANCE
             lookback = 20 if is_gold else (15 if is_m15 else 20)
@@ -731,7 +744,7 @@ class AITradingBot:
             # 🎯 SIGNAL SCORING
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            # 🥇 GOLD SPECIFIC CONDITIONS
+            # 🎯 SNIPER 90+ GOLD CONDITIONS
             if is_gold:
                 buy_conditions = [
                     has_uptrend,                        # 1. Trend (MUST for Gold)
@@ -744,6 +757,8 @@ class AITradingBot:
                     volatility_ok,                      # 8. Volatility
                     current_price > ema_slow,           # 9. Price above EMA Slow
                     strong_uptrend or best_session,     # 10. Extra confirmation
+                    volume_confirmed,                   # 11. 🎯 Volume > 1.3x avg
+                    price_above_vwap,                   # 12. 🎯 Price above VWAP
                 ]
                 
                 sell_conditions = [
@@ -757,6 +772,8 @@ class AITradingBot:
                     volatility_ok,                      # 8. Volatility
                     current_price < ema_slow,           # 9. Price below EMA Slow
                     strong_downtrend or best_session,   # 10. Extra confirmation
+                    volume_confirmed,                   # 11. 🎯 Volume > 1.3x avg
+                    price_below_vwap,                   # 12. 🎯 Price below VWAP
                 ]
                 
                 # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน (Strict for high win rate)
@@ -798,6 +815,8 @@ class AITradingBot:
                     current_price > ema_slow,           # 8. Above slow EMA
                     not asian_session,                  # 9. Not Asian session
                     overlap_session or london_session,  # 10. Best sessions
+                    volume_confirmed,                   # 11. 🎯 Volume > 1.3x avg
+                    price_above_vwap,                   # 12. 🎯 Price above VWAP
                 ]
                 
                 sell_conditions = [
@@ -811,6 +830,8 @@ class AITradingBot:
                     current_price < ema_slow,           # 8. Below slow EMA
                     not asian_session,                  # 9. Not Asian session
                     overlap_session or london_session,  # 10. Best sessions
+                    volume_confirmed,                   # 11. 🎯 Volume > 1.3x avg
+                    price_below_vwap,                   # 12. 🎯 Price below VWAP
                 ]
                 
                 # 💱 FOREX NO TRADE CONDITIONS
@@ -967,13 +988,13 @@ class AITradingBot:
             extra_str = f" | {' | '.join(extra_info)}" if extra_info else ""
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}{extra_str}")
             
-            # 🥇 GOLD: ต้องมี gap ที่ชัดเจนมาก (FIX: เพิ่มจาก 2 เป็น 4)
+            # 🎯 SNIPER 90+: ต้องมี gap ที่ชัดเจนมากๆ
             if is_gold:
-                min_score_gap = 4  # Gold ต้องต่างกันอย่างน้อย 4 points (80% confidence)
-                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8 (ไม่ใช่แค่ 7)
+                min_score_gap = 5  # Gold ต้องต่างกันอย่างน้อย 5 points
+                min_dominant_score = 9  # Score ที่ชนะต้อง >= 9/14
             else:
-                min_score_gap = 4  # Forex ต้องต่างกันอย่างน้อย 4 points
-                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8
+                min_score_gap = 5  # Forex ต้องต่างกันอย่างน้อย 5 points
+                min_dominant_score = 9  # Score ที่ชนะต้อง >= 9/14
             
             # ❌ BLOCK if score gap too small
             if score_gap < min_score_gap:
@@ -1013,13 +1034,13 @@ class AITradingBot:
             
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            # Min conditions - 💱 FOREX needs higher threshold
+            # 🎯 SNIPER 90+: High min conditions for precision
             if is_gold:
-                min_conditions = 6  # Gold needs 6/12 conditions
+                min_conditions = 8  # Gold needs 8/14 conditions (57%+)
             elif is_m15:
-                min_conditions = 3
+                min_conditions = 5  # M15 needs 5/14
             else:
-                min_conditions = 6  # 💱 FOREX: Increased from 4 to 6 for stricter filter
+                min_conditions = 8  # 💱 FOREX: needs 8/14 conditions
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL
@@ -1061,7 +1082,7 @@ class AITradingBot:
                     logger.info(f"      📊 EMA Status: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}, trend={ema_trend:.2f}")
                     logger.info(f"      📊 Price vs Slow: {price_vs_slow_pct:.2f}% (bearish={price_bearish_trend}, bullish={price_bullish_trend})")
                     logger.info(f"      📊 Trend Check: uptrend={has_uptrend}, downtrend={has_downtrend}, strong_up={strong_uptrend}, strong_down={strong_downtrend}")
-                    logger.info(f"      📊 Scores: Buy={buy_score}/12, Sell={sell_score}/12 (need 6)")
+                    logger.info(f"      📊 Scores: Buy={buy_score}/14, Sell={sell_score}/14 (need {min_conditions})")
                     return None
                 
                 # 💱 FOREX: Check forex_no_trade filter
@@ -1071,83 +1092,83 @@ class AITradingBot:
                 
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
-                    # 🥇 GOLD: Higher confidence requirement
+                    # 🎯 SNIPER 90+: Higher confidence requirement
                     if is_gold:
-                        # 📊 BASE CONFIDENCE from score
-                        base_confidence = 65 + (buy_score - min_conditions) * 5
+                        # 📊 BASE CONFIDENCE from score (12 conditions + bonus)
+                        base_confidence = 70 + (buy_score - min_conditions) * 4
                         
-                        # 🎯 SCORE GAP BONUS/PENALTY - ยิ่ง gap มาก ยิ่งมั่นใจ
-                        if score_gap >= 5:
-                            gap_bonus = 10  # Gap 5+ = +10% confidence
-                        elif score_gap >= 4:
-                            gap_bonus = 5   # Gap 4 = +5%
-                        elif score_gap >= 3:
-                            gap_bonus = 2   # Gap 3 = +2%
+                        # 🎯 SCORE GAP BONUS - ยิ่ง gap มาก ยิ่งมั่นใจ
+                        if score_gap >= 7:
+                            gap_bonus = 15  # Gap 7+ = +15% confidence
+                        elif score_gap >= 6:
+                            gap_bonus = 10  # Gap 6 = +10%
+                        elif score_gap >= 5:
+                            gap_bonus = 5   # Gap 5 = +5%
                         else:
-                            gap_bonus = -5  # Gap 2 = -5% penalty
+                            gap_bonus = 0   # Gap < 5 should be blocked already
                         
                         confidence = min(95, base_confidence + gap_bonus)
                         
-                        # 📊 QUALITY based on score AND gap
-                        if buy_score >= 9 and score_gap >= 4:
+                        # 📊 QUALITY based on score AND gap (adjusted for 12 conditions)
+                        if buy_score >= 11 and score_gap >= 6:
                             quality = "PREMIUM"
-                        elif buy_score >= 8 or (buy_score >= 7 and score_gap >= 4):
+                        elif buy_score >= 10 or (buy_score >= 9 and score_gap >= 5):
                             quality = "HIGH"
-                        elif buy_score >= 7:
+                        elif buy_score >= 9:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
                             
-                        logger.info(f"   📊 BUY Signal: Score={buy_score}, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
+                        logger.info(f"   📊 BUY Signal: Score={buy_score}/14, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
                     else:
-                        # 💱 FOREX: Higher threshold for quality
-                        confidence = 65 + (buy_score - min_conditions) * 5
-                        if buy_score >= 10:
+                        # 💱 FOREX: Higher threshold for quality (12 conditions)
+                        confidence = 70 + (buy_score - min_conditions) * 4
+                        if buy_score >= 11:
                             quality = "PREMIUM"
-                        elif buy_score >= 8:
+                        elif buy_score >= 10:
                             quality = "HIGH"
-                        elif buy_score >= 6:
+                        elif buy_score >= 9:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
                 elif sell_score >= min_conditions and sell_score > buy_score:
                     signal = "SELL"
-                    # 🥇 GOLD: Higher confidence requirement
+                    # 🎯 SNIPER 90+: Higher confidence requirement
                     if is_gold:
-                        # 📊 BASE CONFIDENCE from score
-                        base_confidence = 65 + (sell_score - min_conditions) * 5
+                        # 📊 BASE CONFIDENCE from score (12 conditions + bonus)
+                        base_confidence = 70 + (sell_score - min_conditions) * 4
                         
-                        # 🎯 SCORE GAP BONUS/PENALTY - ยิ่ง gap มาก ยิ่งมั่นใจ
-                        if score_gap >= 5:
-                            gap_bonus = 10  # Gap 5+ = +10% confidence
-                        elif score_gap >= 4:
-                            gap_bonus = 5   # Gap 4 = +5%
-                        elif score_gap >= 3:
-                            gap_bonus = 2   # Gap 3 = +2%
+                        # 🎯 SCORE GAP BONUS - ยิ่ง gap มาก ยิ่งมั่นใจ
+                        if score_gap >= 7:
+                            gap_bonus = 15  # Gap 7+ = +15% confidence
+                        elif score_gap >= 6:
+                            gap_bonus = 10  # Gap 6 = +10%
+                        elif score_gap >= 5:
+                            gap_bonus = 5   # Gap 5 = +5%
                         else:
-                            gap_bonus = -5  # Gap 2 = -5% penalty
+                            gap_bonus = 0   # Gap < 5 should be blocked already
                         
                         confidence = min(95, base_confidence + gap_bonus)
                         
-                        # 📊 QUALITY based on score AND gap
-                        if sell_score >= 9 and score_gap >= 4:
+                        # 📊 QUALITY based on score AND gap (adjusted for 12 conditions)
+                        if sell_score >= 11 and score_gap >= 6:
                             quality = "PREMIUM"
-                        elif sell_score >= 8 or (sell_score >= 7 and score_gap >= 4):
+                        elif sell_score >= 10 or (sell_score >= 9 and score_gap >= 5):
                             quality = "HIGH"
-                        elif sell_score >= 7:
+                        elif sell_score >= 9:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
                             
-                        logger.info(f"   📊 SELL Signal: Score={sell_score}, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
+                        logger.info(f"   📊 SELL Signal: Score={sell_score}/14, Gap={score_gap}, Confidence={confidence}%, Quality={quality}")
                     else:
-                        # 💱 FOREX: Higher threshold for quality
-                        confidence = 65 + (sell_score - min_conditions) * 5
-                        if sell_score >= 10:
+                        # 💱 FOREX: Higher threshold for quality (12 conditions)
+                        confidence = 70 + (sell_score - min_conditions) * 4
+                        if sell_score >= 11:
                             quality = "PREMIUM"
-                        elif sell_score >= 8:
+                        elif sell_score >= 10:
                             quality = "HIGH"
-                        elif sell_score >= 6:
+                        elif sell_score >= 9:
                             quality = "MEDIUM"
                         else:
                             quality = "LOW"
@@ -1183,12 +1204,12 @@ class AITradingBot:
                 # 🎯 SIGNAL-BASED SL/TP MULTIPLIERS
                 # ═══════════════════════════════════════════════════════════════════
                 
-                # 📊 Base multipliers by Quality
+                # 🎯 SNIPER 90+: Closer TP for higher hit rate
                 quality_multipliers = {
-                    "PREMIUM": {"sl": 0.5, "tp": 2.5},  # Best signals: tight SL, wide TP
-                    "HIGH":    {"sl": 0.6, "tp": 2.0},
-                    "MEDIUM":  {"sl": 0.7, "tp": 1.5},
-                    "LOW":     {"sl": 0.8, "tp": 1.2},
+                    "PREMIUM": {"sl": 0.5, "tp": 1.8},  # Closer TP = higher hit rate
+                    "HIGH":    {"sl": 0.6, "tp": 1.5},
+                    "MEDIUM":  {"sl": 0.7, "tp": 1.3},
+                    "LOW":     {"sl": 0.8, "tp": 1.1},
                 }
                 
                 base_mults = quality_multipliers.get(quality, {"sl": 0.8, "tp": 1.2})
@@ -1247,11 +1268,11 @@ class AITradingBot:
                 sl_distance = atr * sl_multiplier
                 tp_distance = atr * tp_multiplier
                 
-                # 📊 Ensure minimum R:R based on quality
+                # 🎯 SNIPER 90+: Lower R:R but higher hit rate
                 min_rr_by_quality = {
-                    "PREMIUM": 2.0,
-                    "HIGH": 1.5,
-                    "MEDIUM": 1.2,
+                    "PREMIUM": 1.5,
+                    "HIGH": 1.3,
+                    "MEDIUM": 1.1,
                     "LOW": 1.0,
                 }
                 min_rr = min_rr_by_quality.get(quality, 1.0)
@@ -1304,15 +1325,15 @@ class AITradingBot:
                 expected_lot = max(0.01, round(expected_lot, 2))
                 logger.info(f"   💰 Expected lot: {expected_lot} (Risk ${risk_amount:.2f} / SL risk ${risk_per_lot:.0f})")
             else:
-                # Forex: Use pip-based with proper R:R
+                # 🎯 SNIPER 90+: Forex - tighter SL, closer TP for higher hit rate
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
-                sl_distance = atr * 1.5
-                tp_distance = atr * 2.0  # 1:1.33 R:R
+                sl_distance = atr * 1.2  # Tighter SL
+                tp_distance = atr * 1.5  # Closer TP = higher hit rate
                 
-                min_sl = 20 * pip_value
-                max_sl = 100 * pip_value  # Increased from 50
+                min_sl = 15 * pip_value
+                max_sl = 60 * pip_value  # Tighter max SL
                 sl_distance = max(min_sl, min(sl_distance, max_sl))
-                tp_distance = sl_distance * 1.5  # Ensure 1:1.5 R:R
+                tp_distance = sl_distance * 1.3  # 1:1.3 R:R for higher hit rate
             
             if signal == "BUY":
                 stop_loss = current_price - sl_distance
@@ -4692,10 +4713,10 @@ class AITradingBot:
         logger.info("")
         
         # 🎯 FINAL DECISION THRESHOLD
-        # 🔥 20-LAYER ULTRA EXTREME CONFIG FOR MAXIMUM PROFIT
-        # - If >= 15% layers pass → TRADE (ultra relaxed)
-        # - If < 15% layers pass → SKIP
-        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.50"))  # 🛡️ FIX VULN-1: 50% layers must pass (was 15%)
+        # 🎯 SNIPER 90+ CONFIG FOR MAXIMUM WIN RATE
+        # - If >= 60% layers pass → TRADE (strict)
+        # - If < 60% layers pass → SKIP
+        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.60"))  # 🎯 SNIPER 90+: 60% layers must pass
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4706,14 +4727,13 @@ class AITradingBot:
             return {"action": "SKIP", "reason": f"FINAL DECISION: Only {layers_passed}/{total_layers} layers passed ({pass_rate:.0%})"}
         
         # ═══════════════════════════════════════════════════════════════
-        # 🎯 ENHANCED FILTER #1: HIGH QUALITY PASSES
-        # 🔥 ULTRA EXTREME: ไม่ต้องการ high quality passes
+        # 🎯 SNIPER 90+ FILTER #1: HIGH QUALITY PASSES
         # ═══════════════════════════════════════════════════════════════
         high_quality_passes = sum(1 for r in base_layer_results if r.get('can_trade') and r.get('score', 0) >= 70)
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "3"))  # 🛡️ FIX VULN-2: At least 3 high-quality passes (was 0)
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "5"))  # 🎯 SNIPER 90+: At least 5 high-quality passes
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4724,15 +4744,14 @@ class AITradingBot:
             return {"action": "SKIP", "reason": f"FINAL DECISION: Only {high_quality_passes} high-quality passes (need {MIN_HIGH_QUALITY}+)"}
         
         # ═══════════════════════════════════════════════════════════════
-        # 🎯 ENHANCED FILTER #2: KEY LAYER AGREEMENT
+        # 🎯 SNIPER 90+ FILTER #2: KEY LAYER AGREEMENT
         # Layer 5 (Advanced), 6 (SmartBrain), 7 (Neural), 9 (Quantum), 10 (Alpha)
-        # 🔥 ULTRA EXTREME: ไม่ต้องการ key layer agreement
         # ═══════════════════════════════════════════════════════════════
         KEY_LAYER_NUMS = [5, 6, 7, 9, 10]
         key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
         key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.40"))  # 🛡️ FIX VULN-3: 40% key layers must agree (was 0%)
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.60"))  # 🎯 SNIPER 90+: 60% key layers must agree
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")

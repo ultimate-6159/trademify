@@ -48,11 +48,11 @@ class PatternConfig:
     # Number of similar patterns to find
     TOP_K_PATTERNS = 10
     
-    # Minimum correlation threshold (ต่ำกว่านี้ไม่เทรด)
-    MIN_CORRELATION = 0.85
+    # 🎯 SNIPER 90+: Higher correlation threshold
+    MIN_CORRELATION = 0.88
     
-    # Confidence threshold for trading signal
-    CONFIDENCE_THRESHOLD = 80  # percent
+    # 🎯 SNIPER 90+: Higher confidence threshold
+    CONFIDENCE_THRESHOLD = 85  # percent
     
     # FAISS index type
     FAISS_INDEX_TYPE = "IVF"  # Options: "Flat", "IVF", "HNSW"
@@ -73,11 +73,11 @@ class NormConfig:
 
 # Voting System Settings
 class VotingConfig:
-    # Minimum votes required for signal
-    MIN_CONFIDENCE = 70  # percent
+    # 🎯 SNIPER 90+: Higher confidence required
+    MIN_CONFIDENCE = 80  # percent
     
     # Strong signal threshold
-    STRONG_SIGNAL = 80  # percent
+    STRONG_SIGNAL = 90  # percent
     
     # Time filters (session-based analysis)
     SESSIONS = {
