@@ -622,19 +622,19 @@ class AITradingBot:
             asian_session = 0 <= hour <= 6 or hour >= 22
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
             
-            # 🥇 GOLD: เทรดได้ทุก Session (ไม่บล็อก Asian) - ให้ Bonus สำหรับ Active Sessions
-            # 🚀 RELAXED: Allow trading in all sessions for more opportunities
-            allow_all_sessions = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
+            # 🥇 GOLD: บล็อก Asian Session (noise สูง, spread กว้าง)
+            # 🛡️ FIX VULN-4: Asian session = high spread + low liquidity = bad fills
+            allow_all_sessions = os.getenv("ALLOW_ALL_SESSIONS", "false").lower() == "true"
             
             if is_gold:
                 if allow_all_sessions:
-                    good_session = True  # เทรดได้ทุก Session
+                    good_session = not asian_session  # อนุญาตทุก Session ยกเว้น Asian
                 else:
                     good_session = overlap_session or london_session or ny_session
                 best_session = overlap_session or (london_session and not asian_session)
             else:
                 if allow_all_sessions:
-                    good_session = not is_weekend_risk  # เทรดได้ทุก Session ยกเว้น Weekend
+                    good_session = not asian_session and not is_weekend_risk
                 else:
                     good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
                 best_session = overlap_session
@@ -653,10 +653,11 @@ class AITradingBot:
             price_bullish_trend = price_vs_slow_pct > 0.5   # ราคาสูงกว่า slow 0.5%
             
             # 🥇 GOLD SPECIFIC: Require stronger trend confirmation
-            # 🔥 FIXED: เพิ่ม price-based trend detection
+            # 🛡️ FIX VULN-7: Tighten has_uptrend - remove loose price_bullish_trend (0.5% is too weak)
+            # ต้อง moderate_uptrend (EMA aligned) + price > ema_slow เท่านั้น
             if is_gold:
-                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow) or price_bullish_trend
-                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow) or price_bearish_trend
+                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
+                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
             else:
                 has_uptrend = strong_uptrend or moderate_uptrend
                 has_downtrend = strong_downtrend or moderate_downtrend
@@ -758,14 +759,15 @@ class AITradingBot:
                     strong_downtrend or best_session,   # 10. Extra confirmation
                 ]
                 
-                # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน (Relaxed for more trades)
-                # 🚀 UPDATED: Allow all sessions if ENV set
-                allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
+                # 🚫 GOLD FILTERS - ห้ามเทรดถ้าไม่ผ่าน (Strict for high win rate)
                 
+                # 🛡️ FIX VULN-10: Always block Asian session for Gold + prevent has_uptrend AND has_downtrend both True
+                conflicting_trend = has_uptrend and has_downtrend  # ทั้ง up และ down = ไม่มี trend ชัดเจน
                 gold_no_trade = (
-                    (not allow_all and not good_session) or  # Session filter (if enabled)
-                    (not allow_all and asian_session) or     # Asian session (if filter enabled)
-                    is_weekend_risk or               # Weekend risk (always block)
+                    (not good_session) or             # Session filter (always active)
+                    asian_session or                  # Asian session (always block for Gold)
+                    is_weekend_risk or                # Weekend risk (always block)
+                    conflicting_trend or              # ทั้ง uptrend + downtrend = สับสน ห้ามเทรด
                     (not has_uptrend and not has_downtrend)  # ไม่มี trend
                 )
                 
@@ -828,9 +830,14 @@ class AITradingBot:
                 buy_score += 1
             if strong_downtrend:
                 sell_score += 1
+            # 🛡️ FIX VULN-8: Overlap session bonus only for dominant side (not both)
+            # Adding to BOTH buy AND sell cancels out - provides no directional edge
             if overlap_session:
-                buy_score += 1
-                sell_score += 1
+                if buy_score > sell_score:
+                    buy_score += 1
+                elif sell_score > buy_score:
+                    sell_score += 1
+                # If tied, no bonus - wait for clearer signal
             
             # 🔵 FOREX: Add bonus for strong confirmation
             is_forex = not is_gold and not is_m15
@@ -982,23 +989,26 @@ class AITradingBot:
                 return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ TREND FILTER - บล็อกการเทรดสวนเทรนด์ที่แข็งแกร่ง (FIX CRITICAL BUG)
+            # 🛡️ TREND FILTER - บล็อกการเทรดสวนเทรนด์ทุกระดับ (FIX VULN-6)
+            # 🔥 UPGRADED: Block counter-trend for ALL trend levels (not just strong)
             # ═══════════════════════════════════════════════════════════════════════════════
             is_sell_signal = sell_score > buy_score
             is_buy_signal = buy_score > sell_score
             
-            # ❌ BLOCK SELL during STRONG UPTREND (EMA เรียงขึ้นทั้งหมด)
-            if is_sell_signal and strong_uptrend:
-                logger.info(f"   🛡️ TREND FILTER: SELL blocked during STRONG UPTREND!")
-                logger.info(f"      → EMA: fast={ema_fast:.2f} > mid={ema_mid:.2f} > slow={ema_slow:.2f}")
-                logger.info(f"      → ห้าม SELL เมื่อเทรนด์ขึ้นแข็งแกร่ง! รอ BUY แทน")
+            # ❌ BLOCK SELL during ANY UPTREND (strong OR moderate)
+            if is_sell_signal and has_uptrend and not has_downtrend:
+                logger.info(f"   🛡️ TREND FILTER: SELL blocked during UPTREND!")
+                logger.info(f"      → EMA: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}")
+                logger.info(f"      → strong_uptrend={strong_uptrend}, moderate_uptrend={moderate_uptrend}")
+                logger.info(f"      → ห้าม SELL เมื่อเทรนด์ขึ้น! รอ BUY แทน")
                 return None
             
-            # ❌ BLOCK BUY during STRONG DOWNTREND (EMA เรียงลงทั้งหมด)
-            if is_buy_signal and strong_downtrend:
-                logger.info(f"   🛡️ TREND FILTER: BUY blocked during STRONG DOWNTREND!")
-                logger.info(f"      → EMA: fast={ema_fast:.2f} < mid={ema_mid:.2f} < slow={ema_slow:.2f}")
-                logger.info(f"      → ห้าม BUY เมื่อเทรนด์ลงแข็งแกร่ง! รอ SELL แทน")
+            # ❌ BLOCK BUY during ANY DOWNTREND (strong OR moderate)
+            if is_buy_signal and has_downtrend and not has_uptrend:
+                logger.info(f"   🛡️ TREND FILTER: BUY blocked during DOWNTREND!")
+                logger.info(f"      → EMA: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}")
+                logger.info(f"      → strong_downtrend={strong_downtrend}, moderate_downtrend={moderate_downtrend}")
+                logger.info(f"      → ห้าม BUY เมื่อเทรนด์ลง! รอ SELL แทน")
                 return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
@@ -1047,8 +1057,7 @@ class AITradingBot:
             else:
                 # 🥇 GOLD: Check gold_no_trade filter first
                 if is_gold and gold_no_trade:
-                    allow_all = os.getenv("ALLOW_ALL_SESSIONS", "true").lower() == "true"
-                    logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, weekend={is_weekend_risk}, allow_all={allow_all}")
+                    logger.info(f"   🥇 GOLD FILTER: No trade - trend={has_uptrend or has_downtrend}, conflicting={has_uptrend and has_downtrend}, asian={asian_session}, weekend={is_weekend_risk}")
                     logger.info(f"      📊 EMA Status: fast={ema_fast:.2f}, mid={ema_mid:.2f}, slow={ema_slow:.2f}, trend={ema_trend:.2f}")
                     logger.info(f"      📊 Price vs Slow: {price_vs_slow_pct:.2f}% (bearish={price_bearish_trend}, bullish={price_bullish_trend})")
                     logger.info(f"      📊 Trend Check: uptrend={has_uptrend}, downtrend={has_downtrend}, strong_up={strong_uptrend}, strong_down={strong_downtrend}")
@@ -4686,7 +4695,7 @@ class AITradingBot:
         # 🔥 20-LAYER ULTRA EXTREME CONFIG FOR MAXIMUM PROFIT
         # - If >= 15% layers pass → TRADE (ultra relaxed)
         # - If < 15% layers pass → SKIP
-        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.15"))  # 🔥 ULTRA EXTREME: 15% default
+        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.50"))  # 🛡️ FIX VULN-1: 50% layers must pass (was 15%)
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4704,7 +4713,7 @@ class AITradingBot:
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "0"))  # 🔥 ULTRA EXTREME: No minimum
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "3"))  # 🛡️ FIX VULN-2: At least 3 high-quality passes (was 0)
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4723,7 +4732,7 @@ class AITradingBot:
         key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
         key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.0"))  # 🔥 ULTRA EXTREME: No agreement required
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.40"))  # 🛡️ FIX VULN-3: 40% key layers must agree (was 0%)
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4819,12 +4828,14 @@ class AITradingBot:
                 logger.warning(f"⚠️ Fixed invalid TP for SELL: {old_tp:.5f} -> {take_profit:.5f}")
         
 
-            # 🎯 LIMIT TP - ไม่ให้ TP ไกลเกินไป (Max R:R = 2.0)
+            # 🎯 LIMIT TP - ไม่ให้ TP ไกลเกินไป (Max R:R = 3.5)
+            # 🛡️ FIX VULN-5: Increased from 2.0 to 3.5 - allow higher profit potential
+            # R:R 2.0 caps profits while losses remain large, reducing overall profitability
             if take_profit and stop_loss:
                 sl_distance = abs(current_price - stop_loss)
                 tp_distance = abs(take_profit - current_price)
                 current_rr = tp_distance / sl_distance if sl_distance > 0 else 0
-                max_rr = 2.0
+                max_rr = 3.5
                 if current_rr > max_rr:
                     old_tp = take_profit
                     tp_distance_limited = sl_distance * max_rr

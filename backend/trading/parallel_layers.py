@@ -280,21 +280,20 @@ class ParallelLayerProcessor:
         reasons = []
         
         # Check 1: Pass rate >= 40%
-        # 🚀 OPTIMIZED THRESHOLDS for 10-15 trades/day while maintaining efficiency
-        # Read from environment or use optimized defaults
+        # 🛡️ FIX VULN-9: Align parallel thresholds with sequential path for consistency
         import os
-        MIN_PASS_RATE = float(os.getenv("MIN_LAYER_PASS_RATE", "0.35"))  # 🚀 CHANGED: 40% → 35%
+        MIN_PASS_RATE = float(os.getenv("MIN_LAYER_PASS_RATE", "0.50"))  # 🛡️ ALIGNED: 50% (same as sequential)
         if pass_rate < MIN_PASS_RATE:
             reasons.append(f"Pass rate {pass_rate:.0%} < {MIN_PASS_RATE:.0%}")
         
-        # Check 2: High quality passes >= 1 (was 2)
+        # Check 2: High quality passes >= 3
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY_PASSES", "1"))  # 🚀 CHANGED: 2 → 1
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY_PASSES", "3"))  # 🛡️ ALIGNED: 3 (same as sequential)
         if high_quality_passes < MIN_HIGH_QUALITY:
             reasons.append(f"High-quality passes {high_quality_passes} < {MIN_HIGH_QUALITY}")
         
-        # Check 3: Key layer agreement >= 35% (was 40%)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_LAYER_AGREEMENT", "0.35"))  # 🚀 CHANGED: 40% → 35%
+        # Check 3: Key layer agreement >= 40%
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_LAYER_AGREEMENT", "0.40"))  # 🛡️ ALIGNED: 40% (same as sequential)
         if len(key_results) > 0 and key_agreement < MIN_KEY_AGREEMENT:
             reasons.append(f"Key layer agreement {key_agreement:.0%} < {MIN_KEY_AGREEMENT:.0%}")
         
