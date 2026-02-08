@@ -75,15 +75,15 @@ class BacktestConfig:
     leverage: int = 100
     currency: str = "USD"
     
-    # Risk settings - 🎯 SNIPER 90+
-    max_risk_per_trade: float = 1.5  # % (SNIPER - conservative)
-    max_daily_loss: float = 8.0  # % (SNIPER - tight)
-    max_drawdown: float = 10.0  # % (SNIPER - strict)
+    # Risk settings - 🎯 SNIPER 90+ (Compounding Optimized)
+    max_risk_per_trade: float = 2.5  # % (Higher risk for faster compounding)
+    max_daily_loss: float = 10.0  # % (Room for higher risk per trade)
+    max_drawdown: float = 10.0  # % (SNIPER - strict, CLI overrides to 20%)
     
-    # Signal settings - 🎯 SNIPER 90+
+    # Signal settings - 🎯 SNIPER 90+ (Balanced)
     min_quality: str = "MEDIUM"  # PREMIUM, HIGH, MEDIUM, LOW
-    min_confidence: float = 75.0  # Minimum confidence score
-    min_layer_pass_rate: float = 0.60  # 🎯 SNIPER 90+: 60% layers need to pass (12/20)
+    min_confidence: float = 70.0  # Minimum confidence score
+    min_layer_pass_rate: float = 0.50  # 🎯 50% layers need to pass (10/20)
     
     # Execution settings
     slippage_pips: float = 1.0
@@ -99,10 +99,10 @@ class BacktestConfig:
     # "technical" = Use technical indicators only (no pattern database needed)
     signal_mode: str = "technical"
     
-    # 🎯 SNIPER 90+: Live Trading Realism Settings
+    # 🎯 SNIPER 90+ (Balanced): Live Trading Realism Settings
     use_live_trading_logic: bool = True  # Use exact same logic as Live Trading
-    min_high_quality_passes: int = 5  # 🎯 SNIPER 90+: Need 5 high quality passes
-    min_key_agreement: float = 0.60  # 🎯 SNIPER 90+: 60% key agreement required
+    min_high_quality_passes: int = 3  # 🎯 Need 3 high quality passes
+    min_key_agreement: float = 0.50  # 🎯 50% key agreement required
     realistic_execution: bool = True  # Apply realistic slippage/spread model
     
     # 🎯 TRAILING STOP SETTINGS - TIGHT FOR SNIPER
@@ -598,12 +598,12 @@ class BacktestEngine:
                 # 4. RSI CONFIRMATION (More relaxed for M15)
                 # ─────────────────────────────────────────────────────────────────
                 if is_m15:
-                    rsi_ok_buy = 35 <= rsi <= 60
-                    rsi_ok_sell = 40 <= rsi <= 65
+                    rsi_ok_buy = 32 <= rsi <= 65
+                    rsi_ok_sell = 35 <= rsi <= 68
                 else:
-                    # 🎯 SNIPER 90+: Ultra-tight RSI for Gold
-                    rsi_ok_buy = 40 <= rsi <= 55
-                    rsi_ok_sell = 45 <= rsi <= 60
+                    # 🎯 Balanced: RSI ขยายขึ้นเล็กน้อย
+                    rsi_ok_buy = 35 <= rsi <= 58
+                    rsi_ok_sell = 42 <= rsi <= 65
                 
                 rsi_rising = rsi > rsi_prev
                 rsi_falling = rsi < rsi_prev
@@ -611,8 +611,8 @@ class BacktestEngine:
                 # ─────────────────────────────────────────────────────────────────
                 # 5. CANDLE CONFIRMATION (Relaxed for more signals)
                 # ─────────────────────────────────────────────────────────────────
-                # 🎯 SNIPER 90+: Strong candle confirmation
-                min_body_ratio = 0.35 if is_m15 else 0.5
+                # 🎯 Balanced: Candle confirmation
+                min_body_ratio = 0.3 if is_m15 else 0.4
                 bullish_candle = is_bullish and body_ratio > min_body_ratio
                 bearish_candle = is_bearish and body_ratio > min_body_ratio
                 
@@ -622,23 +622,23 @@ class BacktestEngine:
                 # ─────────────────────────────────────────────────────────────────
                 # 6. PULLBACK ZONE (Wider for more signals)
                 # ─────────────────────────────────────────────────────────────────
-                # 🎯 SNIPER 90+: Tighter pullback zone
+                # 🎯 Balanced: ขยาย pullback zone
                 distance_to_ema = abs(current_price - ema_slow)
-                pullback_atr_mult = 3.0 if is_m15 else 2.0
+                pullback_atr_mult = 3.0 if is_m15 else 2.5
                 in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
                 
                 # ─────────────────────────────────────────────────────────────────
                 # 7. VOLATILITY CHECK
                 # ─────────────────────────────────────────────────────────────────
-                max_volatility = 3.0 if is_m15 else 2.0  # 🎯 SNIPER: Stricter
+                max_volatility = 3.5 if is_m15 else 2.5  # 🎯 Balanced: ผ่อนขึ้น
                 volatility_ok = atr_pct <= max_volatility
                 
-                # 🎯 SNIPER 90+: VOLUME CONFIRMATION
+                # 🎯 VOLUME CONFIRMATION (ลดจาก 1.3 → 1.15)
                 vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
                 avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
                 current_vol = vol_data[-1]
                 volume_ratio = current_vol / max(avg_volume_20, 1)
-                volume_confirmed = volume_ratio >= 1.3
+                volume_confirmed = volume_ratio >= 1.15
                 
                 # 🎯 SNIPER 90+: VWAP FILTER
                 vwap_period = min(50, len(close))
@@ -701,12 +701,12 @@ class BacktestEngine:
                     buy_score += 1
                     sell_score += 1
                 
-                # 🎯 SNIPER 90+: Need 7/12 conditions (H1) or 5/12 (M15)
-                min_conditions = 5 if is_m15 else 7
+                # 🎯 Balanced: Need 6/12 (H1) or 4/12 (M15)
+                min_conditions = 4 if is_m15 else 6
                 
-                # 🎯 SNIPER 90+: Score gap filter
+                # 🎯 Score gap filter (ลดจาก 4→3)
                 score_gap = abs(buy_score - sell_score)
-                if score_gap < 4:
+                if score_gap < 3:
                     return None  # ไม่ชัดเจนพอ
                 
             else:
@@ -845,16 +845,16 @@ class BacktestEngine:
                     # TP = 0.6x SL (PROVEN OPTIMAL)
                     tp_distance = sl_distance * 0.6
                 else:
-                    # H1: Better R:R settings
+                    # H1: PROVEN best settings (0.7:1 R:R + 93% WR = maximum compounding)
                     sl_distance = atr * 1.8
                     tp_distance = atr * 0.7
                     
-                    # Dynamic SL for H1 (also capped)
+                    # Dynamic SL for H1 (scaled with account)
                     raw_min_sl = self.balance * 0.01
                     raw_max_sl = self.balance * 0.03
                     
                     ABSOLUTE_MIN_SL_H1 = 1.0
-                    ABSOLUTE_MAX_SL_H1 = 100.0  # $100 max for H1
+                    ABSOLUTE_MAX_SL_H1 = 100.0  # $100 max for H1 (prevents 0.01 lot floor over-risk)
                     
                     min_sl = max(ABSOLUTE_MIN_SL_H1, min(raw_min_sl, ABSOLUTE_MAX_SL_H1 * 0.2))
                     max_sl = max(5.0, min(raw_max_sl, ABSOLUTE_MAX_SL_H1))
@@ -1773,7 +1773,7 @@ class BacktestEngine:
         risk_amount *= position_multiplier
         
         quantity = risk_amount / (sl_pips * 10)  # Simplified lot calculation
-        quantity = max(0.01, min(quantity, 10.0))  # Limit to 0.01-10 lots
+        quantity = max(0.01, min(quantity, 100.0))  # Limit to 0.01-100 lots (allow compounding)
         quantity = round(quantity, 2)
         
         # Get layer pass rate for logging

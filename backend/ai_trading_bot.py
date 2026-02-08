@@ -371,10 +371,10 @@ class AITradingBot:
             "step_atr_mult": 0.05,              # 🎯 ขยับ SL ทีละ 0.05x ATR (smooth)
             "lock_profit_atr_mult": 0.4,        # Lock profit = 0.4x ATR distance
             # === FALLBACK SETTINGS (if ATR not available) ===
-            "activation_profit_pct": 0.08,      # 🎯 เริ่มทำงานเมื่อกำไร >= 0.08%
-            "trail_distance_pct": 0.06,         # 🎯 SL ตาม 0.06% จาก peak (tight)
-            "step_pct": 0.03,                   # ยก SL ทีละ 0.03%
-            "lock_profit_pct": 0.6,             # Lock 60% ของกำไร
+            "activation_profit_pct": 0.05,      # 💰 เริ่มทำงานเมื่อกำไร >= 0.05% (earlier)
+            "trail_distance_pct": 0.04,         # 💰 SL ตาม 0.04% จาก peak (tighter)
+            "step_pct": 0.02,                   # ยก SL ทีละ 0.02%
+            "lock_profit_pct": 0.7,             # Lock 70% ของกำไร
             # === MINIMUM DISTANCES (absolute) ===
             "min_trail_distance_gold": 3.0,     # 🎯 Gold: SL ห่างขั้นต่ำ $3 (tight)
             "min_trail_distance_forex": 0.0006, # 🎯 Forex: SL ห่างขั้นต่ำ 6 pips
@@ -394,32 +394,32 @@ class AITradingBot:
         # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
         # 🚀 UPDATED: Optimized for 10-15 trades/day while maintaining efficiency
         self._smart_features = {
-            # 🎯 SNIPER 90+: Break-Even ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
+            # 💰 Break-Even ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
             "break_even": {
                 "enabled": True,
-                "activation_pct": 0.3,  # 🎯 เปิดใช้เมื่อกำไร >= 0.3% (เร็วขึ้น)
+                "activation_pct": 0.2,  # 💰 เปิดใช้เมื่อกำไร >= 0.2% (earlier protection)
                 "offset_pct": 0.03,     # SL = entry + 0.03% (เผื่อ spread)
             },
-            # 🎯 SNIPER 90+: จำกัดจำนวนเทรดต่อวัน (น้อยแต่แม่น)
+            # 🎯 จำกัดจำนวนเทรดต่อวัน (เพิ่มจาก 5→10)
             "max_daily_trades": {
                 "enabled": True,
-                "limit": int(os.getenv("MAX_DAILY_TRADES", "5")),  # 🎯 เทรดได้ไม่เกิน 5 ครั้งต่อวัน
+                "limit": int(os.getenv("MAX_DAILY_TRADES", "10")),  # 🎯 เทรดได้ไม่เกิน 10 ครั้งต่อวัน
             },
-            # 🎯 SNIPER 90+: หยุดเทรดหลังขาดทุนติดต่อกัน
+            # 🎯 หยุดเทรดหลังขาดทุนติดต่อกัน (ลด cooldown)
             "loss_protection": {
                 "enabled": True,
-                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2")),  # 🎯 หยุดหลังขาดทุน 2 ครั้งติด
-                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "60")),  # 🎯 พักเทรด 60 นาที
+                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3")),  # 🎯 หยุดหลังขาดทุน 3 ครั้งติด
+                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "30")),  # 🎯 พักเทรด 30 นาที
             },
             # Time-based Exit: ปิดออเดอร์ที่ค้างนานเกินไป
             "time_exit": {
                 "enabled": True,
                 "max_hours": 24,  # ปิดออเดอร์ที่ค้าง > 24 ชม.
             },
-            # 🎯 SNIPER 90+: Correlation Protection
+            # 🎯 Correlation Protection (เพิ่มจาก 2→3)
             "correlation_protection": {
                 "enabled": True,
-                "max_same_direction": int(os.getenv("MAX_SAME_DIRECTION", "2")),  # 🎯 เปิดทิศเดียวกันได้ไม่เกิน 2 position
+                "max_same_direction": int(os.getenv("MAX_SAME_DIRECTION", "3")),  # 🎯 เปิดทิศเดียวกันได้ไม่เกิน 3 position
             },
         }
         self._consecutive_losses = 0
@@ -673,52 +673,52 @@ class AITradingBot:
             rsi_falling = rsi < rsi_prev
             
             if is_gold:
-                # 🎯 SNIPER 90+: Ultra-tight RSI for Gold
-                rsi_ok_buy = 40 <= rsi <= 55  # ไม่ซื้อเมื่อ RSI สูงเกินไป
-                rsi_ok_sell = 45 <= rsi <= 60  # ไม่ขายเมื่อ RSI ต่ำเกินไป
-                rsi_divergence_buy = rsi < 42 and rsi_rising  # RSI ต่ำแต่กำลังขึ้น
-                rsi_divergence_sell = rsi > 58 and rsi_falling  # RSI สูงแต่กำลังลง
+                # 🎯 SNIPER 90+ (Balanced): RSI ที่ยืดหยุ่นขึ้น
+                rsi_ok_buy = 35 <= rsi <= 58  # ขยาย range เล็กน้อย
+                rsi_ok_sell = 42 <= rsi <= 65
+                rsi_divergence_buy = rsi < 40 and rsi_rising
+                rsi_divergence_sell = rsi > 60 and rsi_falling
             elif is_m15:
-                rsi_ok_buy = 35 <= rsi <= 60
-                rsi_ok_sell = 40 <= rsi <= 65
+                rsi_ok_buy = 32 <= rsi <= 65
+                rsi_ok_sell = 35 <= rsi <= 68
                 rsi_divergence_buy = rsi_divergence_sell = False
             else:
-                # 🎯 SNIPER 90+: Tighter RSI for Forex
-                rsi_ok_buy = 38 <= rsi <= 58
-                rsi_ok_sell = 42 <= rsi <= 62
+                # 🎯 Forex: ขยาย RSI range
+                rsi_ok_buy = 35 <= rsi <= 62
+                rsi_ok_sell = 38 <= rsi <= 65
                 rsi_divergence_buy = rsi_divergence_sell = False
             
-            # 5. CANDLE CONFIRMATION - 🎯 SNIPER 90+: ต้องมีแท่งเทียน Strong
-            min_body_ratio = 0.5 if is_gold else (0.35 if is_m15 else 0.4)
+            # 5. CANDLE CONFIRMATION - 🎯 ต้องมีแท่งเทียน Strong (ผ่อนเล็กน้อย)
+            min_body_ratio = 0.4 if is_gold else (0.3 if is_m15 else 0.35)
             bullish_candle = is_bullish and body_ratio > min_body_ratio
             bearish_candle = is_bearish and body_ratio > min_body_ratio
             
             bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
             bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
             
-            # 🎯 SNIPER 90+: Require engulfing or very strong candle
+            # 🎯 Require engulfing or strong candle (ผ่อนจาก 0.55 → 0.45)
             if is_gold:
-                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.55)
-                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.55)
+                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.45)
+                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.45)
             else:
-                bullish_candle_ok = (bullish_candle and body_ratio > 0.45) or bullish_engulf
-                bearish_candle_ok = (bearish_candle and body_ratio > 0.45) or bearish_engulf
+                bullish_candle_ok = (bullish_candle and body_ratio > 0.38) or bullish_engulf
+                bearish_candle_ok = (bearish_candle and body_ratio > 0.38) or bearish_engulf
             
             # 6. PULLBACK ZONE
             distance_to_ema = abs(current_price - ema_slow)
             pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Tighter for Gold
             in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
             
-            # 7. VOLATILITY CHECK - 🎯 SNIPER 90+: ต้องไม่ volatile เกินไป
-            max_volatility = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Stricter for SNIPER
+            # 7. VOLATILITY CHECK - 🎯 ต้องไม่ volatile เกินไป (ผ่อนเล็กน้อย)
+            max_volatility = 2.5 if is_gold else (3.5 if is_m15 else 3.0)
             volatility_ok = atr_pct <= max_volatility
             
-            # 7.5. 🎯 SNIPER 90+: VOLUME CONFIRMATION (mandatory)
+            # 7.5. 🎯 VOLUME CONFIRMATION
             vol_data = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
             avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
             current_vol = vol_data[-1]
             volume_ratio = current_vol / max(avg_volume_20, 1)
-            volume_confirmed = volume_ratio >= 1.3  # ปริมาณต้องมากกว่าค่าเฉลี่ย 30%+
+            volume_confirmed = volume_ratio >= 1.15  # ลดจาก 1.3 → 1.15 (ให้เทรดบ่อยขึ้น)
             
             # 7.6. 🎯 SNIPER 90+: VWAP FILTER
             # VWAP = sum(price * volume) / sum(volume) - ราคาเฉลี่ยถ่วงน้ำหนักด้วย volume
@@ -988,13 +988,13 @@ class AITradingBot:
             extra_str = f" | {' | '.join(extra_info)}" if extra_info else ""
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}{extra_str}")
             
-            # 🎯 SNIPER 90+: ต้องมี gap ที่ชัดเจนมากๆ
+            # 🎯 ต้องมี gap ชัดเจน (ผ่อนจาก 5→4 เพื่อเทรดบ่อยขึ้น)
             if is_gold:
-                min_score_gap = 5  # Gold ต้องต่างกันอย่างน้อย 5 points
-                min_dominant_score = 9  # Score ที่ชนะต้อง >= 9/14
+                min_score_gap = 4  # Gold ต้องต่างกันอย่างน้อย 4 points
+                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8/14
             else:
-                min_score_gap = 5  # Forex ต้องต่างกันอย่างน้อย 5 points
-                min_dominant_score = 9  # Score ที่ชนะต้อง >= 9/14
+                min_score_gap = 4  # Forex ต้องต่างกันอย่างน้อย 4 points
+                min_dominant_score = 8  # Score ที่ชนะต้อง >= 8/14
             
             # ❌ BLOCK if score gap too small
             if score_gap < min_score_gap:
@@ -1034,13 +1034,13 @@ class AITradingBot:
             
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            # 🎯 SNIPER 90+: High min conditions for precision
+            # 🎯 Min conditions (ผ่อนจาก 8→7 เพื่อเทรดบ่อยขึ้น)
             if is_gold:
-                min_conditions = 8  # Gold needs 8/14 conditions (57%+)
+                min_conditions = 7  # Gold needs 7/14 conditions (50%+)
             elif is_m15:
                 min_conditions = 5  # M15 needs 5/14
             else:
-                min_conditions = 8  # 💱 FOREX: needs 8/14 conditions
+                min_conditions = 7  # 💱 FOREX: needs 7/14 conditions
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL
@@ -1204,12 +1204,12 @@ class AITradingBot:
                 # 🎯 SIGNAL-BASED SL/TP MULTIPLIERS
                 # ═══════════════════════════════════════════════════════════════════
                 
-                # 🎯 SNIPER 90+: Closer TP for higher hit rate
+                # 💰 MAX PROFIT: Higher TP for bigger wins
                 quality_multipliers = {
-                    "PREMIUM": {"sl": 0.5, "tp": 1.8},  # Closer TP = higher hit rate
-                    "HIGH":    {"sl": 0.6, "tp": 1.5},
-                    "MEDIUM":  {"sl": 0.7, "tp": 1.3},
-                    "LOW":     {"sl": 0.8, "tp": 1.1},
+                    "PREMIUM": {"sl": 0.5, "tp": 2.5},  # Best signal = big TP
+                    "HIGH":    {"sl": 0.6, "tp": 2.0},
+                    "MEDIUM":  {"sl": 0.7, "tp": 1.8},
+                    "LOW":     {"sl": 0.8, "tp": 1.5},
                 }
                 
                 base_mults = quality_multipliers.get(quality, {"sl": 0.8, "tp": 1.2})
@@ -1257,7 +1257,7 @@ class AITradingBot:
                 
                 # 📊 Calculate final multipliers
                 sl_multiplier = max(0.3, min(1.2, sl_mult_from_quality + gap_sl_adj + trend_sl_adj + session_sl_adj))
-                tp_multiplier = max(1.0, min(3.5, tp_mult_from_quality + gap_tp_adj + trend_tp_adj + session_tp_adj))
+                tp_multiplier = max(1.2, min(5.0, tp_mult_from_quality + gap_tp_adj + trend_tp_adj + session_tp_adj))
                 
                 # M15 adjustment: tighter for scalping
                 if is_m15:
@@ -1288,16 +1288,16 @@ class AITradingBot:
                 
                 if balance < 500:
                     min_sl_pct = 0.2
-                    max_sl_pct = 1.5   # Reduced from 3% - prevent huge SL
+                    max_sl_pct = 2.0   # 💰 Allow wider SL for small accounts
                 elif balance < 2000:
                     min_sl_pct = 0.15
-                    max_sl_pct = 1.2
+                    max_sl_pct = 1.5
                 elif balance < 10000:
                     min_sl_pct = 0.1
-                    max_sl_pct = 1.0
+                    max_sl_pct = 1.2
                 else:
                     min_sl_pct = 0.1
-                    max_sl_pct = 0.8
+                    max_sl_pct = 1.0
                 
                 min_sl = current_price * (min_sl_pct / 100)
                 max_sl = current_price * (max_sl_pct / 100)
@@ -4716,7 +4716,7 @@ class AITradingBot:
         # 🎯 SNIPER 90+ CONFIG FOR MAXIMUM WIN RATE
         # - If >= 60% layers pass → TRADE (strict)
         # - If < 60% layers pass → SKIP
-        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.60"))  # 🎯 SNIPER 90+: 60% layers must pass
+        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.50"))  # 🎯 SNIPER 90+: 50% layers must pass
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4733,7 +4733,7 @@ class AITradingBot:
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "5"))  # 🎯 SNIPER 90+: At least 5 high-quality passes
+        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "3"))  # 🎯 SNIPER 90+: At least 3 high-quality passes
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4751,7 +4751,7 @@ class AITradingBot:
         key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
         key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.60"))  # 🎯 SNIPER 90+: 60% key layers must agree
+        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.50"))  # 🎯 SNIPER 90+: 50% key layers must agree
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
