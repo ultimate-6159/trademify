@@ -361,44 +361,37 @@ class AITradingBot:
             "date": datetime.now().date().isoformat()
         }
         
-        # 📈 🎯 SNIPER 90+ Trailing Stop Config - TIGHT for max profit lock
+        # 📈 🎯 SNIPER 90+ Trailing Stop Config - MATCHES BACKTEST EXACTLY
+        # Uses TP-distance-based activation (NOT price-percentage-based)
         self._trailing_stop_config = {
             "enabled": True,                    # เปิด/ปิด Trailing Stop
-            # === ATR-BASED SETTINGS (SNIPER 90+) ===
-            "use_atr": True,                    # ใช้ ATR แทน fixed %
-            "activation_atr_mult": 0.3,         # 🎯 เริ่มทำงานเร็วขึ้น: 0.3x ATR
-            "trail_atr_mult": 0.2,              # 🎯 SL ห่าง 0.2x ATR จาก peak (tight)
-            "step_atr_mult": 0.05,              # 🎯 ขยับ SL ทีละ 0.05x ATR (smooth)
-            "lock_profit_atr_mult": 0.4,        # Lock profit = 0.4x ATR distance
-            # === FALLBACK SETTINGS (if ATR not available) ===
-            "activation_profit_pct": 0.05,      # 💰 เริ่มทำงานเมื่อกำไร >= 0.05% (earlier)
-            "trail_distance_pct": 0.04,         # 💰 SL ตาม 0.04% จาก peak (tighter)
-            "step_pct": 0.02,                   # ยก SL ทีละ 0.02%
-            "lock_profit_pct": 0.7,             # Lock 70% ของกำไร
-            # === MINIMUM DISTANCES (absolute) ===
-            "min_trail_distance_gold": 3.0,     # 🎯 Gold: SL ห่างขั้นต่ำ $3 (tight)
-            "min_trail_distance_forex": 0.0006, # 🎯 Forex: SL ห่างขั้นต่ำ 6 pips
+            # === TP-DISTANCE-BASED SETTINGS (MATCHES BACKTEST) ===
+            "use_tp_distance": True,            # 🎯 ใช้ TP distance เป็นฐาน (เหมือน backtest)
+            "activation_tp_pct": 0.08,          # 🎯 เริ่มทำงานเมื่อกำไร >= 8% ของ TP distance
+            "trail_profit_pct": 0.15,           # 🎯 SL ห่าง 15% ของ profit จาก peak
         }
         self._position_highest_prices: Dict[str, float] = {}  # Track highest/lowest for trailing
-        self._position_atr: Dict[str, float] = {}  # Track ATR at entry for each position
+        self._position_entry_tp: Dict[str, float] = {}  # Track TP at entry for each position
         
-        # 🎯 Floating TP Config - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
+        # 🎯 Floating TP Config - DISABLED (Backtest ไม่ใช้ Floating TP)
         self._floating_tp_config = {
-            "enabled": True,                    # เปิด/ปิด Floating TP
-            "min_rr_ratio": 1.5,                # R:R ขั้นต่ำที่ต้องรักษา (SL-Entry : TP-Entry)
-            "tp_extension_multiplier": 1.2,    # ยืด TP 20% เมื่อ SL ถูกยก
-            "max_tp_extension_pct": 5.0,        # TP ขยับได้มากสุด 5% จาก entry
+            "enabled": False,                   # ❌ ปิด - Backtest ไม่ใช้ Floating TP
+            "min_rr_ratio": 1.5,
+            "tp_extension_multiplier": 1.2,
+            "max_tp_extension_pct": 5.0,
         }
-        self._position_original_tp: Dict[str, float] = {}  # เก็บ TP เดิมเพื่ออ้างอิง
+        self._position_original_tp: Dict[str, float] = {}
         
         # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
         # 🚀 UPDATED: Optimized for 10-15 trades/day while maintaining efficiency
         self._smart_features = {
-            # 💰 Break-Even ย้าย SL ไปจุด entry เมื่อกำไรถึงระดับหนึ่ง
+            # 💰 Break-Even ย้าย SL ไปจุด entry - MATCHES BACKTEST
+            # Backtest: activation = 50% of TP distance, SL = entry + 10% of TP distance
             "break_even": {
                 "enabled": True,
-                "activation_pct": 0.2,  # 💰 เปิดใช้เมื่อกำไร >= 0.2% (earlier protection)
-                "offset_pct": 0.03,     # SL = entry + 0.03% (เผื่อ spread)
+                "use_tp_distance": True,         # 🎯 ใช้ TP distance เป็นฐาน (เหมือน backtest)
+                "activation_tp_pct": 0.5,        # 💰 เปิดใช้เมื่อกำไร >= 50% ของ TP distance
+                "offset_tp_pct": 0.1,            # SL = entry + 10% ของ TP distance
             },
             # 🎯 จำกัดจำนวนเทรดต่อวัน (เพิ่มจาก 5→10)
             "max_daily_trades": {
@@ -1563,8 +1556,9 @@ class AITradingBot:
                 self.firebase_service = None
         
         # 8. 🧠 Smart Brain - เรียนรู้จากการเทรด (with Firebase)
+        # 🔥 SNIPER 90+: Disable pullback entry (backtest ไม่มี pullback logic)
         self.smart_brain = SmartBrain(
-            enable_pullback_entry=True,   # รอ pullback ก่อนเข้า
+            enable_pullback_entry=False,  # ❌ ปิด - Backtest ไม่รอ pullback
             enable_partial_tp=True,       # ปิดบางส่วนที่ TP1
             enable_stale_exit=True,       # ปิดเทรดที่ค้างนาน
             enable_adaptive_risk=True,    # ปรับ size ตาม performance
@@ -4184,15 +4178,12 @@ class AITradingBot:
             logger.info(f"   ❌ SKIP: Signal is WAIT")
             return {"action": "SKIP", "reason": "Signal is WAIT"}
         
-        # Check entry timing - but allow STRONG signals to trade immediately
+        # 🔥 SNIPER 90+: Entry timing check DISABLED (backtest ไม่มี entry_timing logic)
+        # Backtest เข้าทันทีเมื่อ signal ผ่าน 20-layer แล้ว
         entry_timing = risk_mgmt.get("entry_timing", "NOW")
-        logger.info(f"   Entry timing: {entry_timing}, Signal: {signal}")
-        
-        if entry_timing != "NOW" and signal not in ["STRONG_BUY", "STRONG_SELL"]:
-            logger.info(f"   ❌ SKIP: Entry timing not NOW and signal not STRONG")
-            return {"action": "SKIP", "reason": f"Entry timing: {entry_timing}"}
-        
-        logger.info(f"   ✅ Entry timing check passed (STRONG signal or NOW)")
+        logger.info(f"   Entry timing: {entry_timing} (ignored - matching backtest)")
+        # DISABLED: if entry_timing != "NOW" ... return SKIP
+        logger.info(f"   ✅ Entry timing check BYPASSED (SNIPER 90+ mode)")
         
         # Check if signal is in allowed_signals list
         if signal not in self.allowed_signals:
@@ -4666,7 +4657,13 @@ class AITradingBot:
 
 
     async def _apply_break_even(self) -> None:
-        """🛡️ Break-Even - ย้าย SL ไปจุด entry เมื่อกำไร"""
+        """
+        🛡️ Break-Even - MATCHES BACKTEST EXACTLY
+        
+        Backtest logic:
+        - Activation: เมื่อกำไร >= 50% ของ TP distance
+        - SL = entry + 10% ของ TP distance (BUY) / entry - 10% ของ TP distance (SELL)
+        """
         config = self._smart_features.get("break_even", {})
         if not config.get("enabled", False):
             return
@@ -4674,8 +4671,9 @@ class AITradingBot:
         if not self.trading_engine or not self.trading_engine.positions:
             return
         
-        activation_pct = config.get("activation_pct", 0.5)
-        offset_pct = config.get("offset_pct", 0.05)
+        # TP-distance-based settings (matches backtest)
+        activation_tp_pct = config.get("activation_tp_pct", 0.5)  # 50% of TP distance
+        offset_tp_pct = config.get("offset_tp_pct", 0.1)          # 10% of TP distance
         
         for pos_id, position in list(self.trading_engine.positions.items()):
             try:
@@ -4687,22 +4685,31 @@ class AITradingBot:
                 current_price = position.current_price or 0
                 entry_price = position.entry_price or 0
                 current_sl = position.stop_loss
+                take_profit = position.take_profit
                 
                 if not current_price or not entry_price:
                     continue
                 
-                # Calculate profit percentage
-                if position.side == OrderSide.BUY:
-                    profit_pct = ((current_price - entry_price) / entry_price) * 100
-                else:
-                    profit_pct = ((entry_price - current_price) / entry_price) * 100
-                
-                # Check activation
-                if profit_pct < activation_pct:
+                # Calculate TP distance (same as backtest)
+                tp_distance = abs(take_profit - entry_price) if take_profit else 0
+                if tp_distance <= 0:
                     continue
                 
-                # Calculate break-even SL with offset
-                offset = entry_price * (offset_pct / 100)
+                # Activation target = 50% of TP distance (matches backtest)
+                activation_target = tp_distance * activation_tp_pct
+                
+                # Calculate current profit
+                if position.side == OrderSide.BUY:
+                    current_profit = current_price - entry_price
+                else:
+                    current_profit = entry_price - current_price
+                
+                # Check activation (matches backtest: current_profit >= tp_distance * 0.5)
+                if current_profit < activation_target:
+                    continue
+                
+                # Calculate break-even SL (matches backtest: entry + 10% of TP distance)
+                offset = tp_distance * offset_tp_pct
                 
                 if position.side == OrderSide.BUY:
                     new_sl = entry_price + offset
@@ -4727,11 +4734,13 @@ class AITradingBot:
                 if success:
                     self._break_even_applied[pos_id] = True
                     position.stop_loss = new_sl
+                    profit_pct = (current_profit / entry_price) * 100
                     logger.info(
                         f"🛡️ BREAK-EVEN: {symbol} | "
                         f"Entry: {entry_price:.5f} | "
                         f"New SL: {new_sl:.5f} | "
-                        f"Profit: {profit_pct:.2f}%"
+                        f"Profit: ${current_profit:.2f} ({profit_pct:.3f}%) | "
+                        f"TP dist: ${tp_distance:.2f}"
                     )
                     
                     await self._broadcast_update("break_even_applied", {
@@ -5205,7 +5214,14 @@ class AITradingBot:
             return current_tp
 
     async def _update_trailing_stops(self) -> None:
-        """🎯 Trailing Stop - ยก SL ตามราคาเพื่อล็อคกำไร (Lock 50% Profit)"""
+        """
+        🎯 Trailing Stop - MATCHES BACKTEST EXACTLY
+        
+        ใช้ TP-distance-based approach เหมือน Backtest:
+        - Activation: เมื่อกำไร >= 8% ของ TP distance
+        - Trail: SL = highest_price - (profit * 15%)
+        - Track highest_price/lowest_price ต่อ position
+        """
         if not self._trailing_stop_config.get("enabled", False):
             return
         
@@ -5213,9 +5229,8 @@ class AITradingBot:
             return
         
         config = self._trailing_stop_config
-        activation_pct = config.get("activation_profit_pct", 0.15)
-        lock_profit_pct = config.get("lock_profit_pct", 0.5)  # Lock 50% of profit
-        step_pct = config.get("step_pct", 0.05)
+        activation_tp_pct = config.get("activation_tp_pct", 0.08)  # 8% of TP distance
+        trail_profit_pct = config.get("trail_profit_pct", 0.15)    # 15% of profit from peak
         
         for pos_id, position in list(self.trading_engine.positions.items()):
             try:
@@ -5223,66 +5238,63 @@ class AITradingBot:
                 current_price = position.current_price or 0
                 entry_price = position.entry_price or 0
                 current_sl = position.stop_loss
+                take_profit = position.take_profit
                 
                 if not current_price or not entry_price:
                     continue
                 
-                # Calculate profit percentage
-                if position.side == OrderSide.BUY:
-                    profit_pct = ((current_price - entry_price) / entry_price) * 100
-                    profit_amount = current_price - entry_price
-                else:  # SELL
-                    profit_pct = ((entry_price - current_price) / entry_price) * 100
-                    profit_amount = entry_price - current_price
-                
-                # Check activation threshold
-                if profit_pct < activation_pct:
+                # Calculate TP distance (same as backtest)
+                tp_distance = abs(take_profit - entry_price) if take_profit else 0
+                if tp_distance <= 0:
                     continue
                 
-                # Determine min trail distance based on symbol
+                # Activation target = 8% of TP distance (matches backtest)
+                activation_target = tp_distance * activation_tp_pct
+                
                 is_gold = "XAU" in symbol.upper() or "GOLD" in symbol.upper()
-                if is_gold:
-                    min_trail_distance = config.get("min_trail_distance_gold", 0.5)
-                else:
-                    min_trail_distance = config.get("min_trail_distance_forex", 0.0005)
                 
-                # Calculate new SL: Lock 50% of profit
-                # For BUY: new_sl = entry + (profit * 0.5)
-                # For SELL: new_sl = entry - (profit * 0.5)
-                locked_profit = profit_amount * lock_profit_pct
-                step_distance = current_price * (step_pct / 100)
-                
-                # Calculate new SL based on position side
                 if position.side == OrderSide.BUY:
-                    # For BUY: SL = entry + locked_profit (move up to lock profit)
-                    new_sl = entry_price + locked_profit
+                    # Track highest price (same as backtest)
+                    prev_highest = self._position_highest_prices.get(pos_id, 0)
+                    if current_price > prev_highest or prev_highest == 0:
+                        self._position_highest_prices[pos_id] = current_price
+                    highest_price = self._position_highest_prices[pos_id]
                     
-                    # Ensure minimum distance from current price
-                    if (current_price - new_sl) < min_trail_distance:
-                        new_sl = current_price - min_trail_distance
+                    # Current profit from highest
+                    current_profit = highest_price - entry_price
                     
-                    # Don't move SL backward
+                    # Check activation (matches backtest: current_profit >= activation_target)
+                    if current_profit < activation_target:
+                        continue
+                    
+                    # Trail SL: highest_price - (profit * 15%) (matches backtest)
+                    trail_distance = current_profit * trail_profit_pct
+                    new_sl = highest_price - trail_distance
+                    
+                    # Only move SL up, never down (matches backtest)
                     if current_sl and new_sl <= current_sl:
                         continue
                     
-                    # Check step size (move by at least step_distance)
-                    if current_sl and (new_sl - current_sl) < step_distance:
-                        continue
-                    
                 else:  # SELL
-                    # For SELL: SL = entry - locked_profit (move down to lock profit)
-                    new_sl = entry_price - locked_profit
+                    # Track lowest price (same as backtest)
+                    prev_lowest = self._position_highest_prices.get(pos_id, float('inf'))
+                    if current_price < prev_lowest or prev_lowest == float('inf'):
+                        self._position_highest_prices[pos_id] = current_price
+                    lowest_price = self._position_highest_prices[pos_id]
                     
-                    # Ensure minimum distance from current price
-                    if (new_sl - current_price) < min_trail_distance:
-                        new_sl = current_price + min_trail_distance
+                    # Current profit from lowest
+                    current_profit = entry_price - lowest_price
                     
-                    # Don't move SL backward (for SELL, higher is backward)
-                    if current_sl and new_sl >= current_sl:
+                    # Check activation
+                    if current_profit < activation_target:
                         continue
                     
-                    # Check step size
-                    if current_sl and (current_sl - new_sl) < step_distance:
+                    # Trail SL: lowest_price + (profit * 15%) (matches backtest)
+                    trail_distance = current_profit * trail_profit_pct
+                    new_sl = lowest_price + trail_distance
+                    
+                    # Only move SL down, never up (matches backtest)
+                    if current_sl and new_sl >= current_sl:
                         continue
                 
                 # Round to appropriate precision
@@ -5302,26 +5314,19 @@ class AITradingBot:
                         old_sl = current_sl or entry_price
                         position.stop_loss = new_sl
                         
-                        # Calculate locked profit
+                        # Calculate locked profit info
                         if position.side == OrderSide.BUY:
-                            locked_profit_pct = ((new_sl - entry_price) / entry_price) * 100
+                            locked_amount = new_sl - entry_price
                         else:
-                            locked_profit_pct = ((entry_price - new_sl) / entry_price) * 100
+                            locked_amount = entry_price - new_sl
+                        
+                        profit_pct = (current_profit / entry_price) * 100
                         
                         logger.info(
                             f"📈 TRAILING STOP: {symbol} | "
-                            f"Profit: {profit_pct:.2f}% | "
+                            f"Profit: ${current_profit:.2f} ({profit_pct:.3f}%) | "
                             f"SL: {old_sl:.5f} → {new_sl:.5f} | "
-                            f"Locked: {locked_profit_pct:.2f}%"
-                        )
-                        
-                        # 🎯 FLOATING TP - ยก TP ตาม SL เพื่อให้ได้กำไรมากขึ้น
-                        new_tp = await self._update_floating_tp(
-                            position=position,
-                            new_sl=new_sl,
-                            entry_price=entry_price,
-                            current_price=current_price,
-                            pos_id=pos_id
+                            f"Locked: ${locked_amount:.2f}"
                         )
                         
                         # Broadcast update
@@ -5330,9 +5335,8 @@ class AITradingBot:
                             "position_id": pos_id,
                             "old_sl": old_sl,
                             "new_sl": new_sl,
-                            "new_tp": new_tp,
                             "profit_pct": profit_pct,
-                            "locked_profit_pct": locked_profit_pct,
+                            "locked_amount": locked_amount,
                             "timestamp": datetime.now().isoformat()
                         })
                     else:
