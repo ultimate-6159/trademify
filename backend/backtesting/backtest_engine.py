@@ -355,6 +355,10 @@ class BacktestEngine:
             # 1. Check and close existing trades
             await self._check_open_trades(current_time, current_bar)
             
+            # Reset daily PnL at day change (MUST be before daily loss check)
+            if i > window_size and current_time.date() != self.data.index[i-1].date():
+                self.daily_pnl = 0.0
+            
             # 2. Check daily risk limits
             if self.daily_pnl <= -self.config.max_daily_loss * self.balance / 100:
                 continue  # Skip trading today
@@ -395,10 +399,6 @@ class BacktestEngine:
             if drawdown >= self.config.max_drawdown:
                 logger.warning(f"⚠️ Max drawdown reached at {current_time}: {drawdown:.2f}%")
                 break
-            
-            # Reset daily PnL at day change
-            if i > window_size and current_time.date() != self.data.index[i-1].date():
-                self.daily_pnl = 0.0
         
         # Close any remaining open trades
         await self._close_all_trades(self.data.index[-1], self.data.iloc[-1])
@@ -579,8 +579,9 @@ class BacktestEngine:
                 moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
                 moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
                 
-                has_uptrend = strong_uptrend or moderate_uptrend
-                has_downtrend = strong_downtrend or moderate_downtrend
+                # 🎯 GOLD: Require stronger trend confirmation (same as Live)
+                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
+                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
                 
                 # ─────────────────────────────────────────────────────────────────
                 # 3. CROSSOVER SIGNALS
@@ -595,36 +596,52 @@ class BacktestEngine:
                 has_bearish_cross = bearish_cross or price_cross_down
                 
                 # ─────────────────────────────────────────────────────────────────
-                # 4. RSI CONFIRMATION (More relaxed for M15)
+                # 4. RSI CONFIRMATION - 🔥 GOLD ต้องไม่ Overbought/Oversold
                 # ─────────────────────────────────────────────────────────────────
-                if is_m15:
+                rsi_rising = rsi > rsi_prev
+                rsi_falling = rsi < rsi_prev
+                
+                if is_gold:
+                    # 🎯 SNIPER 90+ (Balanced): RSI ที่ยืดหยุ่นขึ้น (same as Live)
+                    rsi_ok_buy = 35 <= rsi <= 58
+                    rsi_ok_sell = 42 <= rsi <= 65
+                    rsi_divergence_buy = rsi < 40 and rsi_rising
+                    rsi_divergence_sell = rsi > 60 and rsi_falling
+                elif is_m15:
                     rsi_ok_buy = 32 <= rsi <= 65
                     rsi_ok_sell = 35 <= rsi <= 68
+                    rsi_divergence_buy = rsi_divergence_sell = False
                 else:
                     # 🎯 Balanced: RSI ขยายขึ้นเล็กน้อย
                     rsi_ok_buy = 35 <= rsi <= 58
                     rsi_ok_sell = 42 <= rsi <= 65
-                
-                rsi_rising = rsi > rsi_prev
-                rsi_falling = rsi < rsi_prev
+                    rsi_divergence_buy = rsi_divergence_sell = False
                 
                 # ─────────────────────────────────────────────────────────────────
                 # 5. CANDLE CONFIRMATION (Relaxed for more signals)
                 # ─────────────────────────────────────────────────────────────────
-                # 🎯 Balanced: Candle confirmation
-                min_body_ratio = 0.3 if is_m15 else 0.4
+                # 🎯 Candle confirmation (same as Live)
+                min_body_ratio = 0.4 if is_gold else (0.3 if is_m15 else 0.35)
                 bullish_candle = is_bullish and body_ratio > min_body_ratio
                 bearish_candle = is_bearish and body_ratio > min_body_ratio
                 
                 bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
                 bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
                 
+                # 🎯 GOLD: Require engulfing or strong candle (same as Live)
+                if is_gold:
+                    bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.45)
+                    bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.45)
+                else:
+                    bullish_candle_ok = (bullish_candle and body_ratio > 0.38) or bullish_engulf
+                    bearish_candle_ok = (bearish_candle and body_ratio > 0.38) or bearish_engulf
+                
                 # ─────────────────────────────────────────────────────────────────
                 # 6. PULLBACK ZONE (Wider for more signals)
                 # ─────────────────────────────────────────────────────────────────
-                # 🎯 Balanced: ขยาย pullback zone
+                # 🎯 Pullback zone (same as Live)
                 distance_to_ema = abs(current_price - ema_slow)
-                pullback_atr_mult = 3.0 if is_m15 else 2.5
+                pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)
                 in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
                 
                 # ─────────────────────────────────────────────────────────────────
@@ -651,13 +668,15 @@ class BacktestEngine:
                 # ─────────────────────────────────────────────────────────────────
                 # 8. SUPPORT/RESISTANCE
                 # ─────────────────────────────────────────────────────────────────
-                lookback = 15 if is_m15 else 20
+                lookback = 20 if is_gold else (15 if is_m15 else 20)
                 recent_high = np.max(high[-lookback:])
                 recent_low = np.min(low[-lookback:])
                 price_range = recent_high - recent_low
                 
-                near_support = current_price <= recent_low + price_range * 0.35
-                near_resistance = current_price >= recent_high - price_range * 0.35
+                # 🎯 GOLD: Tighter entry zones (same as Live)
+                zone_pct = 0.25 if is_gold else 0.35
+                near_support = current_price <= recent_low + price_range * zone_pct
+                near_resistance = current_price >= recent_high - price_range * zone_pct
                 
                 # ═══════════════════════════════════════════════════════════════════════════════
                 # 🎯 SNIPER 90+ SIGNAL SCORING
