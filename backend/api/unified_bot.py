@@ -361,13 +361,16 @@ _contrarian_mode = {
 # 4. Candle Pattern - Shooting Star, Doji, Hammer ที่ extreme
 # 5. ATR Spike - Volatility สูงผิดปกติ = reversal likely
 # 6. Momentum Fading - MACD histogram ลดลง = momentum จบ
+#
+# 🔥 DISABLED: Backtest ไม่ใช้ Peak Detection → ได้ 93.7% WR + $500→$112M!
+# Peak Detection ทำให้พลาด signal ดีๆ มากเกินไป
 
 _peak_detection_config = {
-    "enabled": True,                              # ✅ เปิด! ป้องกันเข้าที่ peak
-    "block_trade_at_peak": True,                  # 🚫 Block BUY ที่ peak
-    "block_trade_at_bottom": True,                # 🚫 Block SELL ที่ bottom
-    "wait_for_pullback_at_peak": True,            # ⏳ รอ pullback ถ้าเจอ peak
-    "wait_for_bounce_at_bottom": True,            # ⏳ รอ bounce ถ้าเจอ bottom
+    "enabled": False,                             # ❌ ปิด! ให้ตรงกับ Backtest (93.7% WR)
+    "block_trade_at_peak": False,                 # ❌ ปิด! ไม่ Block BUY ที่ peak
+    "block_trade_at_bottom": False,               # ❌ ปิด! ไม่ Block SELL ที่ bottom
+    "wait_for_pullback_at_peak": False,           # ❌ ปิด! ไม่รอ pullback
+    "wait_for_bounce_at_bottom": False,           # ❌ ปิด! ไม่รอ bounce
     
     # RSI Thresholds
     "rsi_overbought": 70,                         # RSI > 70 = overbought
@@ -390,8 +393,8 @@ _peak_detection_config = {
     "confidence_penalty_near_peak": 10,           # 📉 ลด confidence 10% ถ้าใกล้ peak
     
     # Allow override for strong signals
-    "allow_premium_signal_at_peak": False,        # 🚫 แม้ PREMIUM ก็ไม่ให้เข้าที่ peak
-    "min_confidence_override": 95,                # 📈 ถ้า confidence >= 95% ให้เข้าได้ (หายาก)
+    "allow_premium_signal_at_peak": True,         # ✅ เปิด! ให้ PREMIUM เข้าได้ทุกที่
+    "min_confidence_override": 70,                # 📈 ถ้า confidence >= 70% ให้เข้าได้
 }
 
 # 🏔️ Peak Detection Results Cache
@@ -5200,40 +5203,18 @@ async def _can_trade_signal(symbol: str, signal_data: Dict) -> tuple[bool, str]:
         logger.warning(f"🛡️ ANTI-WIPEOUT: {symbol} - {trend_reason}")
         return False, trend_reason
     
-    # 🆕 6.5. 🏔️ PEAK DETECTION CHECK - ห้ามเข้าที่ peak/bottom!
-    if _peak_detection_config.get("enabled", True):
-        # Get data for peak detection
-        try:
-            if _bot and _bot.data_provider:
-                df = await _bot.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                if df is not None and len(df) >= 30:
-                    peak_result = await _run_peak_detection(symbol, df, signal)
-                    
-                    if not peak_result.get("can_trade", True):
-                        logger.warning(f"🏔️ PEAK DETECTION: {symbol} - Trade blocked!")
-                        for reason in peak_result.get("reasons", [])[:3]:
-                            logger.warning(f"   {reason}")
-                        return False, f"PEAK DETECTION: {'At PEAK' if peak_result.get('is_peak') else 'At BOTTOM'} - wait for {'pullback' if peak_result.get('is_peak') else 'bounce'}"
-                    
-                    # Adjust confidence if near peak/bottom
-                    confidence_adj = peak_result.get("confidence_adjustment", 0)
-                    if confidence_adj < 0:
-                        adjusted_confidence = confidence + confidence_adj
-                        logger.info(f"🏔️ {symbol}: Confidence adjusted {confidence:.1f}% → {adjusted_confidence:.1f}% (peak warning)")
-                        
-                        # Re-check confidence after adjustment
-                        if adjusted_confidence < min_confidence:
-                            return False, f"PEAK ADJUSTED: Confidence {adjusted_confidence:.1f}% < {min_confidence}% after peak penalty"
-        except Exception as e:
-            logger.warning(f"Peak detection error: {e}")
+    # 🆕 6.5. 🏔️ PEAK DETECTION CHECK - ❌ DISABLED (ไม่มีใน backtest - ทำให้ WR ต่างกัน!)
+    # NOTE: Peak Detection causes live trading to miss good signals that backtest takes
+    # Backtest: 93.7% WR, $500→$112M WITHOUT peak detection
+    # Live: Lost 3 consecutive trades WITH peak detection blocking signals
+    # SOLUTION: Disable to match backtest behavior
+    # if _peak_detection_config.get("enabled", True):
+    #     ... peak detection code disabled ...
     
-    # 7. 🎯 PULLBACK ENTRY CHECK - รอ pullback ก่อนเข้า (ถ้าเปิดใช้งาน)
-    if _pullback_config.get("enabled", False):
-        current_price = signal_data.get("current_price", 0)
-        if current_price > 0:
-            can_enter_pullback, pullback_reason = _check_pullback_entry(symbol, signal_data, current_price)
-            if not can_enter_pullback:
-                return False, f"PULLBACK: {pullback_reason}"
+    # 7. 🎯 PULLBACK ENTRY CHECK - ❌ DISABLED (ไม่มีใน backtest!)
+    # NOTE: Pullback wait causes missed entries on momentum moves
+    # if _pullback_config.get("enabled", False):
+    #     ... pullback check code disabled ...
     
     # 8. Check for open positions
     has_position = await _check_open_positions(symbol)
