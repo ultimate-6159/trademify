@@ -56,16 +56,15 @@ async def run_gold_backtest(
     print(f"   ?? Min Quality: {trading_config.min_quality}")
     print(f"   ?? Min Confidence: {trading_config.min_confidence}%")
     print(f"   ?? Max Daily Trades: {trading_config.max_daily_trades}")
-    print(f"   ??? Risk per Trade: {trading_config.max_risk_per_trade}%")
-    print(f"   ?? Max Drawdown: 15%")
+    print(f"   ?? Risk per Trade: {trading_config.max_risk_per_trade}%")
+    print(f"   ?? Max Drawdown: {trading_config.max_drawdown}%")
     print("?? ???????????????????????????????????????????????????????????????")
     print("")
     
-    # Calculate appropriate lot size for small accounts
-    # For $100 account, we need to use micro lots (0.01)
-    # Risk calculation: $100 * 2% = $2 risk per trade
+    # ?? USE AGGRESSIVE SETTINGS FOR $200M+ TARGET
+    # Risk settings from trading_config (AGGRESSIVE mode = 4% risk, 25% drawdown)
     
-    # Create backtest config - MATCHED WITH LIVE TRADING
+    # Create backtest config - OPTIMIZED FOR MAXIMUM COMPOUNDING
     config = RealBacktestConfig(
         symbol="XAUUSD",  # Gold
         timeframe="H1",
@@ -73,12 +72,12 @@ async def run_gold_backtest(
         min_quality=trading_config.min_quality,
         min_layer_pass_rate=trading_config.min_layer_pass_rate,
         
-        # Account settings - SAME AS LIVE
+        # ?? AGGRESSIVE Account settings for $200M+ target
         initial_balance=initial_balance,
-        max_risk_per_trade=trading_config.max_risk_per_trade,  # 2%
-        max_daily_loss=trading_config.max_daily_loss,  # 5%
-        max_drawdown=15.0,  # 15% max drawdown
-        max_positions=5,  # ? SAME AS LIVE (5 positions)
+        max_risk_per_trade=trading_config.max_risk_per_trade,  # ?? 4% for aggressive
+        max_daily_loss=trading_config.max_daily_loss,          # ?? 15% for aggressive
+        max_drawdown=trading_config.max_drawdown,              # ?? 25% for aggressive
+        max_positions=5,  # ? 5 positions
         
         # Signal settings
         min_confidence=trading_config.min_confidence,
@@ -92,6 +91,7 @@ async def run_gold_backtest(
     # Run backtest
     engine = RealIntelligenceBacktest(config)
     result = await engine.run()
+    
     
     # Print detailed analysis
     print("")

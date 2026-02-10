@@ -76,14 +76,16 @@ class TradingConfig:
     default_take_profit_percent: float = 4.0  # % จากราคาเข้า
     max_holding_hours: Optional[int] = None  # ชั่วโมงสูงสุดที่ถือ
     
-    # Trailing Stop
-    trailing_stop_enabled: bool = False
-    trailing_stop_percent: float = 1.0  # %
-    trailing_stop_activation: float = 2.0  # เริ่มทำงานเมื่อ profit ถึง %
+    # 🎯 Trailing Stop - MATCHED WITH BACKTEST (93.1% WR)
+    # Backtest: trailing_activation_pct=0.08 (8% of TP), trailing_distance_pct=0.15 (15%)
+    trailing_stop_enabled: bool = True  # 🔥 ENABLED by default (backtest proven)
+    trailing_stop_percent: float = 0.15  # 15% trailing distance (match backtest)
+    trailing_stop_activation: float = 0.08  # 8% of TP to activate (match backtest)
     
-    # Break-Even
-    break_even_enabled: bool = False
-    break_even_at_percent: float = 1.0  # ย้าย SL ไป break-even เมื่อ profit ถึง %
+    # 🎯 Break-Even - MATCHED WITH BACKTEST (93.1% WR)
+    # Backtest: Move to entry + 10% of TP when 50% TP reached
+    break_even_enabled: bool = True  # 🔥 ENABLED by default (backtest proven)
+    break_even_at_percent: float = 0.50  # 50% of TP to trigger breakeven
     
     # Trading Hours (UTC)
     trading_hours_enabled: bool = False

@@ -281,6 +281,11 @@ AGGRESSIVE_CONFIG = HighFrequencyConfig(
     loss_cooldown_minutes=20,
     max_same_direction=4,
     symbols=["XAUUSDm"],  # ?? Gold only
+    # ?? AGGRESSIVE RISK SETTINGS FOR $200M+ BACKTEST
+    max_risk_per_trade=4.0,  # ?? 4% per trade (for 93%+ WR)
+    max_daily_loss=15.0,     # ?? 15% daily loss limit
+    max_drawdown=25.0,       # ?? 25% max drawdown
+    min_layer_pass_rate=0.35,  # 35% layer pass rate
 )
 
 

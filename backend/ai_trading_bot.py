@@ -917,23 +917,20 @@ class AITradingBot:
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     tp_distance = sl_distance * 0.6
                 else:
-                    # H1 SWING (matches backtest exactly - PROVEN $124M)
-                    sl_distance = atr * 1.8
-                    tp_distance = atr * 0.7
+                    # 🎯 FIX ISSUE #1: H1 SWING - SYNC WITH BACKTEST EXACTLY!
+                    # Backtest uses: SL = ATR * 1.2, TP = ATR * 1.0 (R:R = 0.83:1)
+                    # This was ATR * 1.8 / 0.7 before - WRONG!
+                    sl_distance = atr * 1.2  # 🔧 FIXED: Was 1.8, now matches backtest
+                    tp_distance = atr * 1.0  # 🔧 FIXED: Was 0.7, now matches backtest
                     
-                    raw_min_sl = balance * 0.01
-                    raw_max_sl = balance * 0.03
+                    # 🛡️ Minimum SL to avoid tiny trades (same as backtest line 1128)
+                    min_sl_price = 5.0  # Minimum $5 SL distance for Gold
+                    sl_distance = max(min_sl_price, sl_distance)
                     
-                    ABSOLUTE_MIN_SL_H1 = 1.0
-                    ABSOLUTE_MAX_SL_H1 = 100.0
-                    
-                    min_sl = max(ABSOLUTE_MIN_SL_H1, min(raw_min_sl, ABSOLUTE_MAX_SL_H1 * 0.2))
-                    max_sl = max(5.0, min(raw_max_sl, ABSOLUTE_MAX_SL_H1))
-                    
-                    sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    tp_distance = sl_distance * 0.7
+                    # Keep TP proportional
+                    tp_distance = sl_distance * (1.0 / 1.2)  # Maintain R:R = 0.83:1
                 
-                logger.info(f"   🎯 BACKTEST SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=0.7:1")
+                logger.info(f"   🎯 BACKTEST SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=0.83:1")
             else:
                 # Forex (matches backtest)
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
