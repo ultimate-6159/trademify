@@ -369,12 +369,14 @@ class AITradingBot:
         
         # 📈 🎯 SNIPER 90+ Trailing Stop Config - MATCHES BACKTEST EXACTLY
         # Uses TP-distance-based activation (NOT price-percentage-based)
+        # 🔧 FIX #1: Trailing Stop ค่า default จะถูก override โดย Dynamic Risk Settings
+        # ค่าเหล่านี้เป็น placeholder ที่จะถูกอัพเดตใน _apply_dynamic_risk_settings()
         self._trailing_stop_config = {
             "enabled": True,                    # เปิด/ปิด Trailing Stop
             # === TP-DISTANCE-BASED SETTINGS (MATCHES BACKTEST) ===
             "use_tp_distance": True,            # 🎯 ใช้ TP distance เป็นฐาน (เหมือน backtest)
-            "activation_tp_pct": 0.08,          # 🎯 เริ่มทำงานเมื่อกำไร >= 8% ของ TP distance
-            "trail_profit_pct": 0.15,           # 🎯 SL ห่าง 15% ของ profit จาก peak
+            "activation_tp_pct": None,          # 🔧 จะถูกตั้งค่าโดย Dynamic Risk (default: 0.05)
+            "trail_profit_pct": None,           # 🔧 จะถูกตั้งค่าโดย Dynamic Risk (default: 0.10)
         }
         self._position_highest_prices: Dict[str, float] = {}  # Track highest/lowest for trailing
         self._position_entry_tp: Dict[str, float] = {}  # Track TP at entry for each position
@@ -390,14 +392,19 @@ class AITradingBot:
         
         # 🧠 Smart Trading Features - ทำให้ระบบฉลาดขึ้น
         # 🚀 UPDATED: Optimized for 10-15 trades/day while maintaining efficiency
+        # 🔧 FIX #3: Break-Even ทำงานหลังจาก Trailing Stop
+        # Break-Even: activation 50% of TP → ย้าย SL ไป entry+offset
+        # Trailing: activation 5% of TP → trail SL ตาม profit peak
+        # ลำดับ: Trailing (5%) → Break-Even (50%) → Continue Trailing
         self._smart_features = {
             # 💰 Break-Even ย้าย SL ไปจุด entry - MATCHES BACKTEST
-            # Backtest: activation = 50% of TP distance, SL = entry + 10% of TP distance
+            # 🔧 FIX: Break-Even จะ activate หลัง trailing stop เพราะ threshold สูงกว่า (50% vs 5%)
             "break_even": {
                 "enabled": True,
                 "use_tp_distance": True,         # 🎯 ใช้ TP distance เป็นฐาน (เหมือน backtest)
                 "activation_tp_pct": 0.5,        # 💰 เปิดใช้เมื่อกำไร >= 50% ของ TP distance
                 "offset_tp_pct": 0.1,            # SL = entry + 10% ของ TP distance
+                "priority": 2,                   # 🔧 ทำงานหลัง trailing (priority 1)
             },
             # 🎯 จำกัดจำนวนเทรดต่อวัน (เพิ่มจาก 5→10)
             "max_daily_trades": {
@@ -467,6 +474,9 @@ class AITradingBot:
         self._last_supreme_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_transcendent_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_omniscient_decision_by_symbol: Dict[str, Dict[str, Any]] = {}
+        
+        # 🔧 FIX #6: Cache 20-layer results from analyze_symbol() to avoid re-running in execute_trade()
+        self._cached_layer_results_by_symbol: Dict[str, Dict[str, Any]] = {}
         
         # 🚀 PARALLEL LAYER PROCESSING - เร็วขึ้น 3-5x
         self.use_parallel_processing = True  # Toggle parallel vs sequential
@@ -1867,6 +1877,11 @@ class AITradingBot:
         """
         🎯 Apply Dynamic Risk Settings based on account balance
         
+        🔧 FIX #1, #2, #4: Dynamic Risk ทำงานแบบ Single Source of Truth
+        - ค่าทั้งหมดมาจาก get_dynamic_risk_settings() 
+        - Override ENV variables และ CLI arguments
+        - แสดง warning ถ้า CLI risk ถูก override
+        
         This uses the same risk scaling as the backtest engine:
         - $500 - $2K: Conservative (2% risk, 35% max DD)
         - $2K - $10K: Conservative-Balanced (2.5-4% risk)
@@ -1887,6 +1902,9 @@ class AITradingBot:
                 except Exception as e:
                     logger.warning(f"Could not get account balance: {e}")
             
+            # Store original CLI risk for comparison
+            original_cli_risk = self.max_risk_percent
+            
             # Apply dynamic risk settings
             self._dynamic_risk_settings = get_dynamic_risk_settings(balance, self.risk_profile)
             
@@ -1898,6 +1916,11 @@ class AITradingBot:
             logger.info(f"   Min High Quality Passes: {self._dynamic_risk_settings['min_high_quality_passes']}")
             logger.info(f"   Min Key Agreement: {self._dynamic_risk_settings['min_key_agreement']:.0%}")
             
+            # 🔧 FIX #4: Show warning if CLI risk was different (user may not know it was overridden)
+            new_risk = self._dynamic_risk_settings['max_risk_per_trade']
+            if original_cli_risk != new_risk:
+                logger.warning(f"   ⚠️ CLI --risk {original_cli_risk}% overridden → {new_risk}% (Dynamic Risk for ${balance:,.0f})")
+            
             # 🎯 Update RiskManager in Trading Engine
             if self.trading_engine and self.trading_engine.risk_manager:
                 rm = self.trading_engine.risk_manager
@@ -1906,23 +1929,34 @@ class AITradingBot:
                 rm.max_drawdown = self._dynamic_risk_settings['max_drawdown']
                 logger.info(f"   ✅ RiskManager updated with dynamic settings")
             
-            # Apply trailing stop settings
+            # 🔧 FIX #1: Apply trailing stop settings (guaranteed to set values)
             if hasattr(self, '_trailing_stop_config'):
                 self._trailing_stop_config["activation_tp_pct"] = self._dynamic_risk_settings.get("trailing_activation_pct", 0.05)
                 self._trailing_stop_config["trail_profit_pct"] = self._dynamic_risk_settings.get("trailing_distance_pct", 0.10)
                 logger.info(f"   Trailing Activation: {self._trailing_stop_config['activation_tp_pct']:.0%}")
                 logger.info(f"   Trailing Distance: {self._trailing_stop_config['trail_profit_pct']:.0%}")
+            
+            # 🔧 FIX #2: Update self.max_risk_percent for consistency
+            self.max_risk_percent = self._dynamic_risk_settings['max_risk_per_trade']
+                
                 
         except Exception as e:
             logger.error(f"Failed to apply dynamic risk settings: {e}")
-            # Fallback to defaults
+            # Fallback to defaults + set trailing stop defaults
             self._dynamic_risk_settings = {
                 "max_risk_per_trade": 2.0,
                 "max_daily_loss": 20.0,
                 "max_drawdown": 30.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,        # 🔧 FIX #2: Added min_pass_rate fallback
+                "trailing_activation_pct": 0.05,
+                "trailing_distance_pct": 0.10,
             }
+            # 🔧 FIX #1: Ensure trailing config has values even on error
+            if hasattr(self, '_trailing_stop_config'):
+                self._trailing_stop_config["activation_tp_pct"] = 0.05
+                self._trailing_stop_config["trail_profit_pct"] = 0.10
     
     async def _init_trading_engine(self):
         """Initialize trading engine - MT5 only (Production)"""
@@ -2275,6 +2309,13 @@ class AITradingBot:
                         result["layer_results"] = layer_results
                         result["layers_passed"] = layer_results.get("passed", 0)
                         result["layers_total"] = layer_results.get("total", 20)
+                        
+                        # 🔧 FIX #6: Cache layer results for execute_trade() to avoid re-running
+                        self._cached_layer_results_by_symbol[symbol] = {
+                            "layer_results": layer_results,
+                            "timestamp": datetime.now().isoformat(),
+                            "signal": tech_signal["signal"],
+                        }
                         
                         # Adjust confidence based on layer pass rate
                         pass_rate = layer_results.get("pass_rate", 50)
@@ -3003,6 +3044,24 @@ class AITradingBot:
         # ════════════════════════════════════════════════════════════════
         if self.use_parallel_processing and self.parallel_processor:
             return await self._execute_trade_parallel(analysis)
+        
+        # ════════════════════════════════════════════════════════════════
+        # 🔧 FIX #6: Check for cached layer results from analyze_symbol()
+        # This avoids running 20-layer analysis twice
+        # ════════════════════════════════════════════════════════════════
+        cached_results = self._cached_layer_results_by_symbol.get(symbol)
+        use_cached = False
+        if cached_results:
+            # Check if cache is recent (within 60 seconds) and same signal
+            try:
+                cached_time = datetime.fromisoformat(cached_results.get("timestamp", ""))
+                time_diff = (datetime.now() - cached_time).total_seconds()
+                cached_signal = cached_results.get("signal", "")
+                if time_diff < 60 and cached_signal == signal:
+                    use_cached = True
+                    logger.info(f"   🔧 FIX #6: Using cached 20-layer results (age: {time_diff:.0f}s)")
+            except:
+                pass
         
         # ════════════════════════════════════════════════════════════════
         # 🔄 SEQUENTIAL PROCESSING (Original - Fallback)
@@ -4426,43 +4485,66 @@ class AITradingBot:
         
         # ═══════════════════════════════════════════════════════════════════════════════
         # 🎯 FINAL DECISION - ALL 20 LAYERS ANALYSIS COMPLETE
+        # 🔧 FIX #6: Use cached layer results if available from analyze_symbol()
         # ═══════════════════════════════════════════════════════════════════════════════
-        total_layers = len(base_layer_results)
-        layers_passed = base_layer_can_trade_count
-        pass_rate = layers_passed / max(1, total_layers)
         
-        # Calculate average multiplier from all layers
-        avg_multiplier = sum(r.get("multiplier", 1.0) for r in base_layer_results) / max(1, total_layers)
-        
-        logger.info("")
-        logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
-        logger.info("🎯                    FINAL DECISION - 20 LAYER ANALYSIS")
-        logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
-        logger.info(f"   📊 Total Layers Analyzed: {total_layers}")
-        logger.info(f"   ✅ Layers PASSED: {layers_passed}")
-        logger.info(f"   ❌ Layers WARNING: {total_layers - layers_passed}")
-        logger.info(f"   📈 Pass Rate: {pass_rate:.0%}")
-        logger.info(f"   📊 Avg Multiplier: {avg_multiplier:.2f}x")
-        logger.info("")
-        
-        # Log each layer result
-        logger.info("   📋 Layer-by-Layer Results:")
-        for layer_result in base_layer_results:
-            layer_name = layer_result.get("layer", "Unknown")
-            layer_num = layer_result.get("layer_num", "?")
-            layer_passed = layer_result.get("can_trade", False)
-            layer_score = layer_result.get("score", 0)
-            layer_mult = layer_result.get("multiplier", 1.0)
-            status_icon = "✅" if layer_passed else "⚠️"
-            logger.info(f"      {status_icon} Layer {layer_num} ({layer_name}): {'PASS' if layer_passed else 'WARN'} | Score: {layer_score:.1f} | Mult: {layer_mult:.2f}x")
-        
-        logger.info("")
+        # Check if we should use cached results (only for FINAL DECISION metrics)
+        if use_cached and cached_results and cached_results.get("layer_results"):
+            cached_lr = cached_results["layer_results"]
+            total_layers = cached_lr.get("total", 20)
+            layers_passed = cached_lr.get("passed", 0)
+            pass_rate = cached_lr.get("pass_rate", 0) / 100  # Convert from percentage to ratio
+            logger.info("")
+            logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
+            logger.info("🎯           FINAL DECISION - USING CACHED 20-LAYER RESULTS (FIX #6)")
+            logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
+            logger.info(f"   📊 Total Layers Analyzed: {total_layers}")
+            logger.info(f"   ✅ Layers PASSED: {layers_passed}")
+            logger.info(f"   ❌ Layers WARNING: {total_layers - layers_passed}")
+            logger.info(f"   📈 Pass Rate: {pass_rate:.0%}")
+            logger.info("")
+            
+            # Use cached pass rate for FINAL DECISION thresholds
+            avg_multiplier = 1.0  # Default multiplier when using cache
+        else:
+            # Use freshly computed base_layer_results
+            total_layers = len(base_layer_results)
+            layers_passed = base_layer_can_trade_count
+            pass_rate = layers_passed / max(1, total_layers)
+            
+            # Calculate average multiplier from all layers
+            avg_multiplier = sum(r.get("multiplier", 1.0) for r in base_layer_results) / max(1, total_layers)
+            
+            logger.info("")
+            logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
+            logger.info("🎯                    FINAL DECISION - 20 LAYER ANALYSIS")
+            logger.info("🎯 ═══════════════════════════════════════════════════════════════════════════════")
+            logger.info(f"   📊 Total Layers Analyzed: {total_layers}")
+            logger.info(f"   ✅ Layers PASSED: {layers_passed}")
+            logger.info(f"   ❌ Layers WARNING: {total_layers - layers_passed}")
+            logger.info(f"   📈 Pass Rate: {pass_rate:.0%}")
+            logger.info(f"   📊 Avg Multiplier: {avg_multiplier:.2f}x")
+            logger.info("")
+            
+            # Log each layer result
+            logger.info("   📋 Layer-by-Layer Results:")
+            for layer_result in base_layer_results:
+                layer_name = layer_result.get("layer", "Unknown")
+                layer_num = layer_result.get("layer_num", "?")
+                layer_passed = layer_result.get("can_trade", False)
+                layer_score = layer_result.get("score", 0)
+                layer_mult = layer_result.get("multiplier", 1.0)
+                status_icon = "✅" if layer_passed else "⚠️"
+                logger.info(f"      {status_icon} Layer {layer_num} ({layer_name}): {'PASS' if layer_passed else 'WARN'} | Score: {layer_score:.1f} | Mult: {layer_mult:.2f}x")
+            
+            logger.info("")
         
         # 🎯 FINAL DECISION THRESHOLD
         # 🎯 SNIPER 90+ CONFIG FOR MAXIMUM WIN RATE
-        # - If >= 60% layers pass → TRADE (strict)
-        # - If < 60% layers pass → SKIP
-        MIN_PASS_RATE = float(os.getenv("MIN_PASS_RATE", "0.50"))  # 🎯 SNIPER 90+: 50% layers must pass
+        # 🔧 FIX #2: Use Dynamic Risk Settings instead of hardcoded ENV
+        # - Dynamic risk adjusts thresholds based on account size
+        # - Smaller accounts = stricter filters, larger = more trades
+        MIN_PASS_RATE = self._dynamic_risk_settings.get("min_pass_rate", 0.50)
         
         if pass_rate < MIN_PASS_RATE:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4474,12 +4556,20 @@ class AITradingBot:
         
         # ═══════════════════════════════════════════════════════════════
         # 🎯 SNIPER 90+ FILTER #1: HIGH QUALITY PASSES
+        # 🔧 FIX #2: Use Dynamic Risk Settings instead of ENV
+        # 🔧 FIX #6: Handle cached results
         # ═══════════════════════════════════════════════════════════════
-        high_quality_passes = sum(1 for r in base_layer_results if r.get('can_trade') and r.get('score', 0) >= 70)
+        
+        # When using cached results, use cached layers for high_quality calculation
+        if use_cached and cached_results and cached_results.get("layer_results"):
+            cached_layers = cached_results["layer_results"].get("layers", [])
+            high_quality_passes = sum(1 for r in cached_layers if r.get('can_trade') and r.get('score', 0) >= 70)
+        else:
+            high_quality_passes = sum(1 for r in base_layer_results if r.get('can_trade') and r.get('score', 0) >= 70)
         
         # 🥇 Gold (XAU) gets relaxed requirements - performs better with less filtering
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-        MIN_HIGH_QUALITY = int(os.getenv("MIN_HIGH_QUALITY", "3"))  # 🎯 SNIPER 90+: At least 3 high-quality passes
+        MIN_HIGH_QUALITY = self._dynamic_risk_settings.get("min_high_quality_passes", 3)
         
         if high_quality_passes < MIN_HIGH_QUALITY:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4492,12 +4582,22 @@ class AITradingBot:
         # ═══════════════════════════════════════════════════════════════
         # 🎯 SNIPER 90+ FILTER #2: KEY LAYER AGREEMENT
         # Layer 5 (Advanced), 6 (SmartBrain), 7 (Neural), 9 (Quantum), 10 (Alpha)
+        # 🔧 FIX #2: Use Dynamic Risk Settings instead of ENV
+        # 🔧 FIX #6: Handle cached results
         # ═══════════════════════════════════════════════════════════════
         KEY_LAYER_NUMS = [5, 6, 7, 9, 10]
-        key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
-        key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
+        
+        # When using cached results, use cached layers for key_layer calculation
+        if use_cached and cached_results and cached_results.get("layer_results"):
+            cached_layers = cached_results["layer_results"].get("layers", [])
+            key_layer_passes = sum(1 for r in cached_layers if r.get('layer') in KEY_LAYER_NUMS and r.get('can_trade'))
+            key_layer_total = sum(1 for r in cached_layers if r.get('layer') in KEY_LAYER_NUMS)
+        else:
+            key_layer_passes = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS and r.get('can_trade'))
+            key_layer_total = sum(1 for r in base_layer_results if r.get('layer_num') in KEY_LAYER_NUMS)
+        
         key_agreement_rate = key_layer_passes / max(1, key_layer_total)
-        MIN_KEY_AGREEMENT = float(os.getenv("MIN_KEY_AGREEMENT", "0.50"))  # 🎯 SNIPER 90+: 50% key layers must agree
+        MIN_KEY_AGREEMENT = self._dynamic_risk_settings.get("min_key_agreement", 0.50)
         
         if key_layer_total > 0 and key_agreement_rate < MIN_KEY_AGREEMENT:
             logger.warning(f"🎯 ═══════════════════════════════════════════════════════════════════════════════")
@@ -4669,11 +4769,15 @@ class AITradingBot:
         
         # =====================================================
         # 🛡️ UNIVERSAL LOT SIZING - $200 to $2,000,000,000!
+        # 🔧 FIX #7: Consolidated Lot Size Calculation
         # =====================================================
-        # ใช้ 3 วิธีคำนวณแล้วเลือกค่าต่ำสุด:
-        # 1. Risk-Based: (balance × 1%) / (SL × point_value)
-        # 2. Formula-Based: balance / divisor
-        # 3. Tier-Based: absolute max ตาม balance tier
+        # PRIORITY ORDER (Final: minimum of all):
+        # 1. Risk Guardian: Risk-based calculation
+        # 2. Formula-Based: balance / divisor (safety check)
+        # 3. Tier-Based: HARD CAP based on account size (FINAL LIMIT)
+        #
+        # This ensures lot size never exceeds tier limit even if
+        # Risk Guardian or override calculates higher value.
         
         # 📊 BALANCE TIER LIMITS (Absolute Max)
         balance_tiers = {

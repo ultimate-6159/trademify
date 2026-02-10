@@ -106,6 +106,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 35.0,         # 35% max DD (psychological comfort)
                 "min_high_quality_passes": 4, # Stricter signal quality
                 "min_key_agreement": 0.60,    # 60% key layer agreement
+                "min_pass_rate": 0.55,        # 55% layers must pass (stricter)
                 "trailing_activation_pct": 0.03,  # Earlier trailing
                 "trailing_distance_pct": 0.08,    # Tighter trail
             }
@@ -116,6 +117,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 50.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,        # 50% layers must pass
                 "trailing_activation_pct": 0.04,
                 "trailing_distance_pct": 0.10,
             }
@@ -132,6 +134,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 40.0,
                 "min_high_quality_passes": 4,
                 "min_key_agreement": 0.55,
+                "min_pass_rate": 0.55,
                 "trailing_activation_pct": 0.04,
                 "trailing_distance_pct": 0.10,
             }
@@ -142,6 +145,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 70.0,
                 "min_high_quality_passes": 2,
                 "min_key_agreement": 0.40,
+                "min_pass_rate": 0.45,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.12,
             }
@@ -152,6 +156,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 55.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.10,
             }
@@ -168,6 +173,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 45.0,
                 "min_high_quality_passes": 4,
                 "min_key_agreement": 0.55,
+                "min_pass_rate": 0.55,
                 "trailing_activation_pct": 0.04,
                 "trailing_distance_pct": 0.10,
             }
@@ -178,6 +184,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 75.0,
                 "min_high_quality_passes": 2,
                 "min_key_agreement": 0.40,
+                "min_pass_rate": 0.45,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.12,
             }
@@ -188,6 +195,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 70.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.10,
             }
@@ -204,6 +212,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 40.0,
                 "min_high_quality_passes": 4,
                 "min_key_agreement": 0.60,
+                "min_pass_rate": 0.55,
                 "trailing_activation_pct": 0.03,
                 "trailing_distance_pct": 0.08,
             }
@@ -214,6 +223,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 80.0,
                 "min_high_quality_passes": 2,
                 "min_key_agreement": 0.35,
+                "min_pass_rate": 0.40,
                 "trailing_activation_pct": 0.06,
                 "trailing_distance_pct": 0.15,
             }
@@ -224,6 +234,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 65.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.10,
             }
@@ -240,6 +251,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 25.0,
                 "min_high_quality_passes": 5,
                 "min_key_agreement": 0.70,
+                "min_pass_rate": 0.60,        # Strictest for institutional
                 "trailing_activation_pct": 0.02,
                 "trailing_distance_pct": 0.05,
             }
@@ -250,6 +262,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 50.0,
                 "min_high_quality_passes": 3,
                 "min_key_agreement": 0.50,
+                "min_pass_rate": 0.50,
                 "trailing_activation_pct": 0.05,
                 "trailing_distance_pct": 0.10,
             }
@@ -260,6 +273,7 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
                 "max_drawdown": 35.0,
                 "min_high_quality_passes": 4,
                 "min_key_agreement": 0.60,
+                "min_pass_rate": 0.55,
                 "trailing_activation_pct": 0.03,
                 "trailing_distance_pct": 0.08,
             }
