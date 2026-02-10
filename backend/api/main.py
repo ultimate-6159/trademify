@@ -3785,6 +3785,18 @@ async def get_technical_signal(symbol: str = "EURUSDm"):
     scores = analysis.get("scores", {})
     risk_mgmt = analysis.get("risk_management", {})
     
+    # 🔥 FIX: Use buy_score/sell_score from technical signal (top level)
+    # Backend stores these at top level in _last_analysis (lines 2251-2252 in ai_trading_bot.py)
+    # Raw scores can be 0-12 (Gold has 10 conditions + 2 bonus)
+    buy_score_raw = analysis.get("buy_score", 0)
+    sell_score_raw = analysis.get("sell_score", 0)
+    
+    # 🔥 FIX: Scale scores to 0-10 for frontend display
+    # Gold: max 12 conditions, Forex: max 10 conditions
+    max_score = 12  # Use max possible to ensure we never exceed 10
+    buy_score_scaled = min(10, int(buy_score_raw * 10 / max_score)) if buy_score_raw > 0 else 0
+    sell_score_scaled = min(10, int(sell_score_raw * 10 / max_score)) if sell_score_raw > 0 else 0
+    
     return convert_numpy_types({
         "status": "active",
         "symbol": symbol,
@@ -3794,19 +3806,30 @@ async def get_technical_signal(symbol: str = "EURUSDm"):
         "current_price": analysis.get("current_price", 0),
         "stop_loss": risk_mgmt.get("stop_loss", 0),
         "take_profit": risk_mgmt.get("take_profit", 0),
+        # 🔥 FIX: Add buy_score/sell_score at TOP LEVEL (frontend expects signal.value.buy_score)
+        # Scaled to 0-10 for frontend progress bar display
+        "buy_score": buy_score_scaled,
+        "sell_score": sell_score_scaled,
         "scores": {
-            "buy": scores.get("pattern", 0) if analysis.get("signal") in ["BUY", "STRONG_BUY"] else 0,
-            "sell": scores.get("pattern", 0) if analysis.get("signal") in ["SELL", "STRONG_SELL"] else 0,
+            # Also include in nested scores object for compatibility
+            "buy": buy_score_scaled,
+            "sell": sell_score_scaled,
             "pattern": scores.get("pattern", 0),
             "trend": scores.get("trend", 0),
             "volume": scores.get("volume", 0),
             "momentum": scores.get("momentum", 0),
             "session": scores.get("session", 0),
         },
-        "session": analysis.get("market_data", {}).get("session", "N/A"),
+        # 🔥 FIX: Use session from top level (set by technical signal)
+        "session": analysis.get("session", analysis.get("market_data", {}).get("session", "N/A")),
         "trend": analysis.get("market_regime", "UNKNOWN"),
         "rsi": analysis.get("indicators", {}).get("rsi", 0) if analysis.get("indicators") else 0,
         "atr": risk_mgmt.get("atr", 0),
+        # 🔥 FIX: Add indicators object for frontend RSI/ATR display
+        "indicators": {
+            "rsi": analysis.get("indicators", {}).get("rsi", 0) if analysis.get("indicators") else 0,
+            "atr": risk_mgmt.get("atr", 0),
+        },
         "timestamp": analysis.get("timestamp", datetime.now().isoformat()),
         "signal_mode": getattr(_auto_bot, 'signal_mode', 'technical'),
     })
