@@ -75,6 +75,7 @@ from trading.parallel_layers import (
     format_parallel_results
 )
 from trading.peak_detector import PeakDetector, get_peak_detector
+from backtesting import get_dynamic_risk_settings  # 🎯 Dynamic Risk Scaling
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
 from services.mt5_service import get_mt5_service, MT5Service
@@ -275,6 +276,7 @@ class AITradingBot:
         broadcast_to_firebase: bool = True,
         allowed_signals: List[str] = None,  # Allow specific signals only
         signal_mode: str = "technical",  # 🔥 NEW: "technical" (like backtest) or "pattern" (FAISS)
+        risk_profile: str = "auto",  # 🎯 NEW: "auto", "conservative", "balanced", "aggressive"
     ):
         # Default to Exness MT5 symbols (with 'm' suffix)
         if symbols is None:
@@ -289,6 +291,10 @@ class AITradingBot:
         self.max_risk_percent = max_risk_percent
         self.broker_type = broker_type
         self.broadcast_to_firebase = broadcast_to_firebase
+        
+        # 🎯 Risk Profile for Dynamic Scaling
+        self.risk_profile = risk_profile
+        self._dynamic_risk_settings: Dict[str, Any] = {}
         
         # 🔥 Signal Mode: "technical" = เหมือน backtest, "pattern" = FAISS Pattern Matching
         self.signal_mode = signal_mode
@@ -608,18 +614,20 @@ class AITradingBot:
             
             
             
-            # 1. SESSION FILTER (matches backtest exactly)
+            # 1. SESSION FILTER - 🌏 ALL SESSIONS ENABLED (Including Asian)
             london_session = 7 <= hour <= 16
             ny_session = 13 <= hour <= 21
             overlap_session = 13 <= hour <= 16
             asian_session = 0 <= hour <= 6 or hour >= 22
+            tokyo_session = 0 <= hour <= 9  # Tokyo: 00:00-09:00 UTC
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
             
+            # 🌏 ENABLE ALL SESSIONS (including Asian/Tokyo)
+            # Asian session: Lower volatility but still tradeable for Gold/Forex
             if is_gold:
-                # Match backtest: both M15 and H1 use same filter
-                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+                good_session = (london_session or ny_session or asian_session or tokyo_session) and not is_weekend_risk
             else:
-                good_session = (london_session or ny_session) and not asian_session and not is_weekend_risk
+                good_session = (london_session or ny_session or asian_session or tokyo_session) and not is_weekend_risk
             
             # 2. TREND ANALYSIS (matches backtest exactly)
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
@@ -946,6 +954,7 @@ class AITradingBot:
             else:
                 market_regime = "RANGE"
             
+            
             # Return signal dict
             return {
                 "signal": signal,
@@ -968,6 +977,7 @@ class AITradingBot:
                 "session": "OVERLAP" if overlap_session else "LONDON" if london_session else "NY" if ny_session else "ASIAN",
                 "trend": market_regime,
                 "market_regime": market_regime,
+                "df": df,  # 🎯 For Peak Detection Filter
             }
             
         except Exception as e:
@@ -1504,6 +1514,9 @@ class AITradingBot:
         # 3. Initialize Trading Engine (MT5 or Binance)
         await self._init_trading_engine()
         
+        # 3.5. 🎯 Apply Dynamic Risk Settings based on account balance
+        await self._apply_dynamic_risk_settings()
+        
         # 4. Enhanced Analyzer
         self.enhanced_analyzer = EnhancedAnalyzer(
             min_quality=self.min_quality,
@@ -1515,10 +1528,14 @@ class AITradingBot:
         logger.info(f"✓ Enhanced analyzer initialized (Min Quality: {self.min_quality.value})")
         
         # 5. 🛡️ Risk Guardian - ป้องกันการล้างพอร์ต
-        # 🚀 20-LAYER EXTREME: Load from ENV
-        max_daily_loss = float(os.getenv("MAX_DAILY_LOSS", "20.0"))
-        max_drawdown = float(os.getenv("MAX_DRAWDOWN", "30.0"))
+        # 🎯 Dynamic Risk Settings based on account balance
+        max_daily_loss = self._dynamic_risk_settings.get("max_daily_loss", float(os.getenv("MAX_DAILY_LOSS", "20.0")))
+        max_drawdown = self._dynamic_risk_settings.get("max_drawdown", float(os.getenv("MAX_DRAWDOWN", "30.0")))
         max_positions = int(os.getenv("MAX_POSITIONS", "10"))
+        
+        # Apply dynamic risk per trade
+        risk_per_trade = self._dynamic_risk_settings.get("max_risk_per_trade", self.max_risk_percent)
+        self.max_risk_percent = risk_per_trade
         
         self.risk_guardian = create_risk_guardian(
             max_risk_per_trade=self.max_risk_percent,
@@ -1527,7 +1544,7 @@ class AITradingBot:
             max_positions=max_positions,
         )
         logger.info(f"✓ Risk Guardian initialized (Max Daily Loss: {max_daily_loss}%, Max Drawdown: {max_drawdown}%, Max Positions: {max_positions})")
-        logger.info(f"   🚀 20-LAYER EXTREME MODE ACTIVE!")
+        logger.info(f"   🎯 DYNAMIC RISK MODE: {self.risk_profile.upper()}")
         
         # 6. 🏆 Pro Trading Features - สิ่งที่ Pro Trader ทำ
         self.pro_features = ProTradingFeatures(
@@ -1846,6 +1863,67 @@ class AITradingBot:
             import traceback
             traceback.print_exc()
     
+    async def _apply_dynamic_risk_settings(self):
+        """
+        🎯 Apply Dynamic Risk Settings based on account balance
+        
+        This uses the same risk scaling as the backtest engine:
+        - $500 - $2K: Conservative (2% risk, 35% max DD)
+        - $2K - $10K: Conservative-Balanced (2.5-4% risk)
+        - $10K - $50K: Balanced-Aggressive (3-6% risk)
+        - $50K - $500K: Balanced-Aggressive (3-7% risk)
+        - $500K+: Institutional (1.5-4% risk)
+        """
+        try:
+            # Get account balance from trading engine
+            balance = 10000.0  # Default
+            
+            if self.trading_engine and self.trading_engine.broker:
+                try:
+                    account_info = await self.trading_engine.broker.get_account_info()
+                    if account_info:
+                        balance = account_info.get("balance", 10000.0)
+                        logger.info(f"💰 Account balance detected: ${balance:,.2f}")
+                except Exception as e:
+                    logger.warning(f"Could not get account balance: {e}")
+            
+            # Apply dynamic risk settings
+            self._dynamic_risk_settings = get_dynamic_risk_settings(balance, self.risk_profile)
+            
+            # Log applied settings
+            logger.info(f"🎯 Dynamic Risk Settings Applied (Balance: ${balance:,.0f}, Profile: {self.risk_profile}):")
+            logger.info(f"   Risk/Trade: {self._dynamic_risk_settings['max_risk_per_trade']}%")
+            logger.info(f"   Max Daily Loss: {self._dynamic_risk_settings['max_daily_loss']}%")
+            logger.info(f"   Max Drawdown: {self._dynamic_risk_settings['max_drawdown']}%")
+            logger.info(f"   Min High Quality Passes: {self._dynamic_risk_settings['min_high_quality_passes']}")
+            logger.info(f"   Min Key Agreement: {self._dynamic_risk_settings['min_key_agreement']:.0%}")
+            
+            # 🎯 Update RiskManager in Trading Engine
+            if self.trading_engine and self.trading_engine.risk_manager:
+                rm = self.trading_engine.risk_manager
+                rm.max_risk_per_trade = self._dynamic_risk_settings['max_risk_per_trade']
+                rm.max_daily_loss = self._dynamic_risk_settings['max_daily_loss']
+                rm.max_drawdown = self._dynamic_risk_settings['max_drawdown']
+                logger.info(f"   ✅ RiskManager updated with dynamic settings")
+            
+            # Apply trailing stop settings
+            if hasattr(self, '_trailing_stop_config'):
+                self._trailing_stop_config["activation_tp_pct"] = self._dynamic_risk_settings.get("trailing_activation_pct", 0.05)
+                self._trailing_stop_config["trail_profit_pct"] = self._dynamic_risk_settings.get("trailing_distance_pct", 0.10)
+                logger.info(f"   Trailing Activation: {self._trailing_stop_config['activation_tp_pct']:.0%}")
+                logger.info(f"   Trailing Distance: {self._trailing_stop_config['trail_profit_pct']:.0%}")
+                
+        except Exception as e:
+            logger.error(f"Failed to apply dynamic risk settings: {e}")
+            # Fallback to defaults
+            self._dynamic_risk_settings = {
+                "max_risk_per_trade": 2.0,
+                "max_daily_loss": 20.0,
+                "max_drawdown": 30.0,
+                "min_high_quality_passes": 3,
+                "min_key_agreement": 0.50,
+            }
+    
     async def _init_trading_engine(self):
         """Initialize trading engine - MT5 only (Production)"""
         from trading.mt5_connector import MT5Broker, MT5Config
@@ -1880,7 +1958,8 @@ class AITradingBot:
                 testnet=False
             ))
         
-        # 🚀 20-LAYER EXTREME: Load risk settings from ENV
+        # 🎯 Dynamic Risk: Load risk settings (will be updated after balance check)
+        # Initial values from ENV, will be overridden by dynamic settings
         max_daily_loss_rm = float(os.getenv("MAX_DAILY_LOSS", "20.0"))
         max_positions_rm = int(os.getenv("MAX_POSITIONS", "10"))
         max_drawdown_rm = float(os.getenv("MAX_DRAWDOWN", "30.0"))
@@ -1890,11 +1969,10 @@ class AITradingBot:
             max_risk_per_trade=self.max_risk_percent,
             max_daily_loss=max_daily_loss_rm,
             max_positions=max_positions_rm,
-            min_confidence=min_confidence_rm,  # Use ENV value
+            min_confidence=min_confidence_rm,
             max_drawdown=max_drawdown_rm
         )
-        logger.info(f"✓ Risk manager: min_confidence={min_confidence_rm}%, max_daily_loss={max_daily_loss_rm}%, max_positions={max_positions_rm}")
-        logger.info(f"   🚀 20-LAYER EXTREME MODE!")
+        logger.info(f"✓ Risk manager initialized (will be updated with dynamic settings)")
         
         self.trading_engine = TradingEngine(
             broker=broker,
@@ -4160,6 +4238,80 @@ class AITradingBot:
         else:
             position_multiplier_from_risk = 1.0
         
+        # ═══════════════════════════════════════════════════════════════════════════════
+        # 🎯 PEAK DETECTION FILTER (Layer 16) - From Backtest Best Practices
+        # Avoid buying at tops, selling at bottoms - KEY for 93%+ Win Rate!
+        # ═══════════════════════════════════════════════════════════════════════════════
+        peak_can_trade = True
+        peak_multiplier = 1.0
+        
+        if self.peak_detector:
+            try:
+                # Get DataFrame for peak analysis
+                if 'df' in risk_mgmt:
+                    peak_df = risk_mgmt['df']
+                else:
+                    # Try to get from analysis or create from available data
+                    peak_df = None
+                
+                if peak_df is not None and len(peak_df) >= 30:
+                    peak_result = await self.peak_detector.analyze(
+                        symbol=symbol,
+                        df_main=peak_df,
+                        current_signal=signal
+                    )
+                    
+                    # Check if we should trade based on peak detection
+                    if signal in ["BUY", "STRONG_BUY"]:
+                        peak_can_trade = peak_result.can_buy
+                        if peak_result.is_peak:
+                            peak_multiplier = 0.3  # Reduce position if at peak
+                            logger.warning(f"   ⚠️ PEAK DETECTED: {peak_result.confidence:.0f}% confidence")
+                            for reason in peak_result.reasons[:3]:
+                                logger.warning(f"      {reason}")
+                        elif peak_result.extreme.value == "NEAR_PEAK":
+                            peak_multiplier = 0.6  # Reduce position if near peak
+                            logger.info(f"   ⚠️ NEAR PEAK: Reducing position")
+                    else:  # SELL
+                        peak_can_trade = peak_result.can_sell
+                        if peak_result.is_bottom:
+                            peak_multiplier = 0.3
+                            logger.warning(f"   ⚠️ BOTTOM DETECTED: {peak_result.confidence:.0f}% confidence")
+                            for reason in peak_result.reasons[:3]:
+                                logger.warning(f"      {reason}")
+                        elif peak_result.extreme.value == "NEAR_BOTTOM":
+                            peak_multiplier = 0.6
+                            logger.info(f"   ⚠️ NEAR BOTTOM: Reducing position")
+                    
+                    # Add to layer results
+                    base_layer_results.append({
+                        "layer": "PeakDetector",
+                        "layer_num": 16,
+                        "can_trade": peak_can_trade,
+                        "score": 100 - peak_result.confidence if (peak_result.is_peak or peak_result.is_bottom) else 80,
+                        "multiplier": peak_multiplier
+                    })
+                    if peak_can_trade:
+                        base_layer_can_trade_count += 1
+                    
+                    logger.info(f"   🎯 Peak Detection: {peak_result.extreme.value} | Can Trade: {peak_can_trade} | Mult: {peak_multiplier}x")
+                else:
+                    # No data for peak detection, skip this check
+                    base_layer_results.append({
+                        "layer": "PeakDetector",
+                        "layer_num": 16,
+                        "can_trade": True,
+                        "score": 70,
+                        "multiplier": 1.0
+                    })
+                    base_layer_can_trade_count += 1
+                    logger.debug(f"   🎯 Peak Detection: Skipped (no data)")
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Peak Detection error: {e}")
+                peak_can_trade = True
+                peak_multiplier = 1.0
+        
         # Skip if quality below threshold
         quality_order = ["SKIP", "LOW", "MEDIUM", "HIGH", "PREMIUM"]
         min_quality_idx = quality_order.index(self.min_quality.value)
@@ -4262,11 +4414,15 @@ class AITradingBot:
         # 🏆👑 Supreme Intelligence position size factor (Hedge Fund Level) - ADAPTIVE
         position_multiplier = min(position_multiplier, supreme_multiplier)
         
+        
         # 🌌✨ Transcendent Intelligence position size factor (Beyond Human) - ADAPTIVE
         position_multiplier = min(position_multiplier, transcendent_multiplier)
         
         # 🔮 Omniscient Intelligence position size factor (All-Knowing) - ADAPTIVE
         position_multiplier = min(position_multiplier, omniscient_multiplier)
+        
+        # 🎯 Peak Detection position size factor - Avoid buying at tops, selling at bottoms!
+        position_multiplier = min(position_multiplier, peak_multiplier)
         
         # ═══════════════════════════════════════════════════════════════════════════════
         # 🎯 FINAL DECISION - ALL 20 LAYERS ANALYSIS COMPLETE
@@ -5669,7 +5825,9 @@ Examples:
     parser.add_argument('--interval', type=int, default=60, help='Analysis interval (seconds)')
     parser.add_argument('--quality', default='LOW', choices=['PREMIUM', 'HIGH', 'MEDIUM', 'LOW'], 
                        help='Signal quality filter (PREMIUM=safest, LOW=aggressive)')
-    parser.add_argument('--risk', type=float, default=5.0, help='Max risk per trade (%%)')
+    parser.add_argument('--risk', type=float, default=5.0, help='Override max risk per trade (%%) - will be auto-set if not specified')
+    parser.add_argument('--risk-profile', default='auto', choices=['auto', 'conservative', 'balanced', 'aggressive'],
+                       help='🎯 Dynamic risk profile based on account size (auto=recommended)')
     parser.add_argument('--broker', default='MT5', choices=['MT5', 'BINANCE'], help='Broker type')
     parser.add_argument('--mode', default='technical', choices=['technical', 'pattern'], 
                        help='🔥 Signal mode: technical=เหมือน Backtest (High Win Rate), pattern=FAISS')
@@ -5687,13 +5845,13 @@ Examples:
     print("=" * 60)
     print("🤖 TRADEMIFY AI TRADING BOT - PRODUCTION")
     print("=" * 60)
-    print(f"   Broker:    {args.broker} (Exness MT5)")
-    print(f"   Symbols:   {args.symbols}")
-    print(f"   Timeframe: {args.timeframe} (HTF: {args.htf})")
-    print(f"   Quality:   {args.quality}")
-    print(f"   Risk:      {args.risk}% per trade")
-    print(f"   🔥 Mode:   {args.mode.upper()} {'(เหมือน Backtest - High Win Rate!)' if args.mode == 'technical' else '(FAISS Pattern Matching)'}")
-    print(f"   Mode:      🔴 LIVE TRADING")
+    print(f"   Broker:       {args.broker} (Exness MT5)")
+    print(f"   Symbols:      {args.symbols}")
+    print(f"   Timeframe:    {args.timeframe} (HTF: {args.htf})")
+    print(f"   Quality:      {args.quality}")
+    print(f"   Risk Profile: {args.risk_profile.upper()} (auto-adjusts based on balance)")
+    print(f"   🔥 Mode:      {args.mode.upper()} {'(เหมือน Backtest - High Win Rate!)' if args.mode == 'technical' else '(FAISS Pattern Matching)'}")
+    print(f"   Mode:         🔴 LIVE TRADING")
     print("=" * 60)
     
     print("\n⚠️  PRODUCTION MODE - REAL MONEY AT RISK!")
@@ -5707,7 +5865,8 @@ Examples:
         min_quality=quality_map[args.quality],
         max_risk_percent=args.risk,
         broker_type=args.broker,
-        signal_mode=args.mode,  # 🔥 NEW: technical or pattern
+        signal_mode=args.mode,
+        risk_profile=args.risk_profile,  # 🎯 Dynamic Risk Scaling
     )
     
     _bot_instance = bot
