@@ -263,6 +263,39 @@ class FirebaseRESTService:
         if not self.initialized:
             return None
         return self._get("learning")
+    
+    # === Smart Brain Methods (Trade Journal & Pattern Memory) ===
+    
+    def save_trade_journal(self, journal_data: Dict) -> bool:
+        """Save trade journal to Firebase"""
+        if not self.initialized:
+            return False
+        return self._put("smart_brain/trade_journal", journal_data)
+    
+    def load_trade_journal(self) -> Optional[Dict]:
+        """Load trade journal from Firebase"""
+        if not self.initialized:
+            return None
+        return self._get("smart_brain/trade_journal")
+    
+    def save_pattern_memory(self, patterns: Dict) -> bool:
+        """Save pattern memory to Firebase"""
+        if not self.initialized:
+            return False
+        return self._put("smart_brain/pattern_memory", patterns)
+    
+    def load_pattern_memory(self) -> Optional[Dict]:
+        """Load pattern memory from Firebase"""
+        if not self.initialized:
+            return None
+        return self._get("smart_brain/pattern_memory")
+    
+    def add_trade_history(self, trade_data: Dict) -> Optional[str]:
+        """Add a trade to history"""
+        if not self.initialized:
+            return None
+        trade_data["timestamp"] = datetime.now().isoformat()
+        return self._post("trading/history", trade_data)
 
 
 class FirebaseService:
