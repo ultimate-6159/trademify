@@ -807,12 +807,13 @@ class AITradingBot:
             # 🎯 SCORE GAP FILTER (matches backtest)
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            score_gap = abs(buy_score - sell_score)
-            
-            # Convert to 20-point for display
+            # Convert to 20-point FIRST (for consistent gap calculation)
             total_score = buy_score + sell_score
             buy_20 = int(buy_score * 20 / max(total_score, 1)) if total_score > 0 else 10
             sell_20 = 20 - buy_20
+            
+            # Calculate gap from 20-point scores (NOT raw scores)
+            score_gap = abs(buy_20 - sell_20)
             score_display = f"BUY {buy_20} : {sell_20} SELL"
             
             divergence_type = "NONE"
