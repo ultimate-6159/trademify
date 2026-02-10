@@ -82,17 +82,24 @@ async def main():
     )
     
     parser.add_argument(
+        "--risk-profile", "-r",
+        default="auto",
+        choices=["auto", "conservative", "balanced", "aggressive"],
+        help="Risk profile: auto (based on balance), conservative, balanced, aggressive"
+    )
+    
+    parser.add_argument(
         "--max-risk",
         type=float,
-        default=2.0,
-        help="Max risk per trade %% (default: 2.0)"
+        default=None,
+        help="Override max risk per trade %% (auto-set by risk-profile if not specified)"
     )
     
     parser.add_argument(
         "--max-drawdown",
         type=float,
-        default=20.0,
-        help="Max drawdown %% before stopping (default: 20.0)"
+        default=None,
+        help="Override max drawdown %% (auto-set by risk-profile if not specified)"
     )
     
     parser.add_argument(
@@ -130,28 +137,43 @@ async def main():
     print(f"   Timeframe:        {args.timeframe}")
     print(f"   Period:           {args.years} years")
     print(f"   Initial Balance:  ${args.balance:,.2f}")
+    print(f"   Risk Profile:     {args.risk_profile.upper()}")
     print(f"   Min Quality:      {args.quality}")
     print(f"   Signal Mode:      {args.signal_mode}")
     print(f"   Min Pass Rate:    {args.min_pass_rate:.0%}")
-    print(f"   Max Risk/Trade:   {args.max_risk}%")
-    print(f"   Max Drawdown:     {args.max_drawdown}%")
+    if args.max_risk:
+        print(f"   Max Risk/Trade:   {args.max_risk}% (override)")
+    if args.max_drawdown:
+        print(f"   Max Drawdown:     {args.max_drawdown}% (override)")
     print("=" * 70)
     print("\n")
     
-    # Create config
+    # Create config with risk profile
     config = BacktestConfig(
         symbol=args.symbol,
         timeframe=args.timeframe,
         years=args.years,
         initial_balance=args.balance,
+        risk_profile=args.risk_profile,
         min_quality=args.quality,
         min_layer_pass_rate=args.min_pass_rate,
-        max_risk_per_trade=args.max_risk,
-        max_drawdown=args.max_drawdown,
         use_full_intelligence=not args.no_intelligence,
         signal_mode=args.signal_mode,
         output_dir=args.output_dir
     )
+    
+    # Apply manual overrides if specified
+    if args.max_risk is not None:
+        config.max_risk_per_trade = args.max_risk
+    if args.max_drawdown is not None:
+        config.max_drawdown = args.max_drawdown
+    
+    # Show applied settings
+    print(f"💰 Applied Risk Settings:")
+    print(f"   Risk/Trade: {config.max_risk_per_trade}%")
+    print(f"   Daily Loss: {config.max_daily_loss}%")
+    print(f"   Max DD: {config.max_drawdown}%")
+    print("\n")
     
     # Run backtest
     engine = BacktestEngine(config)
