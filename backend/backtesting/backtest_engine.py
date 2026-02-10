@@ -1113,17 +1113,19 @@ class BacktestEngine:
                     # TP = 0.6x SL (PROVEN OPTIMAL)
                     tp_distance = sl_distance * 0.6
                 else:
-                    # H1: 💎 $120M STRATEGY - ATR-BASED SL/TP (CORRECT)
-                    # Key: SL/TP are PRICE distances, not USD amounts!
-                    # Position size is calculated separately based on risk %
+                    # H1: 🎯 TIGHT SL/TP - Easier to hit TP
+                    # ลด ATR multiplier เพื่อให้ TP แตะง่ายขึ้น
+                    # R:R = 0.625:1 needs 62% WR to break even (we have 95%+ WR)
                     
-                    # 🎯 ATR-BASED SL/TP (This is the CORRECT approach)
-                    sl_distance = atr * 1.2  # 1.2x ATR for tighter SL
-                    tp_distance = atr * 1.0  # R:R = 0.83:1 (high WR target)
+                    sl_distance = atr * 0.8  # 🔧 REDUCED: Was 1.2, now tighter
+                    tp_distance = atr * 0.5  # 🔧 REDUCED: Was 1.0, now easier to hit
                     
                     # 🛡️ Minimum SL to avoid tiny trades
-                    min_sl_price = 5.0  # Minimum $5 SL distance for Gold
+                    min_sl_price = 3.0  # Minimum $3 SL distance for Gold
                     sl_distance = max(min_sl_price, sl_distance)
+                    
+                    # Keep TP proportional (R:R = 0.625:1)
+                    tp_distance = sl_distance * 0.625
                 
             else:
                 # Forex: Use pip-based

@@ -918,20 +918,20 @@ class AITradingBot:
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     tp_distance = sl_distance * 0.6
                 else:
-                    # 🎯 FIX ISSUE #1: H1 SWING - SYNC WITH BACKTEST EXACTLY!
-                    # Backtest uses: SL = ATR * 1.2, TP = ATR * 1.0 (R:R = 0.83:1)
-                    # This was ATR * 1.8 / 0.7 before - WRONG!
-                    sl_distance = atr * 1.2  # 🔧 FIXED: Was 1.8, now matches backtest
-                    tp_distance = atr * 1.0  # 🔧 FIXED: Was 0.7, now matches backtest
+                    # 🎯 H1 SWING - TIGHTER SL/TP for faster TP hits
+                    # ลด ATR multiplier เพื่อให้ TP แตะง่ายขึ้น
+                    # R:R = 0.625:1 needs 62% WR to break even (we have 95%+ WR)
+                    sl_distance = atr * 0.8  # 🔧 REDUCED: Was 1.2, now tighter
+                    tp_distance = atr * 0.5  # 🔧 REDUCED: Was 1.0, now easier to hit
                     
-                    # 🛡️ Minimum SL to avoid tiny trades (same as backtest line 1128)
-                    min_sl_price = 5.0  # Minimum $5 SL distance for Gold
+                    # 🛡️ Minimum SL to avoid tiny trades
+                    min_sl_price = 3.0  # Minimum $3 SL distance for Gold
                     sl_distance = max(min_sl_price, sl_distance)
                     
-                    # Keep TP proportional
-                    tp_distance = sl_distance * (1.0 / 1.2)  # Maintain R:R = 0.83:1
+                    # Keep TP proportional (R:R = 0.625:1)
+                    tp_distance = sl_distance * 0.625
                 
-                logger.info(f"   🎯 BACKTEST SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=0.83:1")
+                logger.info(f"   🎯 TIGHT SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=0.625:1")
             else:
                 # Forex (matches backtest)
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
