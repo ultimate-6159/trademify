@@ -5906,6 +5906,12 @@ def get_bot() -> Optional[AITradingBot]:
 async def main():
     global _bot_instance
     
+    # Fix Windows console encoding for emoji support
+    import sys
+    if sys.platform == 'win32':
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    
     parser = argparse.ArgumentParser(
         description='🤖 Trademify AI Trading Bot - Expert Pattern Recognition System (Production)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
