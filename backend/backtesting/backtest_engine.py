@@ -802,25 +802,22 @@ class BacktestEngine:
                 day_of_week = current_time.weekday()
                 
                 # ─────────────────────────────────────────────────────────────────
-                # 1. SESSION FILTER - 🌏 ALL SESSIONS ENABLED (Including Asian)
+                # 1. SESSION FILTER - 🚫 BLOCK ASIAN SESSION (สัญญาณผิดทางบ่อย)
                 # ─────────────────────────────────────────────────────────────────
                 london_session = 7 <= hour <= 16
                 ny_session = 13 <= hour <= 21
                 overlap_session = 13 <= hour <= 16
                 
-                asian_session = 0 <= hour <= 6 or hour >= 22
-                tokyo_session = 0 <= hour <= 9  # Tokyo: 00:00-09:00 UTC
+                asian_session = 0 <= hour <= 6 or hour >= 22  # BLOCKED
+                tokyo_session = 0 <= hour <= 9  # Tokyo: 00:00-09:00 UTC - BLOCKED
                 is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
                 
-                # 🌏 ENABLE ALL SESSIONS (including Asian/Tokyo)
-                # Asian session: Lower volatility but still tradeable
-                # Score adjustment: Asian gets 60% weight vs London/NY 100%
+                # 🚫 BLOCK ASIAN SESSION - สัญญาณผิดทางบ่อยมาก
+                # Only trade during London & NY sessions (best liquidity & accuracy)
                 if is_m15:
-                    # M15: Allow all sessions except weekend risk
-                    good_session = (london_session or ny_session or asian_session or tokyo_session) and not is_weekend_risk
+                    good_session = (london_session or ny_session) and not is_weekend_risk
                 else:
-                    # H1: Allow all sessions except weekend risk
-                    good_session = (london_session or ny_session or asian_session or tokyo_session) and not is_weekend_risk
+                    good_session = (london_session or ny_session) and not is_weekend_risk
                 
                 # ─────────────────────────────────────────────────────────────────
                 # 2. TREND ANALYSIS
