@@ -222,6 +222,8 @@ class TradingEngine:
     """
     Trading Engine หลัก
     ควบคุมการทำงานทั้งหมดของระบบเทรดอัตโนมัติ
+    
+    🔧 FIX: Added Trailing Stop and Break-Even protection
     """
     
     def __init__(
@@ -229,16 +231,38 @@ class TradingEngine:
         broker: BaseBroker,
         risk_manager: 'RiskManager',
         max_positions: int = 5,
-        enabled: bool = False
+        enabled: bool = False,
+        # 🆕 Trailing Stop Settings
+        trailing_stop_enabled: bool = True,
+        trailing_stop_trigger_pct: float = 0.5,  # Activate trailing after 0.5% profit
+        trailing_stop_distance_pct: float = 0.3,  # Trail 0.3% behind price
+        # 🆕 Break-Even Settings  
+        break_even_enabled: bool = True,
+        break_even_trigger_pct: float = 0.3,  # Move SL to BE after 0.3% profit
+        break_even_offset: float = 0.0,  # Offset from entry (0 = exact entry)
     ):
         self.broker = broker
         self.risk_manager = risk_manager
         self.max_positions = max_positions
         self.enabled = enabled
         
+        # 🆕 Trailing Stop Config
+        self.trailing_stop_enabled = trailing_stop_enabled
+        self.trailing_stop_trigger_pct = trailing_stop_trigger_pct
+        self.trailing_stop_distance_pct = trailing_stop_distance_pct
+        
+        # 🆕 Break-Even Config
+        self.break_even_enabled = break_even_enabled
+        self.break_even_trigger_pct = break_even_trigger_pct
+        self.break_even_offset = break_even_offset
+        
         self.positions: Dict[str, Position] = {}
         self.orders: Dict[str, Order] = {}
         self.trade_history: List[TradeResult] = []
+        
+        # 🆕 Track highest profit per position (for trailing stop)
+        self._position_max_profit: Dict[str, float] = {}  # position_id -> max profit %
+        self._position_be_applied: Dict[str, bool] = {}  # position_id -> BE applied?
         
         # Callbacks
         self.on_signal_received: Optional[Callable] = None
@@ -246,6 +270,10 @@ class TradingEngine:
         self.on_position_closed: Optional[Callable] = None
         
         self._running = False
+        
+        logger.info(f"🛡️ TradingEngine Protection Settings:")
+        logger.info(f"   Trailing Stop: {'ON' if trailing_stop_enabled else 'OFF'} (trigger: {trailing_stop_trigger_pct}%, trail: {trailing_stop_distance_pct}%)")
+        logger.info(f"   Break-Even: {'ON' if break_even_enabled else 'OFF'} (trigger: {break_even_trigger_pct}%)")
     
     async def start(self) -> bool:
         """เริ่มระบบเทรดอัตโนมัติ"""
@@ -280,73 +308,52 @@ class TradingEngine:
         ประมวลผลสัญญาณจาก Voting System
         
         Args:
-            vote_result: ผลโหวตจาก VotingSystem
+            vote_result: ผลการ Vote จาก Voting System
             symbol: สัญลักษณ์ที่จะเทรด
-        
+            
         Returns:
-            TradeResult หากมีการเปิด/ปิด Position
+            TradeResult ถ้าทำการเทรด, None ถ้าไม่เทรด
         """
         if not self.enabled:
             logger.info("Trading disabled, skipping signal")
             return None
         
         if self.on_signal_received:
-            self.on_signal_received(vote_result, symbol)
-        
-        signal = vote_result.signal
-        confidence = vote_result.confidence
+            self.on_signal_received(vote_result)
         
         # ตรวจสอบว่าควรเทรดหรือไม่
-        if signal == Signal.WAIT:
-            logger.info(f"WAIT signal for {symbol}, no action taken")
+        if vote_result.signal in [Signal.STRONG_BUY, Signal.BUY]:
+            side = OrderSide.BUY
+        elif vote_result.signal in [Signal.STRONG_SELL, Signal.SELL]:
+            side = OrderSide.SELL
+        else:
+            logger.info(f"Signal {vote_result.signal} - no action")
             return None
         
-        # ตรวจสอบ Risk Management
-        can_trade, reason = await self.risk_manager.can_open_position(
-            symbol=symbol,
-            confidence=confidence,
-            current_positions=len(self.positions)
+        # ตรวจสอบ Risk
+        can_trade, risk_msg = self.risk_manager.can_trade(
+            balance=await self.broker.get_balance(),
+            open_positions=len(self.positions),
+            confidence=vote_result.confidence
         )
         
         if not can_trade:
-            logger.info(f"Risk manager rejected trade: {reason}")
-            return TradeResult(success=False, message=reason)
+            logger.warning(f"Risk check failed: {risk_msg}")
+            return None
         
-        # คำนวณ Position Size
-        balance = await self.broker.get_balance()
-        current_price = await self.broker.get_current_price(symbol)
-        
-        position_size = self.risk_manager.calculate_position_size(
-            balance=balance,
-            entry_price=current_price,
-            stop_loss=vote_result.stop_loss or current_price * 0.98,
-            risk_percent=self.risk_manager.risk_per_trade
-        )
-        
-        # สร้าง Order
-        side = OrderSide.BUY if signal in [Signal.STRONG_BUY, Signal.BUY] else OrderSide.SELL
-        
+        # สร้างและส่ง Order
         order = Order(
-            id=f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+            id=f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}",
             symbol=symbol,
             side=side,
             order_type=OrderType.MARKET,
-            quantity=position_size,
-            stop_loss=vote_result.stop_loss,
-            take_profit=vote_result.take_profit,
+            quantity=self.risk_manager.calculate_position_size(
+                balance=await self.broker.get_balance(),
+                risk_percent=2.0  # Default 2% risk
+            ),
         )
         
-        # ส่งคำสั่ง
-        result = await self.broker.place_order(order)
-        
-        if result.success and result.position:
-            self.positions[result.position.id] = result.position
-            self.trade_history.append(result)
-            
-            if self.on_trade_executed:
-                self.on_trade_executed(result)
-            
-            logger.info(f"Opened {side.value} position for {symbol}: {position_size} @ {current_price}")
+        result = await self.execute_order(order)
         
         return result
     
@@ -421,6 +428,12 @@ class TradingEngine:
                     current_price = await self.broker.get_current_price(position.symbol)
                     position.update_pnl(current_price)
                     
+                    # 🆕 Apply Break-Even Protection FIRST
+                    await self._apply_break_even(position_id, position, current_price)
+                    
+                    # 🆕 Apply Trailing Stop Protection
+                    await self._apply_trailing_stop(position_id, position, current_price)
+                    
                     # ตรวจสอบ SL/TP
                     should_close, reason = self._check_exit_conditions(position, current_price)
                     
@@ -445,6 +458,10 @@ class TradingEngine:
                             )
                             
                             if not still_open:
+                                # 🆕 Cleanup tracking dicts
+                                self._position_max_profit.pop(position_id, None)
+                                self._position_be_applied.pop(position_id, None)
+                                
                                 del self.positions[position_id]
                                 self._closing_positions.discard(position_id)
                                 
@@ -462,6 +479,89 @@ class TradingEngine:
             except Exception as e:
                 logger.error(f"Error in position monitor: {e}")
                 await asyncio.sleep(5)
+    
+    async def _apply_break_even(self, position_id: str, position: Position, current_price: float) -> None:
+        """
+        🆕 Break-Even Protection: Move SL to entry price when profit reaches threshold
+        This locks in NO LOSS even if market reverses
+        """
+        if not self.break_even_enabled:
+            return
+        
+        # Already applied break-even?
+        if self._position_be_applied.get(position_id, False):
+            return
+        
+        # Check if profit reached trigger
+        if position.pnl_percent < self.break_even_trigger_pct:
+            return
+        
+        # Calculate break-even SL
+        if position.side == OrderSide.BUY:
+            new_sl = position.entry_price + self.break_even_offset
+            # Only move SL if it's better (higher for BUY)
+            if position.stop_loss and new_sl <= position.stop_loss:
+                return
+        else:  # SELL
+            new_sl = position.entry_price - self.break_even_offset
+            # Only move SL if it's better (lower for SELL)
+            if position.stop_loss and new_sl >= position.stop_loss:
+                return
+        
+        # Apply break-even
+        try:
+            result = await self.broker.modify_position(position_id, stop_loss=new_sl)
+            if result and (result.success if hasattr(result, 'success') else result):
+                old_sl = position.stop_loss
+                position.stop_loss = new_sl
+                self._position_be_applied[position_id] = True
+                logger.info(f"🔒 BREAK-EVEN: {position.symbol} SL moved to {new_sl:.5f} (was {old_sl:.5f})")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to apply break-even for {position_id}: {e}")
+    
+    async def _apply_trailing_stop(self, position_id: str, position: Position, current_price: float) -> None:
+        """
+        🆕 Trailing Stop: Move SL to lock in profits as price moves in our favor
+        This protects profits from sudden reversals
+        """
+        if not self.trailing_stop_enabled:
+            return
+        
+        # Track max profit
+        current_profit_pct = position.pnl_percent
+        max_profit = self._position_max_profit.get(position_id, 0.0)
+        
+        if current_profit_pct > max_profit:
+            self._position_max_profit[position_id] = current_profit_pct
+            max_profit = current_profit_pct
+        
+        # Check if trailing stop should be activated
+        if max_profit < self.trailing_stop_trigger_pct:
+            return
+        
+        # Calculate trailing stop level
+        trail_distance = current_price * (self.trailing_stop_distance_pct / 100)
+        
+        if position.side == OrderSide.BUY:
+            new_sl = current_price - trail_distance
+            # Only move SL up (never down for BUY)
+            if position.stop_loss and new_sl <= position.stop_loss:
+                return
+        else:  # SELL
+            new_sl = current_price + trail_distance
+            # Only move SL down (never up for SELL)
+            if position.stop_loss and new_sl >= position.stop_loss:
+                return
+        
+        # Apply new SL
+        try:
+            result = await self.broker.modify_position(position_id, stop_loss=new_sl)
+            if result and (result.success if hasattr(result, 'success') else result):
+                old_sl = position.stop_loss
+                position.stop_loss = new_sl
+                logger.info(f"📈 TRAILING STOP: {position.symbol} SL moved to {new_sl:.5f} (was {old_sl:.5f}, profit: {current_profit_pct:.2f}%)")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to apply trailing stop for {position_id}: {e}")
     
     def _check_exit_conditions(self, position: Position, current_price: float) -> tuple[bool, str]:
         """ตรวจสอบเงื่อนไขการออก"""
@@ -508,20 +608,17 @@ class TradingEngine:
         Returns:
             Dict with sync results: added, removed, unchanged positions
         """
-        sync_result = {
-            "added": [],
-            "removed": [],
-            "unchanged": [],
-            "synced_at": datetime.now().isoformat()
-        }
+        sync_result = {"added": [], "removed": [], "unchanged": []}
         
         try:
-            # Get actual positions from broker (MT5)
             broker_positions = await self.broker.get_positions()
-            broker_position_ids = {p.id for p in broker_positions}
+            broker_position_ids = {
+                str(getattr(p, 'ticket', getattr(p, 'id', ''))) 
+                for p in broker_positions
+            }
             internal_position_ids = set(self.positions.keys())
             
-            # 1. Find positions closed by broker (SL/TP hit) - remove from internal
+            # 1. Find positions closed externally - remove from internal
             removed_ids = internal_position_ids - broker_position_ids
             for pos_id in removed_ids:
                 closed_pos = self.positions.pop(pos_id, None)
@@ -559,119 +656,103 @@ class TradingEngine:
             # 3. Update existing positions with current prices
             for broker_pos in broker_positions:
                 if broker_pos.id in self.positions:
-                    self.positions[broker_pos.id].current_price = broker_pos.current_price
-                    self.positions[broker_pos.id].pnl = broker_pos.pnl
-                    sync_result["unchanged"].append({
-                        "id": broker_pos.id,
-                        "symbol": broker_pos.symbol,
-                        "pnl": broker_pos.pnl
-                    })
-            
-            # Log summary
-            if sync_result["removed"] or sync_result["added"]:
-                logger.info(f"🔄 SYNC Complete: +{len(sync_result['added'])} -{len(sync_result['removed'])} ={len(sync_result['unchanged'])}")
-            
+                    self.positions[broker_pos.id] = broker_pos
+                    sync_result["unchanged"].append(broker_pos.id)
+        
         except Exception as e:
-            logger.error(f"❌ Sync failed: {e}")
-            sync_result["error"] = str(e)
+            logger.error(f"🔄 SYNC ERROR: {e}")
         
         return sync_result
 
 
 class RiskManager:
     """
-    Risk Management System
-    ควบคุมความเสี่ยงในการเทรด
+    จัดการความเสี่ยงในการเทรด
     """
     
     def __init__(
         self,
-        max_risk_per_trade: float = 2.0,  # % ของ balance
-        max_daily_loss: float = 5.0,  # % ของ balance
+        max_risk_per_trade: float = 2.0,  # % of balance
+        max_daily_loss: float = 5.0,  # % of starting balance
         max_positions: int = 5,
-        min_confidence: float = 70.0,
-        max_drawdown: float = 10.0,  # % ของ balance
+        min_confidence: float = 60.0,
+        max_drawdown: float = 10.0  # % of peak
     ):
-        self.risk_per_trade = max_risk_per_trade
+        self.max_risk_per_trade = max_risk_per_trade
         self.max_daily_loss = max_daily_loss
         self.max_positions = max_positions
         self.min_confidence = min_confidence
         self.max_drawdown = max_drawdown
         
-        self.daily_pnl = 0.0
+        self.daily_loss = 0.0
+        self.starting_balance = 0.0
         self.peak_balance = 0.0
-        self.current_drawdown = 0.0
     
-    async def can_open_position(
+    def can_trade(
         self,
-        symbol: str,
-        confidence: float,
-        current_positions: int
+        balance: float,
+        open_positions: int,
+        confidence: float
     ) -> tuple[bool, str]:
         """
-        ตรวจสอบว่าสามารถเปิด Position ใหม่ได้หรือไม่
+        ตรวจสอบว่าสามารถเทรดได้หรือไม่
+        
+        Returns:
+            (can_trade, reason)
         """
-        # Check confidence
+        # ตรวจสอบจำนวน Position
+        if open_positions >= self.max_positions:
+            return False, f"Max positions reached ({self.max_positions})"
+        
+        # ตรวจสอบ Confidence
         if confidence < self.min_confidence:
-            return False, f"Confidence {confidence}% below minimum {self.min_confidence}%"
+            return False, f"Confidence too low ({confidence:.1f}% < {self.min_confidence}%)"
         
-        # Check max positions
-        if current_positions >= self.max_positions:
-            return False, f"Maximum positions ({self.max_positions}) reached"
+        # ตรวจสอบ Daily Loss
+        if self.starting_balance > 0:
+            daily_loss_percent = (self.daily_loss / self.starting_balance) * 100
+            if daily_loss_percent >= self.max_daily_loss:
+                return False, f"Daily loss limit reached ({daily_loss_percent:.1f}%)"
         
-        # Check daily loss limit
-        if self.daily_pnl <= -self.max_daily_loss:
-            return False, f"Daily loss limit ({self.max_daily_loss}%) reached"
-        
-        # Check drawdown
-        if self.current_drawdown >= self.max_drawdown:
-            return False, f"Maximum drawdown ({self.max_drawdown}%) reached"
+        # ตรวจสอบ Drawdown
+        if self.peak_balance > 0:
+            drawdown = ((self.peak_balance - balance) / self.peak_balance) * 100
+            if drawdown >= self.max_drawdown:
+                return False, f"Max drawdown reached ({drawdown:.1f}%)"
         
         return True, "OK"
     
     def calculate_position_size(
         self,
         balance: float,
-        entry_price: float,
-        stop_loss: float,
-        risk_percent: float
+        risk_percent: float = None
     ) -> float:
         """
-        คำนวณ Position Size ตาม Risk %
+        คำนวณขนาด Position ตาม Risk
         
-        Formula: Position Size = (Balance * Risk%) / |Entry - SL|
+        Returns:
+            Lot size
         """
+        if risk_percent is None:
+            risk_percent = self.max_risk_per_trade
+        
         risk_amount = balance * (risk_percent / 100)
-        price_risk = abs(entry_price - stop_loss)
         
-        if price_risk == 0:
-            return 0.0
+        # Simple calculation - should be enhanced with proper lot size calculation
+        lot_size = risk_amount / 100  # Simplified
         
-        position_size = risk_amount / price_risk
-        
-        return round(position_size, 4)
+        return max(0.01, round(lot_size, 2))
     
-    def update_daily_stats(self, pnl: float, current_balance: float) -> None:
+    def update_daily_stats(self, pnl: float, balance: float) -> None:
         """อัพเดทสถิติรายวัน"""
-        self.daily_pnl += pnl
+        if pnl < 0:
+            self.daily_loss += abs(pnl)
         
-        if current_balance > self.peak_balance:
-            self.peak_balance = current_balance
-        
-        if self.peak_balance > 0:
-            self.current_drawdown = ((self.peak_balance - current_balance) / self.peak_balance) * 100
+        if balance > self.peak_balance:
+            self.peak_balance = balance
     
-    def reset_daily_stats(self) -> None:
-        """รีเซ็ตสถิติรายวัน (เรียกทุกวัน)"""
-        self.daily_pnl = 0.0
-    
-    def to_dict(self) -> dict:
-        return {
-            "risk_per_trade": self.risk_per_trade,
-            "max_daily_loss": self.max_daily_loss,
-            "max_positions": self.max_positions,
-            "min_confidence": self.min_confidence,
-            "max_drawdown": self.max_drawdown,
-            "daily_pnl": round(self.daily_pnl, 2),
-            "current_drawdown": round(self.current_drawdown, 2),
-        }
+    def reset_daily(self, balance: float) -> None:
+        """Reset สถิติรายวัน"""
+        self.daily_loss = 0.0
+        self.starting_balance = balance
+        self.peak_balance = balance

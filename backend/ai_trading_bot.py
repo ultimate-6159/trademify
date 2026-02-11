@@ -2045,12 +2045,27 @@ class AITradingBot:
         )
         logger.info(f"✓ Risk manager initialized (will be updated with dynamic settings)")
         
+        # 🆕 Get Gold config for trailing stop and break-even settings
+        from trading.gold_strategy_config import get_gold_config
+        gold_config = get_gold_config(self.timeframe)
+        
         self.trading_engine = TradingEngine(
             broker=broker,
             risk_manager=risk_manager,
             max_positions=max_positions_rm,
-            enabled=True
+            enabled=True,
+            # 🆕 Trailing Stop from Gold config
+            trailing_stop_enabled=gold_config.trailing_stop_enabled,
+            trailing_stop_trigger_pct=gold_config.trailing_stop_trigger_pct,
+            trailing_stop_distance_pct=gold_config.trailing_stop_distance_pct,
+            # 🆕 Break-Even from Gold config
+            break_even_enabled=gold_config.break_even_enabled,
+            break_even_trigger_pct=gold_config.break_even_trigger_pct,
         )
+        
+        logger.info(f"🛡️ TradingEngine Protection from gold_strategy_config:")
+        logger.info(f"   Trailing Stop: {'ON' if gold_config.trailing_stop_enabled else 'OFF'} (trigger: {gold_config.trailing_stop_trigger_pct}%)")
+        logger.info(f"   Break-Even: {'ON' if gold_config.break_even_enabled else 'OFF'} (trigger: {gold_config.break_even_trigger_pct}%)")
         
         await self.trading_engine.start()
         
