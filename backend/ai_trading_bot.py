@@ -76,6 +76,7 @@ from trading.parallel_layers import (
 )
 from trading.peak_detector import PeakDetector, get_peak_detector
 from trading.gold_strategy_config import get_gold_config, GoldH1Config  # 🥇 Gold Strategy Config
+from trading.smc_strategy import SMCStrategy, get_smc_strategy, SMCSignal  # 🧠 Smart Money Concepts
 from backtesting import get_dynamic_risk_settings  # 🎯 Dynamic Risk Scaling
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
@@ -1021,7 +1022,38 @@ class AITradingBot:
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SL/TP CALCULATION - 🥇 USES CONFIG
             # ═══════════════════════════════════════════════════════════════════════════════
-            
+
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🧠 SMC FILTER - Require Liquidity Sweep before entry
+            # ═══════════════════════════════════════════════════════════════════════════════
+            smc_signal: Optional[SMCSignal] = None
+
+            if is_gold and gold_config and gold_config.smc_enabled:
+                smc = get_smc_strategy(
+                    swing_lookback=gold_config.smc_swing_lookback,
+                    sweep_lookback=gold_config.smc_sweep_lookback_candles,
+                    sl_buffer_atr=gold_config.smc_sl_buffer_atr,
+                    max_sl_atr=gold_config.smc_max_sl_atr,
+                    min_sweep_strength=gold_config.smc_min_sweep_strength,
+                )
+                smc_signal = smc.generate_signal(
+                    opens=opens, highs=high, lows=low, closes=close,
+                    atr=atr, current_price=current_price
+                )
+
+                if gold_config.smc_require_sweep:
+                    if not smc_signal.sweep_detected:
+                        logger.info(f"   🚫 SMC FILTER: No liquidity sweep → BLOCKED ({smc_signal.reason})")
+                        return None
+
+                    if smc_signal.signal != signal:
+                        logger.info(f"   🚫 SMC FILTER: Sweep direction={smc_signal.signal} conflicts with technical={signal} → BLOCKED")
+                        return None
+
+                    # ✅ SMC confirms the signal - boost confidence
+                    confidence = min(95, confidence + 10)
+                    logger.info(f"   🧠 SMC CONFIRMED: {smc_signal.reason}")
+
             if is_gold and gold_config:
                 if is_m15:
                     # M15 SCALPING - uses config
@@ -1073,6 +1105,23 @@ class AITradingBot:
             else:
                 stop_loss = current_price + sl_distance
                 take_profit = current_price - tp_distance
+
+            # 🧠 SMC OVERRIDE: Use SMC-based SL/TP (behind sweep, target next pool)
+            if smc_signal is not None and smc_signal.sweep_detected and smc_signal.signal == signal:
+                smc_sl = smc_signal.stop_loss
+                smc_tp = smc_signal.take_profit
+
+                # Validate SMC levels are reasonable
+                if signal == "BUY" and smc_sl < current_price and smc_tp > current_price:
+                    stop_loss = smc_sl
+                    take_profit = smc_tp
+                    logger.info(f"   🧠 SMC SL/TP: SL=${stop_loss:.2f} (behind sweep), TP=${take_profit:.2f} (next pool)")
+                elif signal == "SELL" and smc_sl > current_price and smc_tp < current_price:
+                    stop_loss = smc_sl
+                    take_profit = smc_tp
+                    logger.info(f"   🧠 SMC SL/TP: SL=${stop_loss:.2f} (behind sweep), TP=${take_profit:.2f} (next pool)")
+                else:
+                    logger.info(f"   🧠 SMC SL/TP invalid, using CONFIG SL/TP")
             
             # 📊 Determine market regime
             if strong_uptrend:
@@ -1110,6 +1159,9 @@ class AITradingBot:
                 "trend": market_regime,
                 "market_regime": market_regime,
                 "df": df,  # 🎯 For Peak Detection Filter
+                "smc_sweep": smc_signal.sweep_detected if smc_signal else False,
+                "smc_structure": smc_signal.structure.value if smc_signal else "N/A",
+                "smc_reason": smc_signal.reason if smc_signal else "N/A",
             }
             
         except Exception as e:

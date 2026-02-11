@@ -175,11 +175,36 @@ class GoldH1Config:
     # 🗓️ Friday Late Block
     friday_late_block: bool = True
     friday_cutoff_hour: int = 19  # บล็อกหลัง 19:00 UTC ในวันศุกร์
-    
+
     # 🌅 Monday Gap Check
     monday_gap_skip: bool = True
     monday_gap_threshold_pct: float = 0.5  # Skip ถ้า Gap > 0.5%
-    
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🧠 SMART MONEY CONCEPTS (SMC) - เข้าหลัง Stop Hunt
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    # เปิด/ปิด SMC Filter (True = ต้องมี Liquidity Sweep ก่อนเข้าเทรด)
+    smc_enabled: bool = True
+
+    # ต้องมี Sweep ก่อนเข้าเทรด (True = บล็อกถ้าไม่มี sweep)
+    smc_require_sweep: bool = True
+
+    # Swing Point Detection: จำนวนแท่งแต่ละด้านในการหา Swing High/Low
+    smc_swing_lookback: int = 5
+
+    # จำนวนแท่งล่าสุดที่ตรวจ Sweep
+    smc_sweep_lookback_candles: int = 3
+
+    # SL Buffer: ระยะห่าง SL จากจุด sweep (ATR multiplier)
+    smc_sl_buffer_atr: float = 0.3
+
+    # Max SL Distance (ATR multiplier) - ป้องกัน SL กว้างเกินไป
+    smc_max_sl_atr: float = 2.0
+
+    # Minimum Sweep Strength (0-100) - ความแรงขั้นต่ำของ sweep
+    smc_min_sweep_strength: float = 50.0
+
     def to_dict(self) -> Dict[str, Any]:
         """แปลงเป็น dict สำหรับ logging/debugging"""
         return {
@@ -222,6 +247,15 @@ class GoldH1Config:
                 "atr_expansion_block": self.atr_expansion_block,
                 "friday_late_block": self.friday_late_block,
                 "monday_gap_skip": self.monday_gap_skip,
+            },
+            "smc": {
+                "enabled": self.smc_enabled,
+                "require_sweep": self.smc_require_sweep,
+                "swing_lookback": self.smc_swing_lookback,
+                "sweep_lookback": self.smc_sweep_lookback_candles,
+                "sl_buffer_atr": self.smc_sl_buffer_atr,
+                "max_sl_atr": self.smc_max_sl_atr,
+                "min_sweep_strength": self.smc_min_sweep_strength,
             },
         }
 
@@ -329,5 +363,17 @@ def load_gold_config_from_env() -> GoldH1Config:
         config.break_even_enabled = os.getenv("GOLD_BREAK_EVEN_ENABLED").lower() == "true"
     if os.getenv("GOLD_BREAK_EVEN_TRIGGER_PCT"):
         config.break_even_trigger_pct = float(os.getenv("GOLD_BREAK_EVEN_TRIGGER_PCT"))
-    
+
+    # 🧠 SMC settings
+    if os.getenv("GOLD_SMC_ENABLED"):
+        config.smc_enabled = os.getenv("GOLD_SMC_ENABLED").lower() == "true"
+    if os.getenv("GOLD_SMC_REQUIRE_SWEEP"):
+        config.smc_require_sweep = os.getenv("GOLD_SMC_REQUIRE_SWEEP").lower() == "true"
+    if os.getenv("GOLD_SMC_SWING_LOOKBACK"):
+        config.smc_swing_lookback = int(os.getenv("GOLD_SMC_SWING_LOOKBACK"))
+    if os.getenv("GOLD_SMC_SWEEP_LOOKBACK"):
+        config.smc_sweep_lookback_candles = int(os.getenv("GOLD_SMC_SWEEP_LOOKBACK"))
+    if os.getenv("GOLD_SMC_MIN_SWEEP_STRENGTH"):
+        config.smc_min_sweep_strength = float(os.getenv("GOLD_SMC_MIN_SWEEP_STRENGTH"))
+
     return config
