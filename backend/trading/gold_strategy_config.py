@@ -35,11 +35,11 @@ class GoldH1Config:
     
     # จำนวน conditions ขั้นต่ำที่ต้องผ่าน (จาก 10-12 conditions)
     # สูงขึ้น = เทรดน้อยลง แต่แม่นยำขึ้น
-    min_conditions: int = 7  # 7/10 = 70%
+    min_conditions: int = 3  # 3/5 = 60% (SMC handles entry precision)
     
     # Score Gap ขั้นต่ำ (ความแตกต่างระหว่าง BUY vs SELL score)
     # สูงขึ้น = สัญญาณชัดเจนขึ้น
-    min_score_gap: int = 5  # BUY vs SELL ต้องห่างกัน >= 5
+    min_score_gap: int = 2  # BUY vs SELL ต้องห่างกัน >= 2 (fewer conditions)
     
     # ═══════════════════════════════════════════════════════════════════════════════
     # 📈 RSI FILTER - ควบคุม RSI Range ที่อนุญาต
@@ -153,11 +153,11 @@ class GoldH1Config:
     # ═══════════════════════════════════════════════════════════════════════════════
     
     # 🎯 Peak Detection Hard Block (ไม่ใช่แค่ลด position)
-    peak_detection_hard_block: bool = True  # True = บล็อกเลยเมื่อเจอ Peak/Bottom
+    peak_detection_hard_block: bool = False  # Disabled: SMC sweep detection replaces peak/bottom detection
     
     # 📉 Momentum Filter (MACD Histogram)
-    momentum_filter_enabled: bool = True
-    momentum_weakening_threshold: float = 0.3  # Block ถ้า histogram ลดลง > 30%
+    momentum_filter_enabled: bool = False  # Disabled: SMC structure analysis replaces MACD
+    momentum_weakening_threshold: float = 0.3
     
     # 🔴 Consecutive Loss Protection
     consecutive_loss_pause: bool = True

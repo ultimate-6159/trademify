@@ -829,32 +829,24 @@ class AITradingBot:
             # 🎯 SIGNAL SCORING
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            # 🎯 SNIPER 90+ GOLD CONDITIONS (matches backtest exactly)
+            # 🧠 SMC-COMPATIBLE CONDITIONS (เฉพาะที่จำเป็น - SMC จัดการที่เหลือ)
+            # Removed: EMA crossover, RSI momentum, pullback zone, candle pattern, VWAP
+            # These are retail indicators that SMC's sweep/OB/FVG replaces
             if is_gold:
                 buy_conditions = [
-                    has_uptrend,                        # 1. Trend
-                    has_bullish_cross,                  # 2. Crossover
-                    rsi_ok_buy,                         # 3. RSI range
-                    rsi_rising,                         # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bullish_candle or bullish_engulf,   # 6. Candle
-                    in_pullback_zone or near_support,   # 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
-                    volume_confirmed,                   # 9. Volume > 1.15x
-                    price_above_vwap,                   # 10. Price above VWAP
+                    has_uptrend,                        # 1. Basic trend direction
+                    rsi_ok_buy,                         # 2. RSI not extreme
+                    good_session,                       # 3. Session timing
+                    volatility_ok,                      # 4. Volatility OK
+                    volume_confirmed,                   # 5. Volume confirmation
                 ]
-                
+
                 sell_conditions = [
-                    has_downtrend,                      # 1. Trend
-                    has_bearish_cross,                  # 2. Crossover
-                    rsi_ok_sell,                        # 3. RSI range
-                    rsi_falling,                        # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bearish_candle or bearish_engulf,   # 6. Candle
-                    in_pullback_zone or near_resistance,# 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
-                    volume_confirmed,                   # 9. Volume > 1.15x
-                    price_below_vwap,                   # 10. Price below VWAP
+                    has_downtrend,                      # 1. Basic trend direction
+                    rsi_ok_sell,                        # 2. RSI not extreme
+                    good_session,                       # 3. Session timing
+                    volatility_ok,                      # 4. Volatility OK
+                    volume_confirmed,                   # 5. Volume confirmation
                 ]
                 
             else:
@@ -882,46 +874,11 @@ class AITradingBot:
             
             buy_score = sum(buy_conditions)
             sell_score = sum(sell_conditions)
-            
-            # Bonus points (matches backtest exactly)
-            if strong_uptrend:
-                buy_score += 1
-            if strong_downtrend:
-                sell_score += 1
+
+            # Bonus for overlap session (still valid - Gold moves most here)
             if is_gold and overlap_session:
                 buy_score += 1
                 sell_score += 1
-            
-            # ═══════════════════════════════════════════════════════════════════════════════
-            # 🎯 MOMENTUM FILTER (MACD Histogram) - ป้องกันเข้าตอน Momentum หมด
-            # ═══════════════════════════════════════════════════════════════════════════════
-            if is_gold and gold_config and gold_config.momentum_filter_enabled:
-                # Calculate MACD using _ema method (returns single float)
-                if len(close) >= 26:
-                    ema_12_curr = self._ema(close, 12)
-                    ema_26_curr = self._ema(close, 26)
-                    macd_curr = ema_12_curr - ema_26_curr
-
-                    # Calculate previous MACD (shift by 1 candle)
-                    ema_12_prev = self._ema(close[:-1], 12)
-                    ema_26_prev = self._ema(close[:-1], 26)
-                    macd_prev = ema_12_prev - ema_26_prev
-
-                    # Simple momentum check: is MACD strengthening or weakening?
-                    if abs(macd_prev) > 0:
-                        macd_change = (macd_curr - macd_prev) / abs(macd_prev)
-                    else:
-                        macd_change = 0
-
-                    # BUY: Block if momentum weakening (MACD decreasing when positive)
-                    if macd_curr > 0 and macd_change < -gold_config.momentum_weakening_threshold:
-                        logger.info(f"   🚫 MOMENTUM WEAKENING (BUY): MACD decreasing {macd_change:.1%}")
-                        buy_score -= 2  # Penalty instead of block
-
-                    # SELL: Block if momentum weakening (MACD increasing when negative)
-                    if macd_curr < 0 and macd_change > gold_config.momentum_weakening_threshold:
-                        logger.info(f"   🚫 MOMENTUM WEAKENING (SELL): MACD increasing {macd_change:.1%}")
-                        sell_score -= 2  # Penalty instead of block
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SCORE GAP FILTER (matches backtest)
@@ -971,8 +928,8 @@ class AITradingBot:
             if is_m15:
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
-                    confidence = 65 + (buy_score - min_conditions) * 6
-                    if buy_score >= 7:
+                    confidence = 65 + (buy_score - min_conditions) * 8
+                    if buy_score >= 6:
                         quality = "PREMIUM"
                     elif buy_score >= 5:
                         quality = "HIGH"
@@ -982,8 +939,8 @@ class AITradingBot:
                         quality = "LOW"
                 elif sell_score >= min_conditions and sell_score > buy_score:
                     signal = "SELL"
-                    confidence = 65 + (sell_score - min_conditions) * 6
-                    if sell_score >= 7:
+                    confidence = 65 + (sell_score - min_conditions) * 8
+                    if sell_score >= 6:
                         quality = "PREMIUM"
                     elif sell_score >= 5:
                         quality = "HIGH"
@@ -994,25 +951,26 @@ class AITradingBot:
                 else:
                     return None
             else:
+                # H1 quality thresholds (adjusted for 5 conditions + overlap bonus)
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
-                    confidence = 60 + (buy_score - min_conditions) * 8
-                    if buy_score >= 8:
+                    confidence = 60 + (buy_score - min_conditions) * 10
+                    if buy_score >= 6:
                         quality = "PREMIUM"
-                    elif buy_score >= 7:
+                    elif buy_score >= 5:
                         quality = "HIGH"
-                    elif buy_score >= 6:
+                    elif buy_score >= 4:
                         quality = "MEDIUM"
                     else:
                         quality = "LOW"
                 elif sell_score >= min_conditions and sell_score > buy_score:
                     signal = "SELL"
-                    confidence = 60 + (sell_score - min_conditions) * 8
-                    if sell_score >= 8:
+                    confidence = 60 + (sell_score - min_conditions) * 10
+                    if sell_score >= 6:
                         quality = "PREMIUM"
-                    elif sell_score >= 7:
+                    elif sell_score >= 5:
                         quality = "HIGH"
-                    elif sell_score >= 6:
+                    elif sell_score >= 4:
                         quality = "MEDIUM"
                     else:
                         quality = "LOW"
@@ -4501,61 +4459,47 @@ class AITradingBot:
         peak_can_trade = True
         peak_multiplier = 1.0
         
-        if self.peak_detector:
+        # 🧠 Peak Detection: SKIPPED when SMC is active (SMC sweep detection replaces this)
+        is_gold_symbol = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
+        peak_smc_config = get_gold_config(self.timeframe) if is_gold_symbol else None
+        smc_active = peak_smc_config and peak_smc_config.smc_enabled
+
+        if self.peak_detector and not smc_active:
             try:
-                # Get DataFrame for peak analysis
                 if 'df' in risk_mgmt:
                     peak_df = risk_mgmt['df']
                 else:
-                    # Try to get from analysis or create from available data
                     peak_df = None
-                
+
                 if peak_df is not None and len(peak_df) >= 30:
                     peak_result = await self.peak_detector.analyze(
                         symbol=symbol,
                         df_main=peak_df,
                         current_signal=signal
                     )
-                    
-                    # 🆕 Get gold_config for hard block setting
+
                     from trading.gold_strategy_config import get_gold_config
                     peak_gold_config = get_gold_config(self.timeframe)
-                    
-                    # Check if we should trade based on peak detection
+
                     if signal in ["BUY", "STRONG_BUY"]:
                         peak_can_trade = peak_result.can_buy
                         if peak_result.is_peak:
-                            # 🆕 HARD BLOCK if configured
                             if peak_gold_config.peak_detection_hard_block:
                                 logger.warning(f"   🚫 PEAK HARD BLOCK: BUY at PEAK detected ({peak_result.confidence:.0f}% confidence)")
-                                for reason in peak_result.reasons[:3]:
-                                    logger.warning(f"      {reason}")
                                 return {"action": "SKIP", "reason": "Peak detected - HARD BLOCK"}
-                            peak_multiplier = 0.3  # Reduce position if at peak
-                            logger.warning(f"   ⚠️ PEAK DETECTED: {peak_result.confidence:.0f}% confidence")
-                            for reason in peak_result.reasons[:3]:
-                                logger.warning(f"      {reason}")
+                            peak_multiplier = 0.3
                         elif peak_result.extreme.value == "NEAR_PEAK":
-                            peak_multiplier = 0.6  # Reduce position if near peak
-                            logger.info(f"   ⚠️ NEAR PEAK: Reducing position")
-                    else:  # SELL
+                            peak_multiplier = 0.6
+                    else:
                         peak_can_trade = peak_result.can_sell
                         if peak_result.is_bottom:
-                            # 🆕 HARD BLOCK if configured
                             if peak_gold_config.peak_detection_hard_block:
                                 logger.warning(f"   🚫 BOTTOM HARD BLOCK: SELL at BOTTOM detected ({peak_result.confidence:.0f}% confidence)")
-                                for reason in peak_result.reasons[:3]:
-                                    logger.warning(f"      {reason}")
                                 return {"action": "SKIP", "reason": "Bottom detected - HARD BLOCK"}
                             peak_multiplier = 0.3
-                            logger.warning(f"   ⚠️ BOTTOM DETECTED: {peak_result.confidence:.0f}% confidence")
-                            for reason in peak_result.reasons[:3]:
-                                logger.warning(f"      {reason}")
                         elif peak_result.extreme.value == "NEAR_BOTTOM":
                             peak_multiplier = 0.6
-                            logger.info(f"   ⚠️ NEAR BOTTOM: Reducing position")
-                    
-                    # Add to layer results
+
                     base_layer_results.append({
                         "layer": "PeakDetector",
                         "layer_num": 16,
@@ -4565,10 +4509,9 @@ class AITradingBot:
                     })
                     if peak_can_trade:
                         base_layer_can_trade_count += 1
-                    
+
                     logger.info(f"   🎯 Peak Detection: {peak_result.extreme.value} | Can Trade: {peak_can_trade} | Mult: {peak_multiplier}x")
                 else:
-                    # No data for peak detection, skip this check
                     base_layer_results.append({
                         "layer": "PeakDetector",
                         "layer_num": 16,
@@ -4577,12 +4520,22 @@ class AITradingBot:
                         "multiplier": 1.0
                     })
                     base_layer_can_trade_count += 1
-                    logger.debug(f"   🎯 Peak Detection: Skipped (no data)")
-                    
+
             except Exception as e:
                 logger.warning(f"   ⚠️ Peak Detection error: {e}")
                 peak_can_trade = True
                 peak_multiplier = 1.0
+        elif smc_active:
+            # SMC active → skip peak detection, always pass
+            base_layer_results.append({
+                "layer": "PeakDetector",
+                "layer_num": 16,
+                "can_trade": True,
+                "score": 85,
+                "multiplier": 1.0
+            })
+            base_layer_can_trade_count += 1
+            logger.info(f"   🧠 Peak Detection: SKIPPED (SMC sweep handles peak/bottom detection)")
         
         # Skip if quality below threshold
         quality_order = ["SKIP", "LOW", "MEDIUM", "HIGH", "PREMIUM"]
