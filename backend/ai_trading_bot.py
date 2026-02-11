@@ -639,17 +639,18 @@ class AITradingBot:
             else:
                 good_session = (london_session or ny_session) and not is_weekend_risk
             
-            # 2. TREND ANALYSIS (matches backtest exactly)
+            # 2. TREND ANALYSIS - 🛡️ STRICT MODE (reduce losses)
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
             strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
             
             moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
             moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
             
-            # Require stronger trend confirmation (matches backtest)
+            # 🛡️ GOLD H1: REQUIRE STRONG TREND ONLY (prevent counter-trend trades)
             if is_gold:
-                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
-                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
+                # STRICT: Only trade with STRONG trend alignment
+                has_uptrend = strong_uptrend  # 🔒 REMOVED moderate uptrend
+                has_downtrend = strong_downtrend  # 🔒 REMOVED moderate downtrend
             else:
                 has_uptrend = strong_uptrend or moderate_uptrend
                 has_downtrend = strong_downtrend or moderate_downtrend
@@ -822,19 +823,20 @@ class AITradingBot:
             
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}")
             
-            # 🎯 Score gap filter (matches backtest: gap < 3 = skip)
-            if score_gap < 3:
-                logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < 3 required")
+            # 🛡️ Score gap filter - STRICTER for Gold H1 (reduce false signals)
+            min_gap = 5 if is_gold else 3  # 🔒 Gold needs gap >= 5 (was 3)
+            if score_gap < min_gap:
+                logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < {min_gap} required")
                 return None
             
-            # 🎯 Min conditions (matches backtest exactly)
+            # 🛡️ Min conditions - STRICTER for Gold H1 (reduce losses)
             if is_gold:
                 if is_m15:
                     min_conditions = 4  # M15 needs 4
                 else:
-                    min_conditions = 6  # H1 needs 6 (matches backtest)
+                    min_conditions = 7  # 🔒 H1 needs 7 (was 6) - STRICTER
             else:
-                min_conditions = 6  # Forex needs 6 (matches backtest)
+                min_conditions = 6  # Forex needs 6
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL (matches backtest exactly)
@@ -918,20 +920,20 @@ class AITradingBot:
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
                     tp_distance = sl_distance * 0.6
                 else:
-                    # 🎯 H1 SWING - TIGHTER SL/TP for faster TP hits
-                    # ลด ATR multiplier เพื่อให้ TP แตะง่ายขึ้น
-                    # R:R = 0.625:1 needs 62% WR to break even (we have 95%+ WR)
-                    sl_distance = atr * 0.8  # 🔧 REDUCED: Was 1.2, now tighter
-                    tp_distance = atr * 0.5  # 🔧 REDUCED: Was 1.0, now easier to hit
+                    # 🛡️ H1 SWING - PROPER R:R (Win Rate มากขึ้น)
+                    # R:R = 1.5:1 - TP > SL = ได้มากกว่าเสีย
+                    # ATR Gold H1 ~$15-25 → SL=$10-15, TP=$15-22
+                    sl_distance = atr * 0.6  # 🔒 TIGHTER SL: ~$10-15
+                    tp_distance = atr * 0.9  # 🎯 R:R 1.5:1: TP > SL
                     
                     # 🛡️ Minimum SL to avoid tiny trades
-                    min_sl_price = 3.0  # Minimum $3 SL distance for Gold
+                    min_sl_price = 8.0  # Minimum $8 SL distance for Gold
                     sl_distance = max(min_sl_price, sl_distance)
                     
-                    # Keep TP proportional (R:R = 0.625:1)
-                    tp_distance = sl_distance * 0.625
+                    # 🎯 TP = 1.5x SL (R:R = 1.5:1)
+                    tp_distance = sl_distance * 1.5
                 
-                logger.info(f"   🎯 TIGHT SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=0.625:1")
+                logger.info(f"   🛡️ SAFE SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=1.5:1")
             else:
                 # Forex (matches backtest)
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
