@@ -508,11 +508,13 @@ class AITradingBot:
         symbol: str,
         df: pd.DataFrame,
         current_time: datetime,
-        balance: float = 10000
+        balance: float = 10000,
+        htf_df: pd.DataFrame = None,
+        ltf_df: pd.DataFrame = None,
     ) -> Optional[Dict[str, Any]]:
         """
         🥇 TECHNICAL SIGNAL GENERATOR - เหมือน Backtest Engine
-        
+
         ใช้กลยุทธ์เดียวกับ backtest_engine.py:
         - EMA Crossover (5/10/20/50)
         - RSI (7 for M15, 14 for H1)
@@ -982,7 +984,7 @@ class AITradingBot:
             # ═══════════════════════════════════════════════════════════════════════════════
 
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🧠 SMC FILTER - Require Liquidity Sweep before entry
+            # 🧠 SMC 90% PROTOCOL - 5 Iron Rules Filter
             # ═══════════════════════════════════════════════════════════════════════════════
             smc_signal: Optional[SMCSignal] = None
 
@@ -994,23 +996,37 @@ class AITradingBot:
                     max_sl_atr=gold_config.smc_max_sl_atr,
                     min_sweep_strength=gold_config.smc_min_sweep_strength,
                 )
+
+                # Extract H4 data arrays (Rule 1: HTF Structure)
+                htf_h = htf_df['high'].values.astype(np.float64) if htf_df is not None and not htf_df.empty else None
+                htf_l = htf_df['low'].values.astype(np.float64) if htf_df is not None and not htf_df.empty else None
+
+                # Extract M5 data arrays (Rule 5: LTF ChoCH)
+                ltf_h = ltf_df['high'].values.astype(np.float64) if ltf_df is not None and not ltf_df.empty else None
+                ltf_l = ltf_df['low'].values.astype(np.float64) if ltf_df is not None and not ltf_df.empty else None
+                ltf_c = ltf_df['close'].values.astype(np.float64) if ltf_df is not None and not ltf_df.empty else None
+
                 smc_signal = smc.generate_signal(
                     opens=opens, highs=high, lows=low, closes=close,
-                    atr=atr, current_price=current_price
+                    atr=atr, current_price=current_price,
+                    htf_highs=htf_h, htf_lows=htf_l,
+                    ltf_highs=ltf_h, ltf_lows=ltf_l, ltf_closes=ltf_c,
                 )
 
                 if gold_config.smc_require_sweep:
-                    if not smc_signal.sweep_detected:
-                        logger.info(f"   🚫 SMC FILTER: No liquidity sweep → BLOCKED ({smc_signal.reason})")
+                    if smc_signal.signal is None:
+                        logger.info(f"   🚫 SMC 90% PROTOCOL: BLOCKED → {smc_signal.reason}")
                         return None
 
                     if smc_signal.signal != signal:
-                        logger.info(f"   🚫 SMC FILTER: Sweep direction={smc_signal.signal} conflicts with technical={signal} → BLOCKED")
+                        logger.info(f"   🚫 SMC FILTER: SMC={smc_signal.signal} conflicts with technical={signal} → BLOCKED")
                         return None
 
                     # ✅ SMC confirms the signal - boost confidence
                     confidence = min(95, confidence + 10)
-                    logger.info(f"   🧠 SMC CONFIRMED: {smc_signal.reason}")
+                    if smc_signal.choch_confirmed:
+                        confidence = min(98, confidence + 5)
+                    logger.info(f"   🧠 SMC 90%% CONFIRMED: {smc_signal.reason}")
 
             if is_gold and gold_config:
                 if is_m15:
@@ -1119,6 +1135,9 @@ class AITradingBot:
                 "df": df,  # 🎯 For Peak Detection Filter
                 "smc_sweep": smc_signal.sweep_detected if smc_signal else False,
                 "smc_structure": smc_signal.structure.value if smc_signal else "N/A",
+                "smc_htf_structure": smc_signal.htf_structure.value if smc_signal else "N/A",
+                "smc_in_discount": smc_signal.in_discount_zone if smc_signal else False,
+                "smc_choch": smc_signal.choch_confirmed if smc_signal else False,
                 "smc_reason": smc_signal.reason if smc_signal else "N/A",
             }
             
@@ -2251,12 +2270,32 @@ class AITradingBot:
             limit=self.window_size + 100
         )
         logger.info(f"   Got {len(df)} candles for {symbol}")
-        
+
         if len(df) < 50:
             logger.warning(f"⚠️ {symbol}: Insufficient data - need 50, got {len(df)}")
             default_response["reason"] = "Insufficient data"
             default_response["factors"]["skip_reasons"] = [f"Need 50 candles, got {len(df)}"]
             return default_response
+
+        # Fetch H4 data for SMC Rule 1 (HTF Structure)
+        htf_df = None
+        try:
+            htf_df = await self.data_provider.get_klines(
+                symbol=symbol, timeframe="H4", limit=100)
+            if htf_df is not None and not htf_df.empty:
+                logger.info(f"   📐 Fetched {len(htf_df)} H4 candles for SMC Rule 1")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to fetch H4 data: {e}")
+
+        # Fetch M5 data for SMC Rule 5 (LTF ChoCH)
+        ltf_df = None
+        try:
+            ltf_df = await self.data_provider.get_klines(
+                symbol=symbol, timeframe="M5", limit=100)
+            if ltf_df is not None and not ltf_df.empty:
+                logger.info(f"   🔍 Fetched {len(ltf_df)} M5 candles for SMC Rule 5")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to fetch M5 data: {e}")
         
         current_price = float(df['close'].iloc[-1])
         logger.info(f"   {symbol} current price: {current_price}")
@@ -2281,7 +2320,9 @@ class AITradingBot:
                 symbol=symbol,
                 df=df,
                 current_time=datetime.utcnow(),  # 🔧 FIX #5: Use UTC for session filters
-                balance=balance
+                balance=balance,
+                htf_df=htf_df,
+                ltf_df=ltf_df,
             )
             
             if tech_signal is None:
