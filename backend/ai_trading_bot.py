@@ -75,6 +75,7 @@ from trading.parallel_layers import (
     format_parallel_results
 )
 from trading.peak_detector import PeakDetector, get_peak_detector
+from trading.gold_strategy_config import get_gold_config, GoldH1Config  # 🥇 Gold Strategy Config
 from backtesting import get_dynamic_risk_settings  # 🎯 Dynamic Risk Scaling
 from config import PatternConfig, DataConfig
 from services import get_firebase_service
@@ -517,6 +518,7 @@ class AITradingBot:
         - Session Filter (London/NY)
         - ATR-based SL/TP
         
+        
         Target: 85%+ Win Rate for Gold M15, 80%+ for H1
         """
         try:
@@ -539,6 +541,9 @@ class AITradingBot:
             # Detect timeframe
             is_m15 = self.timeframe.upper() in ['M15', 'M5', 'M30']
             is_h1 = self.timeframe.upper() in ['H1', 'H4']
+            
+            # 🥇 LOAD GOLD CONFIG - ใช้ค่าจาก Config แทน Hardcoded
+            gold_config = get_gold_config(self.timeframe) if is_gold else None
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 📊 INDICATORS
@@ -639,18 +644,23 @@ class AITradingBot:
             else:
                 good_session = (london_session or ny_session) and not is_weekend_risk
             
-            # 2. TREND ANALYSIS - 🛡️ STRICT MODE (reduce losses)
+            # 2. TREND ANALYSIS - 🛡️ USES CONFIG
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
             strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
             
             moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
             moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
             
-            # 🛡️ GOLD H1: REQUIRE STRONG TREND ONLY (prevent counter-trend trades)
-            if is_gold:
-                # STRICT: Only trade with STRONG trend alignment
-                has_uptrend = strong_uptrend  # 🔒 REMOVED moderate uptrend
-                has_downtrend = strong_downtrend  # 🔒 REMOVED moderate downtrend
+            # 🥇 GOLD: Use config.require_strong_trend
+            if is_gold and gold_config:
+                if gold_config.require_strong_trend:
+                    # STRICT: Only trade with STRONG trend alignment
+                    has_uptrend = strong_uptrend
+                    has_downtrend = strong_downtrend
+                else:
+                    # RELAXED: Allow moderate trend
+                    has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
+                    has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
             else:
                 has_uptrend = strong_uptrend or moderate_uptrend
                 has_downtrend = strong_downtrend or moderate_downtrend
@@ -665,14 +675,14 @@ class AITradingBot:
             has_bullish_cross = bullish_cross or price_cross_up
             has_bearish_cross = bearish_cross or price_cross_down
             
-            # 4. RSI CONFIRMATION - 🔥 GOLD ต้องไม่ Overbought/Oversold
+            # 4. RSI CONFIRMATION - 🥇 USES CONFIG
             rsi_rising = rsi > rsi_prev
             rsi_falling = rsi < rsi_prev
             
-            if is_gold:
-                # 🎯 SNIPER 90+ (Balanced): RSI ที่ยืดหยุ่นขึ้น
-                rsi_ok_buy = 35 <= rsi <= 58  # ขยาย range เล็กน้อย
-                rsi_ok_sell = 42 <= rsi <= 65
+            if is_gold and gold_config:
+                # 🥇 RSI ranges from config
+                rsi_ok_buy = gold_config.rsi_buy_min <= rsi <= gold_config.rsi_buy_max
+                rsi_ok_sell = gold_config.rsi_sell_min <= rsi <= gold_config.rsi_sell_max
                 rsi_divergence_buy = rsi < 40 and rsi_rising
                 rsi_divergence_sell = rsi > 60 and rsi_falling
             elif is_m15:
@@ -685,37 +695,53 @@ class AITradingBot:
                 rsi_ok_sell = 38 <= rsi <= 65
                 rsi_divergence_buy = rsi_divergence_sell = False
             
-            # 5. CANDLE CONFIRMATION - 🎯 ต้องมีแท่งเทียน Strong (ผ่อนเล็กน้อย)
-            min_body_ratio = 0.4 if is_gold else (0.3 if is_m15 else 0.35)
+            # 5. CANDLE CONFIRMATION - 🥇 USES CONFIG
+            if is_gold and gold_config:
+                min_body_ratio = gold_config.min_body_ratio
+                confirmation_body_ratio = gold_config.confirmation_body_ratio
+            else:
+                min_body_ratio = 0.3 if is_m15 else 0.35
+                confirmation_body_ratio = 0.38
+            
             bullish_candle = is_bullish and body_ratio > min_body_ratio
             bearish_candle = is_bearish and body_ratio > min_body_ratio
             
             bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
             bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
             
-            # 🎯 Require engulfing or strong candle (ผ่อนจาก 0.55 → 0.45)
-            if is_gold:
-                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.45)
-                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.45)
+            # 🥇 Require engulfing or strong candle
+            if is_gold and gold_config:
+                bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > confirmation_body_ratio)
+                bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > confirmation_body_ratio)
             else:
-                bullish_candle_ok = (bullish_candle and body_ratio > 0.38) or bullish_engulf
-                bearish_candle_ok = (bearish_candle and body_ratio > 0.38) or bearish_engulf
+                bullish_candle_ok = (bullish_candle and body_ratio > confirmation_body_ratio) or bullish_engulf
+                bearish_candle_ok = (bearish_candle and body_ratio > confirmation_body_ratio) or bearish_engulf
             
-            # 6. PULLBACK ZONE
+            # 6. PULLBACK ZONE - 🥇 USES CONFIG
             distance_to_ema = abs(current_price - ema_slow)
-            pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)  # Tighter for Gold
+            if is_gold and gold_config:
+                pullback_atr_mult = gold_config.pullback_atr_multiplier
+            else:
+                pullback_atr_mult = 3.0 if is_m15 else 2.5
             in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
             
-            # 7. VOLATILITY CHECK (matches backtest)
-            max_volatility = 3.5 if is_m15 else 2.5
+            # 7. VOLATILITY CHECK - 🥇 USES CONFIG
+            if is_gold and gold_config:
+                max_volatility = gold_config.max_volatility_pct
+            else:
+                max_volatility = 3.5 if is_m15 else 2.5
             volatility_ok = atr_pct <= max_volatility
             
-            # 7.5. 🎯 VOLUME CONFIRMATION
+            # 7.5. 🎯 VOLUME CONFIRMATION - 🥇 USES CONFIG
             vol_data = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
             avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
             current_vol = vol_data[-1]
             volume_ratio = current_vol / max(avg_volume_20, 1)
-            volume_confirmed = volume_ratio >= 1.15  # ลดจาก 1.3 → 1.15 (ให้เทรดบ่อยขึ้น)
+            if is_gold and gold_config:
+                min_volume_ratio = gold_config.min_volume_ratio
+            else:
+                min_volume_ratio = 1.15
+            volume_confirmed = volume_ratio >= min_volume_ratio
             
             # 7.6. 🎯 SNIPER 90+: VWAP FILTER
             # VWAP = sum(price * volume) / sum(volume) - ราคาเฉลี่ยถ่วงน้ำหนักด้วย volume
@@ -823,20 +849,23 @@ class AITradingBot:
             
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}")
             
-            # 🛡️ Score gap filter - STRICTER for Gold H1 (reduce false signals)
-            min_gap = 5 if is_gold else 3  # 🔒 Gold needs gap >= 5 (was 3)
+            # 🛡️ Score gap filter - 🥇 USES CONFIG
+            if is_gold and gold_config:
+                min_gap = gold_config.min_score_gap
+            else:
+                min_gap = 3
             if score_gap < min_gap:
                 logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < {min_gap} required")
                 return None
             
-            # 🛡️ Min conditions - STRICTER for Gold H1 (reduce losses)
-            if is_gold:
-                if is_m15:
-                    min_conditions = 4  # M15 needs 4
-                else:
-                    min_conditions = 7  # 🔒 H1 needs 7 (was 6) - STRICTER
+            
+            # 🛡️ Min conditions - 🥇 USES CONFIG
+            if is_gold and gold_config:
+                min_conditions = gold_config.min_conditions
+            elif is_m15:
+                min_conditions = 4  # M15 needs 4
             else:
-                min_conditions = 6  # Forex needs 6
+                min_conditions = 6  # Forex/H1 default
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL (matches backtest exactly)
@@ -898,14 +927,14 @@ class AITradingBot:
                     return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🎯 SL/TP CALCULATION - MATCHES BACKTEST EXACTLY (Dynamic Balance-Based)
+            # 🎯 SL/TP CALCULATION - 🥇 USES CONFIG
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            if is_gold:
+            if is_gold and gold_config:
                 if is_m15:
-                    # M15 SCALPING (matches backtest)
-                    sl_distance = atr * 2.0
-                    tp_distance = atr * 0.6
+                    # M15 SCALPING - uses config
+                    sl_distance = atr * gold_config.sl_atr_multiplier
+                    tp_distance = atr * gold_config.tp_atr_multiplier
                     
                     min_sl_pct = 0.005  # 0.5% of balance
                     max_sl_pct = 0.02   # 2% of balance
@@ -918,22 +947,23 @@ class AITradingBot:
                     max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))
                     
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    tp_distance = sl_distance * 0.6
+                    tp_distance = sl_distance * gold_config.rr_ratio
                 else:
-                    # 🛡️ H1 SWING - PROPER R:R (Win Rate มากขึ้น)
-                    # R:R = 1.5:1 - TP > SL = ได้มากกว่าเสีย
-                    # ATR Gold H1 ~$15-25 → SL=$10-15, TP=$15-22
-                    sl_distance = atr * 0.6  # 🔒 TIGHTER SL: ~$10-15
-                    tp_distance = atr * 0.9  # 🎯 R:R 1.5:1: TP > SL
+                    # 🥇 H1 SWING - uses config for SL/TP
+                    sl_distance = atr * gold_config.sl_atr_multiplier
                     
-                    # 🛡️ Minimum SL to avoid tiny trades
-                    min_sl_price = 8.0  # Minimum $8 SL distance for Gold
-                    sl_distance = max(min_sl_price, sl_distance)
+                    # 🛡️ Minimum SL from config
+                    sl_distance = max(gold_config.min_sl_distance, sl_distance)
                     
-                    # 🎯 TP = 1.5x SL (R:R = 1.5:1)
-                    tp_distance = sl_distance * 1.5
+                    # 🎯 TP = SL × R:R ratio from config
+                    tp_distance = sl_distance * gold_config.rr_ratio
                 
-                logger.info(f"   🛡️ SAFE SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R=1.5:1")
+                logger.info(f"   🥇 CONFIG SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R={gold_config.rr_ratio}:1")
+            elif is_gold:
+                # Fallback if no config
+                sl_distance = atr * 0.6
+                tp_distance = sl_distance * 1.5
+                logger.info(f"   🛡️ FALLBACK SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}")
             else:
                 # Forex (matches backtest)
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
