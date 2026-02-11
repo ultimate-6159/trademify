@@ -627,22 +627,26 @@ class AITradingBot:
             hour = current_time.hour
             day_of_week = current_time.weekday()
             
+            # 1. SESSION FILTER - 🥇 USES CONFIG
+            if is_gold and gold_config:
+                london_session = gold_config.london_start_hour <= hour <= gold_config.london_end_hour
+                ny_session = gold_config.ny_start_hour <= hour <= gold_config.ny_end_hour
+            else:
+                london_session = 7 <= hour <= 16
+                ny_session = 13 <= hour <= 21
             
-            
-            # 1. SESSION FILTER - 🚫 BLOCK ASIAN SESSION (สัญญาณผิดทางบ่อย)
-            london_session = 7 <= hour <= 16
-            ny_session = 13 <= hour <= 21
             overlap_session = 13 <= hour <= 16
-            asian_session = 0 <= hour <= 6 or hour >= 22  # BLOCKED
-            tokyo_session = 0 <= hour <= 9  # Tokyo: 00:00-09:00 UTC - BLOCKED
+            asian_session = 0 <= hour <= 6 or hour >= 22  # Asian: 22:00-06:00 UTC
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
             
-            # 🚫 BLOCK ASIAN SESSION - สัญญาณผิดทางบ่อยมาก
-            # Only trade during London & NY sessions (best liquidity & accuracy)
-            if is_gold:
-                good_session = (london_session or ny_session) and not is_weekend_risk
-            else:
-                good_session = (london_session or ny_session) and not is_weekend_risk
+            # 🚫 HARD BLOCK ASIAN SESSION - ไม่เทรดเลยถ้าเป็น Asian Session
+            if is_gold and gold_config and gold_config.block_asian_session:
+                if asian_session:
+                    logger.info(f"   🚫 ASIAN SESSION BLOCKED: Hour={hour} (Asian=22:00-06:00 UTC)")
+                    return None  # ❌ HARD BLOCK - ไม่สร้าง signal เลย
+            
+            # Only trade during London & NY sessions
+            good_session = (london_session or ny_session) and not is_weekend_risk
             
             # 2. TREND ANALYSIS - 🛡️ USES CONFIG
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
