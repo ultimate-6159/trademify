@@ -75,7 +75,7 @@ from trading.parallel_layers import (
     format_parallel_results
 )
 from trading.peak_detector import PeakDetector, get_peak_detector
-from trading.gold_strategy_config import get_gold_config, GoldH1Config  # 🥇 Gold Strategy Config
+from trading.gold_strategy_config import get_gold_config, GoldH1Config, get_forex_config, get_strategy_config, ForexH1Config  # 🥇 Gold + 💱 Forex Strategy Config
 from trading.smc_strategy import SMCStrategy, get_smc_strategy, SMCSignal  # 🧠 Smart Money Concepts
 from backtesting import get_dynamic_risk_settings  # 🎯 Dynamic Risk Scaling
 from config import PatternConfig, DataConfig
@@ -539,15 +539,19 @@ class AITradingBot:
             current_high = high[-1]
             current_low = low[-1]
             
-            # Detect if this is Gold
+            # Detect if this is Gold or Forex
             is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
-            
+            is_forex = not is_gold  # EURUSDm, GBPUSDm etc.
+
             # Detect timeframe
             is_m15 = self.timeframe.upper() in ['M15', 'M5', 'M30']
             is_h1 = self.timeframe.upper() in ['H1', 'H4']
-            
-            # 🥇 LOAD GOLD CONFIG - ใช้ค่าจาก Config แทน Hardcoded
-            gold_config = get_gold_config(self.timeframe) if is_gold else None
+
+            # 🌐 LOAD STRATEGY CONFIG - Universal config for Gold + Forex
+            # Gold → GoldH1Config, EURUSD → EURUSDConfig, GBPUSD → GBPUSDConfig
+            strategy_config = get_strategy_config(symbol, self.timeframe)
+            gold_config = strategy_config if is_gold else None
+            forex_config = strategy_config if is_forex else None
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 📊 INDICATORS
@@ -631,97 +635,109 @@ class AITradingBot:
             hour = current_time.hour
             day_of_week = current_time.weekday()
             
-            # 1. SESSION FILTER - 🥇 USES CONFIG
+            # 1. SESSION FILTER - 🌐 USES CONFIG (Gold + Forex)
             if is_gold and gold_config:
                 london_session = gold_config.london_start_hour <= hour <= gold_config.london_end_hour
                 ny_session = gold_config.ny_start_hour <= hour <= gold_config.ny_end_hour
+            elif is_forex and forex_config:
+                london_session = forex_config.london_start_hour <= hour <= forex_config.london_end_hour
+                ny_session = forex_config.ny_start_hour <= hour <= forex_config.ny_end_hour
             else:
                 london_session = 7 <= hour <= 16
                 ny_session = 13 <= hour <= 21
-            
+
             overlap_session = 13 <= hour <= 16
             asian_session = 0 <= hour <= 6 or hour >= 22  # Asian: 22:00-06:00 UTC
             is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
-            
-            # 🚫 HARD BLOCK ASIAN SESSION - ไม่เทรดเลยถ้าเป็น Asian Session
-            if is_gold and gold_config and gold_config.block_asian_session:
+
+            # 🔴 HARD BLOCK ASIAN SESSION (Gold + Forex)
+            if (gold_config and gold_config.block_asian_session) or \
+               (forex_config and forex_config.block_asian_session):
                 if asian_session:
-                    logger.info(f"   🚫 ASIAN SESSION BLOCKED: Hour={hour} (Asian=22:00-06:00 UTC)")
-                    return None  # ❌ HARD BLOCK - ไม่สร้าง signal เลย
-            
+                    logger.info(f"   🌙 ASIAN SESSION BLOCKED: Hour={hour} (Asian=22:00-06:00 UTC)")
+                    return None  # ❌ HARD BLOCK
+
+            # 💱 KILL ZONE HARD BLOCK - Forex: ห้ามเทรดนอก Kill Zone เด็ดขาด
+            # London Kill Zone: 07:00-09:00 UTC, NY Kill Zone: 12:00-15:00 UTC
+            if is_forex and forex_config and getattr(forex_config, 'kill_zone_hard_block', False):
+                in_london_kz = forex_config.london_start_hour <= hour <= forex_config.london_end_hour
+                in_ny_kz = forex_config.ny_start_hour <= hour <= forex_config.ny_end_hour
+                if not (in_london_kz or in_ny_kz):
+                    logger.info(f"   🚫 KILL ZONE HARD BLOCK: Hour={hour} UTC (London={forex_config.london_start_hour}-{forex_config.london_end_hour}, NY={forex_config.ny_start_hour}-{forex_config.ny_end_hour})")
+                    return None  # ❌ HARD BLOCK - นอก Kill Zone ห้ามเปิดออเดอร์เด็ดขาด
+
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ ADVANCED FILTERS - ป้องกันช่องโหว่เพิ่มเติม
+            # 🛡️ ADVANCED FILTERS - ป้องกันช่องโหว่เพิ่มเติม (Gold + Forex)
             # ═══════════════════════════════════════════════════════════════════════════════
-            
-            if is_gold and gold_config:
-                # 🗓️ FRIDAY LATE BLOCK - ไม่เทรดวันศุกร์หลัง cutoff
-                if gold_config.friday_late_block:
-                    if day_of_week == 4 and hour >= gold_config.friday_cutoff_hour:
-                        logger.info(f"   🚫 FRIDAY LATE BLOCKED: Hour={hour} >= {gold_config.friday_cutoff_hour}:00 UTC")
+
+            # Universal config for advanced filters
+            _cfg = gold_config or forex_config
+            if _cfg:
+                # 🗓️ FRIDAY LATE BLOCK
+                if _cfg.friday_late_block:
+                    if day_of_week == 4 and hour >= _cfg.friday_cutoff_hour:
+                        logger.info(f"   🚫 FRIDAY LATE BLOCKED: Hour={hour} >= {_cfg.friday_cutoff_hour}:00 UTC")
                         return None
-                
-                # 📊 VOLUME SPIKE BLOCK - ไม่เทรดตอน Volume พุ่งผิดปกติ (อาจเป็นข่าว)
-                if gold_config.volume_spike_block:
+
+                # 📊 VOLUME SPIKE BLOCK
+                if _cfg.volume_spike_block:
                     vol_data = df['volume'].values if 'volume' in df.columns else None
                     if vol_data is not None and len(vol_data) >= 20:
-                        avg_volume = np.mean(vol_data[-20:-1])  # ไม่รวมแท่งปัจจุบัน
+                        avg_volume = np.mean(vol_data[-20:-1])
                         current_vol = vol_data[-1]
                         vol_spike_ratio = current_vol / max(avg_volume, 1)
-                        if vol_spike_ratio > gold_config.volume_spike_threshold:
-                            logger.info(f"   🚫 VOLUME SPIKE BLOCKED: {vol_spike_ratio:.1f}x > {gold_config.volume_spike_threshold}x threshold (possible news)")
+                        if vol_spike_ratio > _cfg.volume_spike_threshold:
+                            logger.info(f"   🚫 VOLUME SPIKE BLOCKED: {vol_spike_ratio:.1f}x > {_cfg.volume_spike_threshold}x threshold (possible news)")
                             return None
-                
-                # 📈 ATR EXPANSION BLOCK - ไม่เทรดตอน ATR พุ่งกะทันหัน
-                if gold_config.atr_expansion_block:
+
+                # 📈 ATR EXPANSION BLOCK
+                if _cfg.atr_expansion_block:
                     if len(high) >= 28:
-                        # ATR ปัจจุบัน vs ATR เฉลี่ย 14 แท่งก่อนหน้า
                         prev_atr_period = high[-28:-14] - low[-28:-14]
                         prev_atr_avg = np.mean(prev_atr_period)
                         atr_expansion_ratio = atr / max(prev_atr_avg, 0.01)
-                        if atr_expansion_ratio > gold_config.atr_expansion_threshold:
-                            logger.info(f"   🚫 ATR EXPANSION BLOCKED: {atr_expansion_ratio:.1f}x > {gold_config.atr_expansion_threshold}x (volatility spike)")
+                        if atr_expansion_ratio > _cfg.atr_expansion_threshold:
+                            logger.info(f"   🚫 ATR EXPANSION BLOCKED: {atr_expansion_ratio:.1f}x > {_cfg.atr_expansion_threshold}x (volatility spike)")
                             return None
-                
-                # 🌅 MONDAY GAP CHECK - Skip ถ้ามี Gap วันจันทร์
-                if gold_config.monday_gap_skip:
-                    if day_of_week == 0 and hour <= 8:  # Monday early
+
+                # 🌅 MONDAY GAP CHECK
+                if _cfg.monday_gap_skip:
+                    if day_of_week == 0 and hour <= 8:
                         if len(close) >= 2:
-                            # 🔧 FIX #12: Find actual Friday close by searching backwards
                             friday_close = None
                             if 'timestamp' in df.columns:
                                 for i in range(len(df) - 2, max(0, len(df) - 50), -1):
                                     candle_time = pd.Timestamp(df['timestamp'].iloc[i])
-                                    if candle_time.weekday() == 4:  # Friday
+                                    if candle_time.weekday() == 4:
                                         friday_close = close[i]
                                         break
                             if friday_close is None:
-                                friday_close = close[-2]  # Fallback
+                                friday_close = close[-2]
                             monday_open = opens[-1]
                             gap_pct = abs(monday_open - friday_close) / friday_close * 100
-                            if gap_pct > gold_config.monday_gap_threshold_pct:
-                                logger.info(f"   🚫 MONDAY GAP BLOCKED: Gap={gap_pct:.2f}% > {gold_config.monday_gap_threshold_pct}%")
+                            if gap_pct > _cfg.monday_gap_threshold_pct:
+                                logger.info(f"   🚫 MONDAY GAP BLOCKED: Gap={gap_pct:.2f}% > {_cfg.monday_gap_threshold_pct}%")
                                 return None
             
             # Only trade during London & NY sessions
             good_session = (london_session or ny_session) and not is_weekend_risk
             
-            # 2. TREND ANALYSIS - 🛡️ USES CONFIG
+            # 2. TREND ANALYSIS - 🌐 USES CONFIG (Gold + Forex)
             strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
             strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
-            
+
             moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
             moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
-            
-            # 🥇 GOLD: Use config.require_strong_trend
-            if is_gold and gold_config:
-                if gold_config.require_strong_trend:
-                    # STRICT: Only trade with STRONG trend alignment
-                    has_uptrend = strong_uptrend
-                    has_downtrend = strong_downtrend
-                else:
-                    # RELAXED: Allow moderate trend
-                    has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
-                    has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
+
+            # 🌐 Use config.require_strong_trend for both Gold and Forex
+            if _cfg and _cfg.require_strong_trend:
+                # STRICT: Only trade with STRONG trend alignment
+                has_uptrend = strong_uptrend
+                has_downtrend = strong_downtrend
+            elif _cfg:
+                # RELAXED: Allow moderate trend
+                has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
+                has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
             else:
                 has_uptrend = strong_uptrend or moderate_uptrend
                 has_downtrend = strong_downtrend or moderate_downtrend
@@ -736,14 +752,14 @@ class AITradingBot:
             has_bullish_cross = bullish_cross or price_cross_up
             has_bearish_cross = bearish_cross or price_cross_down
             
-            # 4. RSI CONFIRMATION - 🥇 USES CONFIG
+            # 4. RSI CONFIRMATION - 🌐 USES CONFIG (Gold + Forex)
             rsi_rising = rsi > rsi_prev
             rsi_falling = rsi < rsi_prev
-            
-            if is_gold and gold_config:
-                # 🥇 RSI ranges from config
-                rsi_ok_buy = gold_config.rsi_buy_min <= rsi <= gold_config.rsi_buy_max
-                rsi_ok_sell = gold_config.rsi_sell_min <= rsi <= gold_config.rsi_sell_max
+
+            if _cfg:
+                # 🌐 RSI ranges from config (both Gold and Forex)
+                rsi_ok_buy = _cfg.rsi_buy_min <= rsi <= _cfg.rsi_buy_max
+                rsi_ok_sell = _cfg.rsi_sell_min <= rsi <= _cfg.rsi_sell_max
                 rsi_divergence_buy = rsi < 40 and rsi_rising
                 rsi_divergence_sell = rsi > 60 and rsi_falling
             elif is_m15:
@@ -756,10 +772,10 @@ class AITradingBot:
                 rsi_ok_sell = 38 <= rsi <= 65
                 rsi_divergence_buy = rsi_divergence_sell = False
             
-            # 5. CANDLE CONFIRMATION - 🥇 USES CONFIG
-            if is_gold and gold_config:
-                min_body_ratio = gold_config.min_body_ratio
-                confirmation_body_ratio = gold_config.confirmation_body_ratio
+            # 5. CANDLE CONFIRMATION - 🌐 USES CONFIG
+            if _cfg:
+                min_body_ratio = _cfg.min_body_ratio
+                confirmation_body_ratio = _cfg.confirmation_body_ratio
             else:
                 min_body_ratio = 0.3 if is_m15 else 0.35
                 confirmation_body_ratio = 0.38
@@ -770,25 +786,25 @@ class AITradingBot:
             bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
             bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
             
-            # 🥇 Require engulfing or strong candle
-            if is_gold and gold_config:
+            # 🌐 Require engulfing or strong candle
+            if _cfg:
                 bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > confirmation_body_ratio)
                 bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > confirmation_body_ratio)
             else:
                 bullish_candle_ok = (bullish_candle and body_ratio > confirmation_body_ratio) or bullish_engulf
                 bearish_candle_ok = (bearish_candle and body_ratio > confirmation_body_ratio) or bearish_engulf
             
-            # 6. PULLBACK ZONE - 🥇 USES CONFIG
+            # 6. PULLBACK ZONE - 🌐 USES CONFIG
             distance_to_ema = abs(current_price - ema_slow)
-            if is_gold and gold_config:
-                pullback_atr_mult = gold_config.pullback_atr_multiplier
+            if _cfg:
+                pullback_atr_mult = _cfg.pullback_atr_multiplier
             else:
                 pullback_atr_mult = 3.0 if is_m15 else 2.5
             in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
             
-            # 7. VOLATILITY CHECK - 🥇 USES CONFIG
-            if is_gold and gold_config:
-                max_volatility = gold_config.max_volatility_pct
+            # 7. VOLATILITY CHECK - 🌐 USES CONFIG
+            if _cfg:
+                max_volatility = _cfg.max_volatility_pct
             else:
                 max_volatility = 3.5 if is_m15 else 2.5
             volatility_ok = atr_pct <= max_volatility
@@ -798,8 +814,8 @@ class AITradingBot:
             avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
             current_vol = vol_data[-1]
             volume_ratio = current_vol / max(avg_volume_20, 1)
-            if is_gold and gold_config:
-                min_volume_ratio = gold_config.min_volume_ratio
+            if _cfg:
+                min_volume_ratio = _cfg.min_volume_ratio
             else:
                 min_volume_ratio = 1.15
             volume_confirmed = volume_ratio >= min_volume_ratio
@@ -819,9 +835,9 @@ class AITradingBot:
             recent_low = np.min(low[-lookback:])
             price_range = recent_high - recent_low
             
-            # 🥇 Use config for S/R zone
-            if is_gold and gold_config:
-                zone_pct = gold_config.sr_zone_pct
+            # 🌐 Use config for S/R zone
+            if _cfg:
+                zone_pct = _cfg.sr_zone_pct
             else:
                 zone_pct = 0.35
             near_support = current_price <= recent_low + price_range * zone_pct
@@ -831,48 +847,23 @@ class AITradingBot:
             # 🎯 SIGNAL SCORING
             # ═══════════════════════════════════════════════════════════════════════════════
             
-            # 🧠 SMC-COMPATIBLE CONDITIONS (เฉพาะที่จำเป็น - SMC จัดการที่เหลือ)
-            # Removed: EMA crossover, RSI momentum, pullback zone, candle pattern, VWAP
-            # These are retail indicators that SMC's sweep/OB/FVG replaces
-            if is_gold:
-                buy_conditions = [
-                    has_uptrend,                        # 1. Basic trend direction
-                    rsi_ok_buy,                         # 2. RSI not extreme
-                    good_session,                       # 3. Session timing
-                    volatility_ok,                      # 4. Volatility OK
-                    volume_confirmed,                   # 5. Volume confirmation
-                ]
+            # 🧠 SMC-COMPATIBLE CONDITIONS for ALL symbols (SMC handles entry precision)
+            # Retail indicators (EMA crossover, RSI momentum, candle pattern) replaced by SMC sweep/OB/FVG
+            buy_conditions = [
+                has_uptrend,                        # 1. Basic trend direction
+                rsi_ok_buy,                         # 2. RSI not extreme
+                good_session,                       # 3. Session timing
+                volatility_ok,                      # 4. Volatility OK
+                volume_confirmed,                   # 5. Volume confirmation
+            ]
 
-                sell_conditions = [
-                    has_downtrend,                      # 1. Basic trend direction
-                    rsi_ok_sell,                        # 2. RSI not extreme
-                    good_session,                       # 3. Session timing
-                    volatility_ok,                      # 4. Volatility OK
-                    volume_confirmed,                   # 5. Volume confirmation
-                ]
-                
-            else:
-                # 🟢 FOREX STRATEGY (matches backtest exactly)
-                uptrend = sma_20 > sma_50 and current_price > sma_20
-                downtrend = sma_20 < sma_50 and current_price < sma_20
-                
-                pullback_zone_forex = abs(current_price - sma_20) / sma_20 * 100 <= 0.3
-                
-                rsi_ok_buy = 38 <= rsi <= 58
-                rsi_ok_sell = 42 <= rsi <= 62
-                
-                good_session = 8 <= hour <= 20
-                is_friday_late = day_of_week == 4 and hour >= 20
-                
-                volatility_ok = atr_pct < 2.0
-                
-                bullish_reversal = is_bullish and body_ratio > 0.45
-                bearish_reversal = is_bearish and body_ratio > 0.45
-                
-                volume_confirmed_forex = volume_ratio >= 1.3
-                
-                buy_conditions = [uptrend, pullback_zone_forex, rsi_ok_buy, good_session, bullish_reversal, volatility_ok, not is_friday_late, volume_confirmed_forex]
-                sell_conditions = [downtrend, pullback_zone_forex, rsi_ok_sell, good_session, bearish_reversal, volatility_ok, not is_friday_late, volume_confirmed_forex]
+            sell_conditions = [
+                has_downtrend,                      # 1. Basic trend direction
+                rsi_ok_sell,                        # 2. RSI not extreme
+                good_session,                       # 3. Session timing
+                volatility_ok,                      # 4. Volatility OK
+                volume_confirmed,                   # 5. Volume confirmation
+            ]
             
             buy_score = sum(buy_conditions)
             sell_score = sum(sell_conditions)
@@ -901,9 +892,9 @@ class AITradingBot:
             
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}")
             
-            # 🛡️ Score gap filter - 🥇 USES CONFIG
-            if is_gold and gold_config:
-                min_gap = gold_config.min_score_gap
+            # 🛡️ Score gap filter - 🌐 USES CONFIG
+            if _cfg:
+                min_gap = _cfg.min_score_gap
             else:
                 min_gap = 3
             if score_gap < min_gap:
@@ -911,13 +902,13 @@ class AITradingBot:
                 return None
             
             
-            # 🛡️ Min conditions - 🥇 USES CONFIG
-            if is_gold and gold_config:
-                min_conditions = gold_config.min_conditions
+            # 🛡️ Min conditions - 🌐 USES CONFIG
+            if _cfg:
+                min_conditions = _cfg.min_conditions
             elif is_m15:
                 min_conditions = 4  # M15 needs 4
             else:
-                min_conditions = 6  # Forex/H1 default
+                min_conditions = 6  # Fallback
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL (matches backtest exactly)
@@ -988,13 +979,13 @@ class AITradingBot:
             # ═══════════════════════════════════════════════════════════════════════════════
             smc_signal: Optional[SMCSignal] = None
 
-            if is_gold and gold_config and gold_config.smc_enabled:
+            if _cfg and _cfg.smc_enabled:
                 smc = get_smc_strategy(
-                    swing_lookback=gold_config.smc_swing_lookback,
-                    sweep_lookback=gold_config.smc_sweep_lookback_candles,
-                    sl_buffer_atr=gold_config.smc_sl_buffer_atr,
-                    max_sl_atr=gold_config.smc_max_sl_atr,
-                    min_sweep_strength=gold_config.smc_min_sweep_strength,
+                    swing_lookback=_cfg.smc_swing_lookback,
+                    sweep_lookback=_cfg.smc_sweep_lookback_candles,
+                    sl_buffer_atr=_cfg.smc_sl_buffer_atr,
+                    max_sl_atr=_cfg.smc_max_sl_atr,
+                    min_sweep_strength=_cfg.smc_min_sweep_strength,
                 )
 
                 # Extract H4 data arrays (Rule 1: HTF Structure)
@@ -1013,7 +1004,7 @@ class AITradingBot:
                     ltf_highs=ltf_h, ltf_lows=ltf_l, ltf_closes=ltf_c,
                 )
 
-                if gold_config.smc_require_sweep:
+                if _cfg.smc_require_sweep:
                     if smc_signal.signal is None:
                         logger.info(f"   🚫 SMC 90% PROTOCOL: BLOCKED → {smc_signal.reason}")
                         return None
@@ -1028,50 +1019,54 @@ class AITradingBot:
                         confidence = min(98, confidence + 5)
                     logger.info(f"   🧠 SMC 90%% CONFIRMED: {smc_signal.reason}")
 
-            if is_gold and gold_config:
+            if _cfg:
                 if is_m15:
                     # M15 SCALPING - uses config
-                    sl_distance = atr * gold_config.sl_atr_multiplier
-                    tp_distance = atr * gold_config.tp_atr_multiplier
-                    
+                    sl_distance = atr * _cfg.sl_atr_multiplier
+                    tp_distance = atr * _cfg.tp_atr_multiplier
+
                     min_sl_pct = 0.005  # 0.5% of balance
                     max_sl_pct = 0.02   # 2% of balance
                     raw_min_sl = balance * min_sl_pct
                     raw_max_sl = balance * max_sl_pct
-                    
+
                     ABSOLUTE_MIN_SL = 0.5
                     ABSOLUTE_MAX_SL = 50.0
                     min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))
                     max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))
-                    
+
                     sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    tp_distance = sl_distance * gold_config.rr_ratio
+                    tp_distance = sl_distance * _cfg.rr_ratio
                 else:
-                    # 🥇 H1 SWING - uses config for SL/TP
-                    sl_distance = atr * gold_config.sl_atr_multiplier
-                    
-                    # 🛡️ Minimum SL from config
-                    sl_distance = max(gold_config.min_sl_distance, sl_distance)
-                    
-                    # 🎯 TP = SL × R:R ratio from config
-                    tp_distance = sl_distance * gold_config.rr_ratio
-                
-                logger.info(f"   🥇 CONFIG SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}, R:R={gold_config.rr_ratio}:1")
+                    # H1 SWING - uses config for SL/TP
+                    sl_distance = atr * _cfg.sl_atr_multiplier
+
+                    # Minimum SL from config
+                    sl_distance = max(_cfg.min_sl_distance, sl_distance)
+
+                    # Enforce max_sl_distance for Forex (block if SL too wide)
+                    if is_forex and hasattr(_cfg, 'max_sl_distance') and sl_distance > _cfg.max_sl_distance:
+                        logger.info(f"   🚫 SL TOO WIDE: SL={sl_distance:.5f} > max={_cfg.max_sl_distance:.5f} → BLOCKED")
+                        return None
+
+                    # TP = SL × R:R ratio from config
+                    tp_distance = sl_distance * _cfg.rr_ratio
+
+                logger.info(f"   🌐 CONFIG SL/TP: ATR={atr:.5f} → SL={sl_distance:.5f}, TP={tp_distance:.5f}, R:R={_cfg.rr_ratio}:1")
             elif is_gold:
                 # Fallback if no config
                 sl_distance = atr * 0.6
                 tp_distance = sl_distance * 1.5
                 logger.info(f"   🛡️ FALLBACK SL/TP: ATR=${atr:.2f} → SL=${sl_distance:.2f}, TP=${tp_distance:.2f}")
             else:
-                # Forex (matches backtest)
+                # Forex fallback (no config)
                 pip_value = 0.0001 if 'JPY' not in symbol else 0.01
-                sl_distance = atr * 1.5
-                tp_distance = atr * 2.0
-                
-                min_sl = 20 * pip_value
-                max_sl = 50 * pip_value
+                sl_distance = atr * 0.8
+                min_sl = 5 * pip_value
+                max_sl = 15 * pip_value
                 sl_distance = max(min_sl, min(sl_distance, max_sl))
-                tp_distance = sl_distance * 1.5
+                tp_distance = sl_distance * 3.0
+                logger.info(f"   🛡️ FALLBACK FOREX SL/TP: SL={sl_distance:.5f}, TP={tp_distance:.5f}")
             
             if signal == "BUY":
                 stop_loss = current_price - sl_distance

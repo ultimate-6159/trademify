@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import json
+from trading.gold_strategy_config import get_strategy_config
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +102,9 @@ def get_dynamic_risk_settings(balance: float, risk_profile: str = "auto") -> Dic
     if balance < 2000:
         if profile == "conservative":
             return {
-                "max_risk_per_trade": 2.0,    # 2% risk (protect capital)
-                "max_daily_loss": 8.0,        # 8% daily limit
-                "max_drawdown": 35.0,         # 35% max DD (psychological comfort)
+                "max_risk_per_trade": 1.5,    # 1.5% risk (SMC precision, protect capital)
+                "max_daily_loss": 6.0,        # 6% daily limit (tighter for $500)
+                "max_drawdown": 25.0,         # 25% max DD (preserve capital at all costs)
                 "min_high_quality_passes": 4, # Stricter signal quality
                 "min_key_agreement": 0.60,    # 60% key layer agreement
                 "min_pass_rate": 0.55,        # 55% layers must pass (stricter)
@@ -677,15 +678,10 @@ class BacktestEngine:
         current_bar: pd.Series
     ) -> Optional[Dict[str, Any]]:
         """
-        🥇 GOLD HIGH WIN RATE STRATEGY (XAUUSDm) - M15/H1 Timeframe
-        
-        Target: 85%+ Win Rate for M15, 80%+ for H1
-        
-        กลยุทธ์สำหรับทอง:
-        - M15: Scalping with quick TP + Trailing Stop
-        - H1: Swing with wider targets
-        - Session filter (London/NY)
-        - Multiple confluence
+        🌐 Universal Strategy (Gold + Forex) - Config-Driven
+
+        Supports: XAUUSDm, EURUSDm, GBPUSDm, USDJPYm, USDCADm
+        Uses get_strategy_config() for all parameters (same as Live Trading)
         """
         try:
             df = window_data
@@ -702,12 +698,16 @@ class BacktestEngine:
             current_high = high[-1]
             current_low = low[-1]
             
-            # Detect if this is Gold
+            # Detect if this is Gold or Forex
             is_gold = 'XAU' in self.config.symbol.upper() or 'GOLD' in self.config.symbol.upper()
-            
+            is_forex = not is_gold
+
             # Detect timeframe
             is_m15 = self.config.timeframe.upper() in ['M15', 'M5', 'M30']
             is_h1 = self.config.timeframe.upper() in ['H1', 'H4']
+
+            # 🌐 LOAD STRATEGY CONFIG - Universal config for Gold + Forex
+            _cfg = get_strategy_config(self.config.symbol, self.config.timeframe)
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 📊 INDICATORS
@@ -793,227 +793,109 @@ class BacktestEngine:
             prev_bearish = prev_close_price < prev_open_val
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🥇 GOLD M15/H1 STRATEGY
+            # 🌐 UNIVERSAL STRATEGY (Gold + Forex) - Config-Driven
             # ═══════════════════════════════════════════════════════════════════════════════
-            
-            if is_gold:
-                hour = current_time.hour
-                minute = current_time.minute
-                day_of_week = current_time.weekday()
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 1. SESSION FILTER - 🚫 BLOCK ASIAN SESSION (สัญญาณผิดทางบ่อย)
-                # ─────────────────────────────────────────────────────────────────
-                london_session = 7 <= hour <= 16
-                ny_session = 13 <= hour <= 21
-                overlap_session = 13 <= hour <= 16
-                
-                asian_session = 0 <= hour <= 6 or hour >= 22  # BLOCKED
-                tokyo_session = 0 <= hour <= 9  # Tokyo: 00:00-09:00 UTC - BLOCKED
-                is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
-                
-                # 🚫 BLOCK ASIAN SESSION - สัญญาณผิดทางบ่อยมาก
-                # Only trade during London & NY sessions (best liquidity & accuracy)
-                if is_m15:
-                    good_session = (london_session or ny_session) and not is_weekend_risk
-                else:
-                    good_session = (london_session or ny_session) and not is_weekend_risk
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 2. TREND ANALYSIS
-                # ─────────────────────────────────────────────────────────────────
-                strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
-                strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
-                
-                moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
-                moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
-                
-                # 🎯 GOLD: Require stronger trend confirmation (same as Live)
+
+            hour = current_time.hour
+            day_of_week = current_time.weekday()
+
+            # ─────────────────────────────────────────────────────────────────
+            # 1. SESSION FILTER - 🌐 USES CONFIG
+            # ─────────────────────────────────────────────────────────────────
+            london_session = _cfg.london_start_hour <= hour <= _cfg.london_end_hour
+            ny_session = _cfg.ny_start_hour <= hour <= _cfg.ny_end_hour
+            overlap_session = 13 <= hour <= 16
+
+            asian_session = 0 <= hour <= 6 or hour >= 22
+            is_weekend_risk = (day_of_week == 4 and hour >= 19) or day_of_week == 6
+
+            good_session = (london_session or ny_session) and not is_weekend_risk
+
+            # 🔴 HARD BLOCK ASIAN SESSION
+            if _cfg.block_asian_session and asian_session:
+                return None
+
+            # 💱 KILL ZONE HARD BLOCK (Forex only)
+            if is_forex and getattr(_cfg, 'kill_zone_hard_block', False):
+                in_london_kz = _cfg.london_start_hour <= hour <= _cfg.london_end_hour
+                in_ny_kz = _cfg.ny_start_hour <= hour <= _cfg.ny_end_hour
+                if not (in_london_kz or in_ny_kz):
+                    return None
+
+            # 🗓️ FRIDAY LATE BLOCK
+            if _cfg.friday_late_block and day_of_week == 4 and hour >= _cfg.friday_cutoff_hour:
+                return None
+
+            # ─────────────────────────────────────────────────────────────────
+            # 2. TREND ANALYSIS
+            # ─────────────────────────────────────────────────────────────────
+            strong_uptrend = ema_fast > ema_mid > ema_slow > ema_trend
+            strong_downtrend = ema_fast < ema_mid < ema_slow < ema_trend
+
+            moderate_uptrend = ema_fast > ema_mid and current_price > ema_mid
+            moderate_downtrend = ema_fast < ema_mid and current_price < ema_mid
+
+            if _cfg.require_strong_trend:
                 has_uptrend = strong_uptrend or (moderate_uptrend and current_price > ema_slow)
                 has_downtrend = strong_downtrend or (moderate_downtrend and current_price < ema_slow)
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 3. CROSSOVER SIGNALS
-                # ─────────────────────────────────────────────────────────────────
-                bullish_cross = ema_fast_prev <= ema_mid_prev and ema_fast > ema_mid
-                bearish_cross = ema_fast_prev >= ema_mid_prev and ema_fast < ema_mid
-                
-                price_cross_up = close[-2] <= ema_mid_prev and current_price > ema_mid
-                price_cross_down = close[-2] >= ema_mid_prev and current_price < ema_mid
-                
-                has_bullish_cross = bullish_cross or price_cross_up
-                has_bearish_cross = bearish_cross or price_cross_down
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 4. RSI CONFIRMATION - 🔥 GOLD ต้องไม่ Overbought/Oversold
-                # ─────────────────────────────────────────────────────────────────
-                rsi_rising = rsi > rsi_prev
-                rsi_falling = rsi < rsi_prev
-                
-                if is_gold:
-                    # 🎯 SNIPER 90+ (Balanced): RSI ที่ยืดหยุ่นขึ้น (same as Live)
-                    rsi_ok_buy = 35 <= rsi <= 58
-                    rsi_ok_sell = 42 <= rsi <= 65
-                    rsi_divergence_buy = rsi < 40 and rsi_rising
-                    rsi_divergence_sell = rsi > 60 and rsi_falling
-                elif is_m15:
-                    rsi_ok_buy = 32 <= rsi <= 65
-                    rsi_ok_sell = 35 <= rsi <= 68
-                    rsi_divergence_buy = rsi_divergence_sell = False
-                else:
-                    # 🎯 Balanced: RSI ขยายขึ้นเล็กน้อย
-                    rsi_ok_buy = 35 <= rsi <= 58
-                    rsi_ok_sell = 42 <= rsi <= 65
-                    rsi_divergence_buy = rsi_divergence_sell = False
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 5. CANDLE CONFIRMATION (Relaxed for more signals)
-                # ─────────────────────────────────────────────────────────────────
-                # 🎯 Candle confirmation (same as Live)
-                min_body_ratio = 0.4 if is_gold else (0.3 if is_m15 else 0.35)
-                bullish_candle = is_bullish and body_ratio > min_body_ratio
-                bearish_candle = is_bearish and body_ratio > min_body_ratio
-                
-                bullish_engulf = is_bullish and prev_bearish and current_price > opens[-2]
-                bearish_engulf = is_bearish and prev_bullish and current_price < opens[-2]
-                
-                # 🎯 GOLD: Require engulfing or strong candle (same as Live)
-                if is_gold:
-                    bullish_candle_ok = bullish_engulf or (bullish_candle and body_ratio > 0.45)
-                    bearish_candle_ok = bearish_engulf or (bearish_candle and body_ratio > 0.45)
-                else:
-                    bullish_candle_ok = (bullish_candle and body_ratio > 0.38) or bullish_engulf
-                    bearish_candle_ok = (bearish_candle and body_ratio > 0.38) or bearish_engulf
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 6. PULLBACK ZONE (Wider for more signals)
-                # ─────────────────────────────────────────────────────────────────
-                # 🎯 Pullback zone (same as Live)
-                distance_to_ema = abs(current_price - ema_slow)
-                pullback_atr_mult = 2.0 if is_gold else (3.0 if is_m15 else 2.5)
-                in_pullback_zone = distance_to_ema <= atr * pullback_atr_mult
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 7. VOLATILITY CHECK
-                # ─────────────────────────────────────────────────────────────────
-                max_volatility = 3.5 if is_m15 else 2.5  # 🎯 Balanced: ผ่อนขึ้น
-                volatility_ok = atr_pct <= max_volatility
-                
-                # 🎯 VOLUME CONFIRMATION (ลดจาก 1.3 → 1.15)
-                vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
-                avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
-                current_vol = vol_data[-1]
-                volume_ratio = current_vol / max(avg_volume_20, 1)
-                volume_confirmed = volume_ratio >= 1.15
-                
-                # 🎯 SNIPER 90+: VWAP FILTER
-                vwap_period = min(50, len(close))
-                typical_price = (high[-vwap_period:] + low[-vwap_period:] + close[-vwap_period:]) / 3
-                vwap_vol = vol_data[-vwap_period:]
-                vwap = np.sum(typical_price * vwap_vol) / max(np.sum(vwap_vol), 1)
-                price_above_vwap = current_price > vwap
-                price_below_vwap = current_price < vwap
-                
-                # ─────────────────────────────────────────────────────────────────
-                # 8. SUPPORT/RESISTANCE
-                # ─────────────────────────────────────────────────────────────────
-                lookback = 20 if is_gold else (15 if is_m15 else 20)
-                recent_high = np.max(high[-lookback:])
-                recent_low = np.min(low[-lookback:])
-                price_range = recent_high - recent_low
-                
-                # 🎯 GOLD: Tighter entry zones (same as Live)
-                zone_pct = 0.25 if is_gold else 0.35
-                near_support = current_price <= recent_low + price_range * zone_pct
-                near_resistance = current_price >= recent_high - price_range * zone_pct
-                
-                # ═══════════════════════════════════════════════════════════════════════════════
-                # 🎯 SNIPER 90+ SIGNAL SCORING
-                # ═══════════════════════════════════════════════════════════════════════════════
-                
-                buy_conditions = [
-                    has_uptrend,                        # 1. Trend
-                    has_bullish_cross,                  # 2. Crossover
-                    rsi_ok_buy,                         # 3. RSI range
-                    rsi_rising,                         # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bullish_candle or bullish_engulf,   # 6. Candle
-                    in_pullback_zone or near_support,   # 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
-                    volume_confirmed,                   # 9. 🎯 Volume > 1.3x
-                    price_above_vwap,                   # 10. 🎯 Price above VWAP
-                ]
-                
-                sell_conditions = [
-                    has_downtrend,                      # 1. Trend
-                    has_bearish_cross,                  # 2. Crossover
-                    rsi_ok_sell,                        # 3. RSI range
-                    rsi_falling,                        # 4. RSI momentum
-                    good_session,                       # 5. Session
-                    bearish_candle or bearish_engulf,   # 6. Candle
-                    in_pullback_zone or near_resistance,# 7. Entry zone
-                    volatility_ok,                      # 8. Volatility
-                    volume_confirmed,                   # 9. 🎯 Volume > 1.3x
-                    price_below_vwap,                   # 10. 🎯 Price below VWAP
-                ]
-                
-                buy_score = sum(buy_conditions)
-                sell_score = sum(sell_conditions)
-                
-                # Bonus points
-                if strong_uptrend:
-                    buy_score += 1
-                if strong_downtrend:
-                    sell_score += 1
-                if overlap_session:
-                    buy_score += 1
-                    sell_score += 1
-                
-                # 🎯 Balanced: Need 6/12 (H1) or 4/12 (M15)
-                min_conditions = 4 if is_m15 else 6
-                
-                # 🎯 Score gap filter (ลดจาก 4→3)
-                score_gap = abs(buy_score - sell_score)
-                if score_gap < 3:
-                    return None  # ไม่ชัดเจนพอ
-                
             else:
-                # ─────────────────────────────────────────────────────────────────
-                # 🎯 SNIPER 90+ FOREX STRATEGY
-                # ─────────────────────────────────────────────────────────────────
-                uptrend = sma_20 > sma_50 and current_price > sma_20
-                downtrend = sma_20 < sma_50 and current_price < sma_20
-                
-                pullback_zone = abs(current_price - sma_20) / sma_20 * 100 <= 0.3  # Tighter
-                
-                rsi_ok_buy = 38 <= rsi <= 58  # 🎯 SNIPER: Tighter
-                rsi_ok_sell = 42 <= rsi <= 62
-                
-                hour = current_time.hour
-                good_session = 8 <= hour <= 20  # 🎯 Only London/NY
-                is_friday_late = current_time.weekday() == 4 and hour >= 20
-                
-                volatility_ok = atr_pct < 2.0
-                
-                bullish_reversal = is_bullish and body_ratio > 0.45  # 🎯 Stronger candle
-                bearish_reversal = is_bearish and body_ratio > 0.45
-                
-                # 🎯 SNIPER 90+: Volume confirmation for Forex
-                vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
-                avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
-                current_vol = vol_data[-1]
-                volume_ratio = current_vol / max(avg_volume_20, 1)
-                volume_confirmed = volume_ratio >= 1.3
-                
-                buy_conditions = [uptrend, pullback_zone, rsi_ok_buy, good_session, bullish_reversal, volatility_ok, not is_friday_late, volume_confirmed]
-                sell_conditions = [downtrend, pullback_zone, rsi_ok_sell, good_session, bearish_reversal, volatility_ok, not is_friday_late, volume_confirmed]
-                
-                buy_score = sum(buy_conditions)
-                sell_score = sum(sell_conditions)
-                min_conditions = 6  # 🎯 SNIPER: Need 6/8
-                
-                is_m15 = False
-                overlap_session = False
+                has_uptrend = moderate_uptrend
+                has_downtrend = moderate_downtrend
+
+            # ─────────────────────────────────────────────────────────────────
+            # 3. RSI CONFIRMATION - 🌐 USES CONFIG
+            # ─────────────────────────────────────────────────────────────────
+            rsi_ok_buy = _cfg.rsi_buy_min <= rsi <= _cfg.rsi_buy_max
+            rsi_ok_sell = _cfg.rsi_sell_min <= rsi <= _cfg.rsi_sell_max
+
+            # ─────────────────────────────────────────────────────────────────
+            # 4. VOLATILITY CHECK - 🌐 USES CONFIG
+            # ─────────────────────────────────────────────────────────────────
+            volatility_ok = atr_pct <= _cfg.max_volatility_pct
+
+            # ─────────────────────────────────────────────────────────────────
+            # 5. VOLUME CONFIRMATION - 🌐 USES CONFIG
+            # ─────────────────────────────────────────────────────────────────
+            vol_data = df['tick_volume'].values if 'tick_volume' in df.columns else (df['volume'].values if 'volume' in df.columns else np.ones(len(close)))
+            avg_volume_20 = np.mean(vol_data[-20:]) if len(vol_data) >= 20 else np.mean(vol_data)
+            current_vol = vol_data[-1]
+            volume_ratio = current_vol / max(avg_volume_20, 1)
+            volume_confirmed = volume_ratio >= _cfg.min_volume_ratio
+
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🧠 SMC-COMPATIBLE SIGNAL SCORING (same as Live Trading)
+            # ═══════════════════════════════════════════════════════════════════════════════
+
+            buy_conditions = [
+                has_uptrend,                        # 1. Basic trend direction
+                rsi_ok_buy,                         # 2. RSI not extreme
+                good_session,                       # 3. Session timing
+                volatility_ok,                      # 4. Volatility OK
+                volume_confirmed,                   # 5. Volume confirmation
+            ]
+
+            sell_conditions = [
+                has_downtrend,                      # 1. Basic trend direction
+                rsi_ok_sell,                        # 2. RSI not extreme
+                good_session,                       # 3. Session timing
+                volatility_ok,                      # 4. Volatility OK
+                volume_confirmed,                   # 5. Volume confirmation
+            ]
+
+            buy_score = sum(buy_conditions)
+            sell_score = sum(sell_conditions)
+
+            # Bonus for overlap session (Gold)
+            if is_gold and overlap_session:
+                buy_score += 1
+                sell_score += 1
+
+            min_conditions = _cfg.min_conditions
+
+            # Score gap filter - 🌐 USES CONFIG
+            score_gap = abs(buy_score - sell_score)
+            if score_gap < _cfg.min_score_gap:
+                return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL
@@ -1076,67 +958,39 @@ class BacktestEngine:
                     return None
             
             # ═══════════════════════════════════════════════════════════════════════════════
-            # 🛡️ GOLD SL/TP - Optimized for 85%+ Win Rate (M15) / 80%+ (H1)
+            # 🌐 SL/TP CALCULATION - Config-Driven (same as Live Trading)
             # ═══════════════════════════════════════════════════════════════════════════════
-            
-            if is_gold:
-                if is_m15:
-                    # 🥇 M15 SCALPING: Very tight TP, wide SL
-                    # Target: 85%+ Win Rate with Trailing Stop
-                    # 🥇 M15 SCALPING: PROVEN BEST SETTINGS
-                    # Target: 87%+ Win Rate with HIGH profit
-                    # R:R = 0.6:1 needs 63% to break even
-                    # With 87% win rate + trailing = BEST PROVEN RESULTS
-                    
-                    sl_distance = atr * 2.0  # Optimal SL (PROVEN)
-                    tp_distance = atr * 0.6  # Optimal TP (PROVEN)
-                    
-                    # Dynamic SL based on balance (0.5% - 2% of balance)
-                    # BUT capped for large accounts to maintain scalping edge
-                    min_sl_pct = 0.005  # 0.5% of balance
-                    max_sl_pct = 0.02   # 2% of balance
-                    
-                    # Calculate raw SL from balance
-                    raw_min_sl = self.balance * min_sl_pct
-                    raw_max_sl = self.balance * max_sl_pct
-                    
-                    # CAP SL for large accounts (max $50 SL for scalping)
-                    # This keeps the scalping edge regardless of account size
-                    ABSOLUTE_MIN_SL = 0.5   # $0.5 minimum
-                    ABSOLUTE_MAX_SL = 50.0  # $50 maximum (scalping cap)
-                    
-                    min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))  # Cap at $15
-                    max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))  # Cap at $50
-                    
-                    sl_distance = max(min_sl, min(sl_distance, max_sl))
-                    
-                    # TP = 0.6x SL (PROVEN OPTIMAL)
-                    tp_distance = sl_distance * 0.6
-                else:
-                    # H1: 🎯 TIGHT SL/TP - Easier to hit TP
-                    # ลด ATR multiplier เพื่อให้ TP แตะง่ายขึ้น
-                    # R:R = 0.625:1 needs 62% WR to break even (we have 95%+ WR)
-                    
-                    sl_distance = atr * 0.8  # 🔧 REDUCED: Was 1.2, now tighter
-                    tp_distance = atr * 0.5  # 🔧 REDUCED: Was 1.0, now easier to hit
-                    
-                    # 🛡️ Minimum SL to avoid tiny trades
-                    min_sl_price = 3.0  # Minimum $3 SL distance for Gold
-                    sl_distance = max(min_sl_price, sl_distance)
-                    
-                    # Keep TP proportional (R:R = 0.625:1)
-                    tp_distance = sl_distance * 0.625
-                
-            else:
-                # Forex: Use pip-based
-                pip_value = 0.0001 if 'JPY' not in self.config.symbol else 0.01
-                sl_distance = atr * 1.5
-                tp_distance = atr * 2.0
-                
-                min_sl = 20 * pip_value
-                max_sl = 50 * pip_value
+
+            if is_m15:
+                # M15 SCALPING - uses config
+                sl_distance = atr * _cfg.sl_atr_multiplier
+                tp_distance = atr * _cfg.tp_atr_multiplier
+
+                min_sl_pct = 0.005  # 0.5% of balance
+                max_sl_pct = 0.02   # 2% of balance
+                raw_min_sl = self.balance * min_sl_pct
+                raw_max_sl = self.balance * max_sl_pct
+
+                ABSOLUTE_MIN_SL = 0.5
+                ABSOLUTE_MAX_SL = 50.0
+                min_sl = max(ABSOLUTE_MIN_SL, min(raw_min_sl, ABSOLUTE_MAX_SL * 0.3))
+                max_sl = max(2.0, min(raw_max_sl, ABSOLUTE_MAX_SL))
+
                 sl_distance = max(min_sl, min(sl_distance, max_sl))
-                tp_distance = sl_distance * 1.5
+                tp_distance = sl_distance * _cfg.rr_ratio
+            else:
+                # H1 SWING - uses config for SL/TP
+                sl_distance = atr * _cfg.sl_atr_multiplier
+
+                # Minimum SL from config
+                sl_distance = max(_cfg.min_sl_distance, sl_distance)
+
+                # Enforce max_sl_distance for Forex (block if SL too wide)
+                if is_forex and hasattr(_cfg, 'max_sl_distance') and sl_distance > _cfg.max_sl_distance:
+                    return None  # SL too wide → skip trade
+
+                # TP = SL × R:R ratio from config
+                tp_distance = sl_distance * _cfg.rr_ratio
             
             if signal == "BUY":
                 stop_loss = current_price - sl_distance
@@ -1234,7 +1088,7 @@ class BacktestEngine:
                     'sell_score': sell_score,
                     'is_gold': is_gold,
                     'is_m15': is_m15,
-                    'session': 'overlap' if is_gold and overlap_session else ('london' if is_gold and london_session else 'other')
+                    'session': 'overlap' if is_gold and overlap_session else ('london' if london_session else ('ny' if ny_session else 'other'))
                 },
                 'layer_results': layer_results
             }

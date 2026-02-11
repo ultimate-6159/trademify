@@ -294,18 +294,263 @@ class GoldM15Config(GoldH1Config):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 💱 FOREX H1 CONFIG - EURUSDm & GBPUSDm (SMC สำหรับพอร์ต $500)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ForexH1Config(GoldH1Config):
+    """
+    💱 Forex H1 Strategy Configuration (EURUSDm, GBPUSDm)
+    กฎเหล็ก SMC สำหรับพอร์ต $500:
+
+    1. Risk 1-2% ($5-$10) ต่อไม้
+    2. R:R ขั้นต่ำ 1:3 (เสี่ยง $5 ต้องหวังกำไร $15+)
+    3. SL แคบ 5-15 pips (ถ้าเกินนี้ห้ามเข้า)
+    4. Kill Zone ONLY (London 07-09 UTC, NY 12-15 UTC)
+    5. ต้องเห็น Liquidity Sweep ก่อนเข้าเสมอ
+    6. ChoCH M5 ยืนยันก่อนเข้า
+    7. TP1 = Prior swing (50% close + BE), TP2 = Run with H4
+    """
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 📊 TREND FILTER - ต้อง Strong Trend เท่านั้น (เทรดตาม H4)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    require_strong_trend: bool = True
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🎯 SIGNAL SCORING - SMC handles precision, basic trend filter only
+    # ═══════════════════════════════════════════════════════════════════════════════
+    min_conditions: int = 3   # 3/5 basic conditions (trend, RSI, session, vol, volume)
+    min_score_gap: int = 2    # BUY vs SELL gap
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 📈 RSI FILTER - Forex ranges
+    # ═══════════════════════════════════════════════════════════════════════════════
+    rsi_buy_min: float = 35.0
+    rsi_buy_max: float = 60.0
+    rsi_sell_min: float = 40.0
+    rsi_sell_max: float = 65.0
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🕐 KILL ZONE SESSION FILTER - เทรดเฉพาะเวลาเจ้ามือตื่น
+    # London Kill Zone: 07:00 - 09:00 UTC (14:00-16:00 Thai)
+    # New York Kill Zone: 12:00 - 15:00 UTC (19:00-22:00 Thai)
+    # นอกเวลาเหล่านี้ ห้ามเปิดออเดอร์เด็ดขาด
+    # ═══════════════════════════════════════════════════════════════════════════════
+    london_start_hour: int = 7
+    london_end_hour: int = 9     # KILL ZONE only: 07-09 UTC (was 16)
+    ny_start_hour: int = 12
+    ny_end_hour: int = 15        # KILL ZONE only: 12-15 UTC (was 21)
+    block_asian_session: bool = True  # ห้ามเทรด Asian session
+
+    # 🆕 KILL ZONE HARD BLOCK - ห้ามเทรดนอก Kill Zone เด็ดขาด
+    kill_zone_hard_block: bool = True
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🎯 SL/TP SETTINGS - R:R ขั้นต่ำ 1:3 / SL แคบ 5-15 pips
+    # ═══════════════════════════════════════════════════════════════════════════════
+    sl_atr_multiplier: float = 0.8   # SL = ATR × 0.8 (tight)
+    tp_atr_multiplier: float = 2.4   # TP = ATR × 2.4
+    rr_ratio: float = 3.0            # 🔴 R:R 1:3 ขั้นต่ำ (เสี่ยง $5 ต้องหวัง $15+)
+    min_sl_distance: float = 0.0005  # Min SL = 5 pips (0.0005 for EURUSD)
+    max_sl_distance: float = 0.0015  # Max SL = 15 pips (ถ้าเกินห้ามเข้า)
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🛡️ TRAILING STOP
+    # ═══════════════════════════════════════════════════════════════════════════════
+    trailing_stop_enabled: bool = True
+    trailing_stop_trigger_pct: float = 0.3
+    trailing_stop_distance_pct: float = 0.2
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🔒 BREAK-EVEN
+    # ═══════════════════════════════════════════════════════════════════════════════
+    break_even_enabled: bool = True
+    break_even_trigger_pct: float = 0.2   # BE เร็วขึ้นสำหรับพอร์ตเล็ก
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🕯️ CANDLE FILTER
+    # ═══════════════════════════════════════════════════════════════════════════════
+    min_body_ratio: float = 0.4
+    confirmation_body_ratio: float = 0.45
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 📊 VOLUME FILTER
+    # ═══════════════════════════════════════════════════════════════════════════════
+    min_volume_ratio: float = 1.2
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🎚️ VOLATILITY FILTER
+    # ═══════════════════════════════════════════════════════════════════════════════
+    max_volatility_pct: float = 2.0   # Forex = ต่ำกว่า Gold
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 📐 PULLBACK ZONE
+    # ═══════════════════════════════════════════════════════════════════════════════
+    pullback_atr_multiplier: float = 2.0
+    sr_zone_pct: float = 0.30
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🚫 ADVANCED FILTERS
+    # ═══════════════════════════════════════════════════════════════════════════════
+    peak_detection_hard_block: bool = False
+    momentum_filter_enabled: bool = False
+    consecutive_loss_pause: bool = True
+    max_consecutive_losses: int = 2
+    pause_duration_hours: int = 4
+    volume_spike_block: bool = True
+    volume_spike_threshold: float = 3.0
+    atr_expansion_block: bool = True
+    atr_expansion_threshold: float = 1.5
+    friday_late_block: bool = True
+    friday_cutoff_hour: int = 19
+    monday_gap_skip: bool = True
+    monday_gap_threshold_pct: float = 0.3   # Forex: tighter gap threshold
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🧠 SMART MONEY CONCEPTS (SMC) - กฎเหล็ก 5 ข้อ
+    # ═══════════════════════════════════════════════════════════════════════════════
+    smc_enabled: bool = True
+    smc_require_sweep: bool = True          # ห้ามเข้าถ้าไม่มี Liquidity Sweep
+    smc_swing_lookback: int = 5
+    smc_sweep_lookback_candles: int = 3
+    smc_sl_buffer_atr: float = 0.2          # Forex: tighter SL buffer
+    smc_max_sl_atr: float = 1.5             # Forex: max SL tighter than Gold
+    smc_min_sweep_strength: float = 50.0
+
+
+@dataclass
+class GBPUSDConfig(ForexH1Config):
+    """
+    🇬🇧 GBPUSDm (Cable) - Specific Configuration
+
+    นิสัยคู่เงิน:
+    - ผันผวนกว่า EURUSD, วิ่งแรง
+    - ชอบ "Deep Retracement" (ย่อลึก)
+    - London Open Strategy: Judas Swing (ทางหลอก) → V-Shape Reversal
+
+    กลยุทธ์:
+    - จับตาดู London Kill Zone 07:00-09:00 UTC
+    - ถ้ากราฟพุ่งไปทางไหนแรงๆ = Judas Swing (ทางหลอก)
+    - รอมันพุ่งหลอกเสร็จ แล้วตบกลับทาง V-Shape ใน M15
+    - Entry ที่ไหล่ขวา (Retest) ของการกลับตัว
+    """
+
+    # GBP: ผันผวนมากกว่า → ยอม SL กว้างกว่านิดหน่อย
+    sl_atr_multiplier: float = 0.9
+    max_sl_distance: float = 0.0018   # Max 18 pips (GBP volatile)
+    min_sl_distance: float = 0.0006   # Min 6 pips
+
+    # GBP: ATR สูงกว่า → ยอม volatility มากขึ้น
+    max_volatility_pct: float = 2.5
+
+    # GBP: ต้อง sweep strength สูงกว่า (เพราะ fake moves เยอะ)
+    smc_min_sweep_strength: float = 55.0
+
+
+@dataclass
+class EURUSDConfig(ForexH1Config):
+    """
+    🇪🇺 EURUSDm (Euro) - Specific Configuration
+
+    นิสัยคู่เงิน:
+    - ชอบเคารพโครงสร้าง H4
+    - ชอบทำ Fakeout หลอกกิน SL ที่ Swing High/Low ก่อนกลับตัว
+    - Imbalance (FVG) ใน H1 ที่ยังไม่ถูกเติมเต็ม = จุดโฟกัส
+
+    กลยุทธ์:
+    - ดู H4 เทรนด์หลัก
+    - H4 ขาลง: รอราคาดีดขึ้นกวาด Asian High / Previous Daily High → ChoCH M5 → SELL
+    - H4 ขาขึ้น: รอราคาลงกวาด Asian Low / Previous Daily Low → ChoCH M5 → BUY
+    """
+
+    # EUR: เคารพโครงสร้างดี → SL แคบกว่า GBP ได้
+    sl_atr_multiplier: float = 0.7
+    max_sl_distance: float = 0.0012   # Max 12 pips
+    min_sl_distance: float = 0.0005   # Min 5 pips
+
+    # EUR: น้อยผันผวนที่สุดใน Major → volatility ต่ำ
+    max_volatility_pct: float = 1.8
+
+
+@dataclass
+class USDJPYConfig(ForexH1Config):
+    """
+    🇯🇵 USDJPYm (Dollar-Yen) - Specific Configuration
+
+    นิสัยคู่เงิน:
+    - JPY pip_value = 0.01 (ไม่ใช่ 0.0001)
+    - ชอบวิ่งแรงตอน Tokyo-London overlap + NY session
+    - สัมพันธ์กับ US Treasury Yields / BOJ policy
+    - ชอบ Range-bound ช่วง Asian → Breakout ช่วง London/NY
+
+    กลยุทธ์:
+    - ดู H4 trend (yield-driven)
+    - London Kill Zone: รอ Sweep ของ Asian Range High/Low
+    - NY Kill Zone: รอ Sweep ของ London Range High/Low
+    - JPY SL/TP ใช้หน่วยต่างจาก EUR/GBP (pip = 0.01)
+    """
+
+    # JPY: pip = 0.01 → SL/TP distances ต้อง 100x ของ EUR/GBP
+    sl_atr_multiplier: float = 0.8
+    min_sl_distance: float = 0.05    # Min 5 pips (0.05 for JPY)
+    max_sl_distance: float = 0.15    # Max 15 pips (0.15 for JPY)
+
+    # JPY: ผันผวนปานกลาง แต่ช่วง News BOJ วิ่งแรงมาก
+    max_volatility_pct: float = 2.0
+
+    # JPY: sweep strength ปกติ
+    smc_min_sweep_strength: float = 50.0
+
+
+@dataclass
+class USDCADConfig(ForexH1Config):
+    """
+    🇨🇦 USDCADm (Loonie) - Specific Configuration
+
+    นิสัยคู่เงิน:
+    - สัมพันธ์กับราคาน้ำมัน (Oil up → CAD strong → USDCAD down)
+    - ผันผวนน้อยกว่า GBP แต่มากกว่า EUR
+    - ชอบ Consolidate ยาวแล้ว Breakout
+    - NY session เคลื่อนไหวมากที่สุด (ทั้ง USD+CAD อยู่ timezone เดียวกัน)
+
+    กลยุทธ์:
+    - ดู H4 trend (oil correlation)
+    - London Kill Zone: setup เตรียมตัว
+    - NY Kill Zone: entry หลัก (ทั้ง USD+CAD active)
+    - ระวัง Oil inventory report (พุธ) + CAD employment (ศุกร์แรกเดือน)
+    """
+
+    # CAD: pip = 0.0001 เหมือน EUR/GBP
+    sl_atr_multiplier: float = 0.8
+    min_sl_distance: float = 0.0005  # Min 5 pips
+    max_sl_distance: float = 0.0015  # Max 15 pips
+
+    # CAD: ผันผวนปานกลาง
+    max_volatility_pct: float = 2.0
+
+    # CAD: sweep strength ปกติ
+    smc_min_sweep_strength: float = 50.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 🌐 GLOBAL CONFIG INSTANCES
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Config instances ที่ใช้จริง
 GOLD_H1_CONFIG = GoldH1Config()
 GOLD_M15_CONFIG = GoldM15Config()
+EURUSD_H1_CONFIG = EURUSDConfig()
+GBPUSD_H1_CONFIG = GBPUSDConfig()
+USDJPY_H1_CONFIG = USDJPYConfig()
+USDCAD_H1_CONFIG = USDCADConfig()
+FOREX_H1_CONFIG = ForexH1Config()  # Generic Forex fallback
 
 
 def get_gold_config(timeframe: str = "H1") -> GoldH1Config:
     """
     ดึง Config สำหรับ Gold ตาม timeframe
-    
+
     Usage:
         config = get_gold_config("H1")
         if score >= config.min_conditions:
@@ -314,6 +559,44 @@ def get_gold_config(timeframe: str = "H1") -> GoldH1Config:
     if timeframe.upper() in ["M15", "M5", "M30"]:
         return GOLD_M15_CONFIG
     return GOLD_H1_CONFIG
+
+
+def get_forex_config(symbol: str, timeframe: str = "H1") -> ForexH1Config:
+    """
+    💱 ดึง Config สำหรับ Forex ตาม symbol
+
+    Usage:
+        config = get_forex_config("EURUSDm", "H1")
+        if config.smc_enabled:
+            # Use SMC strategy
+    """
+    symbol_upper = symbol.upper()
+    if "EURUSD" in symbol_upper:
+        return EURUSD_H1_CONFIG
+    elif "GBPUSD" in symbol_upper:
+        return GBPUSD_H1_CONFIG
+    elif "USDJPY" in symbol_upper:
+        return USDJPY_H1_CONFIG
+    elif "USDCAD" in symbol_upper:
+        return USDCAD_H1_CONFIG
+    return FOREX_H1_CONFIG
+
+
+def get_strategy_config(symbol: str, timeframe: str = "H1"):
+    """
+    🌐 Universal Config - ดึง Config ที่ถูกต้องสำหรับทุก symbol
+
+    Usage:
+        config = get_strategy_config("XAUUSDm", "H1")  → GoldH1Config
+        config = get_strategy_config("EURUSDm", "H1")  → EURUSDConfig
+        config = get_strategy_config("GBPUSDm", "H1")  → GBPUSDConfig
+        config = get_strategy_config("USDJPYm", "H1")  → USDJPYConfig
+        config = get_strategy_config("USDCADm", "H1")  → USDCADConfig
+    """
+    symbol_upper = symbol.upper()
+    if "XAU" in symbol_upper or "GOLD" in symbol_upper:
+        return get_gold_config(timeframe)
+    return get_forex_config(symbol, timeframe)
 
 
 def load_gold_config_from_env() -> GoldH1Config:
