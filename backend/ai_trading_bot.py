@@ -415,8 +415,9 @@ class AITradingBot:
             # 🎯 หยุดเทรดหลังขาดทุนติดต่อกัน (ลด cooldown)
             "loss_protection": {
                 "enabled": True,
-                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3")),  # 🎯 หยุดหลังขาดทุน 3 ครั้งติด
-                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "30")),  # 🎯 พักเทรด 30 นาที
+                # 🔧 FIX #6: Use gold_config values (2 losses, 4 hours) instead of ENV (3 losses, 30 min)
+                "max_consecutive_losses": int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2")),  # 🎯 gold_config default: 2
+                "cooldown_minutes": int(os.getenv("LOSS_COOLDOWN_MINUTES", "240")),  # 🎯 gold_config default: 4 hours = 240 min
             },
             # Time-based Exit: ปิดออเดอร์ที่ค้างนานเกินไป
             "time_exit": {
@@ -682,7 +683,16 @@ class AITradingBot:
                 if gold_config.monday_gap_skip:
                     if day_of_week == 0 and hour <= 8:  # Monday early
                         if len(close) >= 2:
-                            friday_close = close[-2]  # Assuming this is first candle after weekend
+                            # 🔧 FIX #12: Find actual Friday close by searching backwards
+                            friday_close = None
+                            if 'timestamp' in df.columns:
+                                for i in range(len(df) - 2, max(0, len(df) - 50), -1):
+                                    candle_time = pd.Timestamp(df['timestamp'].iloc[i])
+                                    if candle_time.weekday() == 4:  # Friday
+                                        friday_close = close[i]
+                                        break
+                            if friday_close is None:
+                                friday_close = close[-2]  # Fallback
                             monday_open = opens[-1]
                             gap_pct = abs(monday_open - friday_close) / friday_close * 100
                             if gap_pct > gold_config.monday_gap_threshold_pct:
@@ -2124,23 +2134,29 @@ class AITradingBot:
         from trading.gold_strategy_config import get_gold_config
         gold_config = get_gold_config(self.timeframe)
         
+        # 🔧 FIX #1+2: DISABLE engine.py's trailing stop & break-even
+        # engine.py uses price-percentage-based (0.5% trigger, 0.3% trail) - WRONG
+        # Bot has its own TP-distance-based system matching backtest (5% activation, 10% trail)
+        # Having BOTH causes race condition: conflicting SL modifications every 1s vs 60s
         self.trading_engine = TradingEngine(
             broker=broker,
             risk_manager=risk_manager,
             max_positions=max_positions_rm,
             enabled=True,
-            # 🆕 Trailing Stop from Gold config
-            trailing_stop_enabled=gold_config.trailing_stop_enabled,
-            trailing_stop_trigger_pct=gold_config.trailing_stop_trigger_pct,
-            trailing_stop_distance_pct=gold_config.trailing_stop_distance_pct,
-            # 🆕 Break-Even from Gold config
-            break_even_enabled=gold_config.break_even_enabled,
-            break_even_trigger_pct=gold_config.break_even_trigger_pct,
+            # ❌ DISABLED - Bot's _update_trailing_stops() handles this (TP-distance-based)
+            trailing_stop_enabled=False,
+            trailing_stop_trigger_pct=0,
+            trailing_stop_distance_pct=0,
+            # ❌ DISABLED - Bot's _apply_break_even() handles this (50% TP activation)
+            break_even_enabled=False,
+            break_even_trigger_pct=0,
         )
-        
-        logger.info(f"🛡️ TradingEngine Protection from gold_strategy_config:")
-        logger.info(f"   Trailing Stop: {'ON' if gold_config.trailing_stop_enabled else 'OFF'} (trigger: {gold_config.trailing_stop_trigger_pct}%)")
-        logger.info(f"   Break-Even: {'ON' if gold_config.break_even_enabled else 'OFF'} (trigger: {gold_config.break_even_trigger_pct}%)")
+
+        logger.info(f"🛡️ TradingEngine Protection:")
+        logger.info(f"   Engine Trailing Stop: OFF (using bot's TP-distance-based instead)")
+        logger.info(f"   Engine Break-Even: OFF (using bot's 50% TP activation instead)")
+        logger.info(f"   Bot Trailing: activation={gold_config.trailing_stop_trigger_pct}% of TP, trail={gold_config.trailing_stop_distance_pct}% of profit")
+        logger.info(f"   Bot Break-Even: activation=50% of TP, offset=10% of TP")
         
         await self.trading_engine.start()
         
@@ -2254,7 +2270,7 @@ class AITradingBot:
             tech_signal = self._generate_technical_signal(
                 symbol=symbol,
                 df=df,
-                current_time=datetime.now(),
+                current_time=datetime.utcnow(),  # 🔧 FIX #5: Use UTC for session filters
                 balance=balance
             )
             
@@ -2308,7 +2324,7 @@ class AITradingBot:
                     trend_score = 40
                 
                 # Session detection
-                hour = datetime.now().hour
+                hour = datetime.utcnow().hour  # 🔧 FIX #5: Use UTC for session filters
                 if 13 <= hour <= 17:
                     session = "OVERLAP"
                     session_score = 90
@@ -2351,10 +2367,11 @@ class AITradingBot:
                 
                 return default_response
             
-            # 🔄 Convert to 20-point scoring system BEFORE building result
-            buy_20 = int(tech_signal['buy_score'] * 20 / 12)  # Convert from /12 to /20
-            sell_20 = 20 - buy_20  # Total always = 20
-            score_display = f"BUY {buy_20} : {sell_20} SELL"
+            # 🔄 Use pre-computed 20-point scores from _generate_technical_signal
+            # 🔧 FIX #3: Was hardcoded `/12` but total_score varies (10-14 with bonuses)
+            buy_20 = tech_signal['buy_score_20']
+            sell_20 = tech_signal['sell_score_20']
+            score_display = tech_signal['score_display']
             
             # Build result from technical signal
             result = {
@@ -2542,9 +2559,9 @@ class AITradingBot:
             stop_loss=price_projection.get("stop_loss"),
             take_profit=price_projection.get("take_profit"),
             htf_data=htf_data,
-            current_time=datetime.now(),
+            current_time=datetime.utcnow(),  # 🔧 FIX #5: Use UTC for session filters
         )
-        
+
         result = {
             "symbol": symbol,
             "timeframe": self.timeframe,
@@ -3116,8 +3133,12 @@ class AITradingBot:
                 layers.append({"layer": i, "name": f"Layer {i}", "status": "ERROR", "score": 0, "can_trade": True})
             return {"layers": layers, "passed": 0, "total": 20, "pass_rate": 0}
         
-        pass_rate = (passed / total * 100) if total > 0 else 0
-        logger.info(f"   🧠 20-Layer Summary: {passed}/{total} passed ({pass_rate:.1f}%)")
+        # 🔧 FIX #11: Exclude layers 1-4 from pass_rate (always 100% if initialized = inflates rate ~20%)
+        active_layers = [l for l in layers if l.get("layer", 0) >= 5]
+        active_passed = sum(1 for l in active_layers if l.get("can_trade") and l.get("score", 0) > 50)
+        active_total = len(active_layers) if active_layers else 1
+        pass_rate = (active_passed / active_total * 100) if active_total > 0 else 0
+        logger.info(f"   🧠 20-Layer Summary: {passed}/{total} passed (active: {active_passed}/{active_total} = {pass_rate:.1f}%)")
         
         return {
             "layers": layers,
@@ -3191,13 +3212,49 @@ class AITradingBot:
                 pass
         
         # ════════════════════════════════════════════════════════════════
-        # 🔄 SEQUENTIAL PROCESSING (Original - Fallback)
+        # 🔧 FIX #8: SEQUENTIAL PROCESSING - Fetch data ONCE for all layers
+        # Previously: 6 separate get_klines() calls, one per intelligence layer
+        # Now: Single fetch, shared by all layers via _shared_* variables
         # ════════════════════════════════════════════════════════════════
-        
+
+        # Pre-fetch market data ONCE for all layers
+        try:
+            _shared_df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=200)
+        except Exception as e:
+            logger.warning(f"   ⚠️ Shared data fetch failed: {e}")
+            _shared_df = pd.DataFrame()
+
+        if _shared_df is not None and len(_shared_df) >= 50:
+            _shared_prices = _shared_df['close'].values.astype(np.float32)
+            _shared_highs = _shared_df['high'].values.astype(np.float32)
+            _shared_lows = _shared_df['low'].values.astype(np.float32)
+            _shared_opens = _shared_df['open'].values.astype(np.float32) if 'open' in _shared_df.columns else _shared_prices * 0.999
+            _shared_volumes = _shared_df['volume'].values.astype(np.float32) if 'volume' in _shared_df.columns else np.ones(len(_shared_prices)) * 1000
+
+            # Calculate ATR once
+            _shared_tr = np.maximum(
+                _shared_highs[-14:] - _shared_lows[-14:],
+                np.abs(_shared_highs[-14:] - _shared_prices[-15:-1])
+            )
+            _shared_atr = float(np.mean(_shared_tr))
+        else:
+            _shared_prices = np.array([current_price], dtype=np.float32)
+            _shared_highs = _shared_prices
+            _shared_lows = _shared_prices
+            _shared_opens = _shared_prices
+            _shared_volumes = np.ones(1, dtype=np.float32) * 1000
+            _shared_atr = current_price * 0.01
+
+        # Pre-fetch balance/equity once
+        _shared_balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
+        _shared_equity = await self.trading_engine.broker.get_equity() if self.trading_engine else _shared_balance
+
+        logger.info(f"   🔧 FIX #8: Shared data fetched ONCE ({len(_shared_df) if _shared_df is not None else 0} candles, balance=${_shared_balance:,.0f})")
+
         # 🎛️ ADAPTIVE INTELLIGENCE SYSTEM
         # Layer 1-16: STRICT (Gate Keepers)
         # Layer 17-20: ADAPTIVE (Dynamic Thresholds)
-        
+
         # 📊 Initialize layer results collection for Adaptive Intelligence
         base_layer_can_trade_count = 0  # จำนวน Layer 1-16 ที่ผ่าน
         base_layer_total = 16
@@ -3225,24 +3282,15 @@ class AITradingBot:
         ultra_multiplier = 1.0
         if self.ultra_intelligence:
             try:
-                # Get price data
-                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                if len(df) >= 50:
-                    prices = df['close'].values.astype(np.float32)
-                    highs = df['high'].values.astype(np.float32)
-                    lows = df['low'].values.astype(np.float32)
-                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
-                    
-                    # Calculate ATR safely
-                    tr = np.maximum(
-                        highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - prices[-15:-1])
-                    )
-                    atr = np.mean(tr)
-                    
-                    # Get balance
-                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
-                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                if len(_shared_prices) >= 50:
+                    prices = _shared_prices
+                    highs = _shared_highs
+                    lows = _shared_lows
+                    volumes = _shared_volumes
+                    atr = _shared_atr
+                    balance = _shared_balance
+                    equity = _shared_equity
                     
                     ultra_decision = self.ultra_intelligence.analyze(
                         symbol=symbol,
@@ -3312,21 +3360,15 @@ class AITradingBot:
         supreme_multiplier = 1.0
         if self.supreme_intelligence:
             try:
-                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                if len(df) >= 50:
-                    prices = df['close'].values.astype(np.float32)
-                    highs = df['high'].values.astype(np.float32)
-                    lows = df['low'].values.astype(np.float32)
-                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
-                    
-                    tr = np.maximum(
-                        highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - prices[-15:-1])
-                    )
-                    atr = np.mean(tr)
-                    
-                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
-                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                if len(_shared_prices) >= 50:
+                    prices = _shared_prices
+                    highs = _shared_highs
+                    lows = _shared_lows
+                    volumes = _shared_volumes
+                    atr = _shared_atr
+                    balance = _shared_balance
+                    equity = _shared_equity
                     
                     supreme_decision = self.supreme_intelligence.analyze(
                         symbol=symbol,
@@ -3401,21 +3443,15 @@ class AITradingBot:
         transcendent_multiplier = 1.0
         if self.transcendent_intelligence:
             try:
-                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                if len(df) >= 50:
-                    prices = df['close'].values.astype(np.float32)
-                    highs = df['high'].values.astype(np.float32)
-                    lows = df['low'].values.astype(np.float32)
-                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns else None
-                    
-                    tr = np.maximum(
-                        highs[-14:] - lows[-14:],
-                        np.abs(highs[-14:] - prices[-15:-1])
-                    )
-                    atr = np.mean(tr)
-                    
-                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
-                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                if len(_shared_prices) >= 50:
+                    prices = _shared_prices
+                    highs = _shared_highs
+                    lows = _shared_lows
+                    volumes = _shared_volumes
+                    atr = _shared_atr
+                    balance = _shared_balance
+                    equity = _shared_equity
                     
                     transcendent_decision = self.transcendent_intelligence.analyze(
                         symbol=symbol,
@@ -3498,18 +3534,17 @@ class AITradingBot:
         if self.omniscient_intelligence and analysis.get("market_data"):
             try:
                 market_data = analysis.get("market_data", {})
-                atr = market_data.get("atr", 0)
-                
-                # Get more data for Omniscient analysis (need 100+ candles)
-                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=200)
-                if df is not None and len(df) > 50:
-                    prices = df['close'].values.astype(np.float32)
-                    highs = df['high'].values.astype(np.float32)
-                    lows = df['low'].values.astype(np.float32)
-                    volumes = df['volume'].values.astype(np.float32) if 'volume' in df else None
-                    
-                    balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
-                    equity = await self.trading_engine.broker.get_equity() if self.trading_engine else balance
+                atr = _shared_atr  # 🔧 FIX #8: Use shared ATR
+
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                if len(_shared_prices) > 50:
+                    prices = _shared_prices
+                    highs = _shared_highs
+                    lows = _shared_lows
+                    volumes = _shared_volumes
+
+                    balance = _shared_balance
+                    equity = _shared_equity
                     
                     omniscient_decision = self.omniscient_intelligence.analyze(
                         symbol=symbol,
@@ -3602,28 +3637,14 @@ class AITradingBot:
         intel_decision = None
         if self.intelligence and analysis.get("market_data"):
             try:
-                # Get H1 data from data provider (need more than 1 candle for analysis)
-                h1_data = {}
-                try:
-                    df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                    if df is not None and len(df) > 30:
-                        h1_data = {
-                            "open": df['open'].values.astype(np.float32),
-                            "high": df['high'].values.astype(np.float32),
-                            "low": df['low'].values.astype(np.float32),
-                            "close": df['close'].values.astype(np.float32),
-                        }
-                        logger.info(f"   📊 Got {len(df)} candles for Intelligence analysis")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Failed to get klines: {e}")
-                    # Fallback to single candle
-                    market_data = analysis.get("market_data", {})
-                    h1_data = {
-                        "open": np.array([market_data.get("open", current_price)]),
-                        "high": np.array([market_data.get("high", current_price)]),
-                        "low": np.array([market_data.get("low", current_price)]),
-                        "close": np.array([market_data.get("close", current_price)]),
-                    }
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                h1_data = {
+                    "open": _shared_opens,
+                    "high": _shared_highs,
+                    "low": _shared_lows,
+                    "close": _shared_prices,
+                }
+                logger.info(f"   📊 Using {len(_shared_prices)} shared candles for Intelligence analysis")
                 
                 # Get Smart Brain stats for Kelly
                 win_rate, avg_win, avg_loss, total_trades = 0.5, 1.0, 1.0, 0
@@ -3701,13 +3722,10 @@ class AITradingBot:
         neural_multiplier = 1.0
         if self.neural_brain:
             try:
-                # Get balance for risk calculation
-                balance = await self.trading_engine.broker.get_balance() if self.trading_engine else 10000
-                
-                # Get price data
-                df = await self.data_provider.get_klines(symbol=symbol, timeframe="H1", limit=100)
-                prices = df['close'].values.astype(np.float32) if len(df) > 0 else np.array([current_price])
-                volumes = df['volume'].values.astype(np.float32) if 'volume' in df.columns and len(df) > 0 else None
+                # 🔧 FIX #8: Use shared data instead of separate fetch
+                balance = _shared_balance
+                prices = _shared_prices
+                volumes = _shared_volumes
                 
                 neural_decision = self.neural_brain.analyze(
                     signal_side="BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL",
@@ -4579,52 +4597,65 @@ class AITradingBot:
         stop_loss = risk_mgmt.get("stop_loss")
         take_profit = risk_mgmt.get("take_profit")
         position_multiplier = risk_mgmt.get("position_size", 1.0)
-        
-        # 🧠 Advanced Intelligence multiplier
-        position_multiplier = min(position_multiplier, intel_multiplier)
-        
-        # 🧠 Smart Brain multiplier (adaptive risk)
-        position_multiplier = min(position_multiplier, smart_multiplier)
-        
-        # 🏆 Pro Features position size limit
+
+        # 🔧 FIX #7: Weighted average of key multipliers instead of min() chain
+        # Previously: min() of 15+ multipliers → always dominated by worst module (~0.3x)
+        # Now: weighted average of KEY layers only, clamped to [0.3, 1.5]
+        key_multipliers = []
+        key_weights = []
+
+        # Critical layers get higher weight
+        critical_layers = [
+            (intel_multiplier, 2.0, "Intelligence"),
+            (smart_multiplier, 1.5, "SmartBrain"),
+            (neural_multiplier, 1.5, "Neural"),
+            (quantum_multiplier, 1.0, "Quantum"),
+            (alpha_multiplier, 2.0, "Alpha"),
+            (omega_multiplier, 2.0, "Omega"),
+            (titan_multiplier, 2.5, "Titan"),  # Final synthesizer gets highest weight
+        ]
+
+        # Adaptive layers (lower weight)
+        adaptive_layers = [
+            (ultra_multiplier, 1.0, "Ultra"),
+            (supreme_multiplier, 1.0, "Supreme"),
+            (transcendent_multiplier, 0.8, "Transcendent"),
+            (omniscient_multiplier, 0.8, "Omniscient"),
+        ]
+
+        # Risk-critical layers (these SHOULD use min - they protect capital)
+        risk_floor = min(
+            position_multiplier_from_risk,  # Risk Guardian
+            peak_multiplier,               # Peak Detector (avoid tops/bottoms)
+        )
+
+        for mult, weight, name in critical_layers + adaptive_layers:
+            if mult > 0 and mult != 1.0:  # Only include layers that actually ran
+                key_multipliers.append(mult)
+                key_weights.append(weight)
+            elif mult == 1.0:  # Default = didn't run or passed
+                key_multipliers.append(1.0)
+                key_weights.append(weight * 0.5)  # Lower weight for default
+
+        if key_multipliers:
+            total_weight = sum(key_weights)
+            weighted_avg = sum(m * w for m, w in zip(key_multipliers, key_weights)) / total_weight
+            # Clamp to reasonable range
+            position_multiplier = max(0.3, min(1.5, weighted_avg))
+        else:
+            position_multiplier = 1.0
+
+        # Apply risk floor (capital protection)
+        position_multiplier = min(position_multiplier, risk_floor)
+
+        # Apply Pro Features limit
         position_multiplier = min(position_multiplier, position_multiplier_from_pro)
 
-        # 🛡️ Risk Guardian position size limit
-        position_multiplier = min(position_multiplier, position_multiplier_from_risk)
-        
-        # 🧬 Neural Brain position size factor
-        position_multiplier = min(position_multiplier, neural_multiplier)
-        
-        # 🔮 Deep Intelligence position size factor
-        position_multiplier = min(position_multiplier, deep_multiplier)
-        
-        # ⚛️ Quantum Strategy position size factor
-        position_multiplier = min(position_multiplier, quantum_multiplier)
-        
-        # 🎯 Alpha Engine position size factor
-        position_multiplier = min(position_multiplier, alpha_multiplier)
-        
-        # 🧠⚡ Omega Brain position size factor
-        position_multiplier = min(position_multiplier, omega_multiplier)
-        
-        # 🏛️⚔️ Titan Core position size factor (Final)
-        position_multiplier = min(position_multiplier, titan_multiplier)
-        
-        # 🧠⚡ Ultra Intelligence position size factor (Ultimate) - ADAPTIVE
-        position_multiplier = min(position_multiplier, ultra_multiplier)
-        
-        # 🏆👑 Supreme Intelligence position size factor (Hedge Fund Level) - ADAPTIVE
-        position_multiplier = min(position_multiplier, supreme_multiplier)
-        
-        
-        # 🌌✨ Transcendent Intelligence position size factor (Beyond Human) - ADAPTIVE
-        position_multiplier = min(position_multiplier, transcendent_multiplier)
-        
-        # 🔮 Omniscient Intelligence position size factor (All-Knowing) - ADAPTIVE
-        position_multiplier = min(position_multiplier, omniscient_multiplier)
-        
-        # 🎯 Peak Detection position size factor - Avoid buying at tops, selling at bottoms!
-        position_multiplier = min(position_multiplier, peak_multiplier)
+        # Apply Deep Intelligence
+        if deep_multiplier < 0.5:  # Only penalize if deep strongly disagrees
+            position_multiplier = min(position_multiplier, deep_multiplier)
+
+        logger.info(f"   🔧 FIX #7: Weighted avg={weighted_avg:.2f}x, Risk floor={risk_floor:.2f}x, Final={position_multiplier:.2f}x")
         
         # ═══════════════════════════════════════════════════════════════════════════════
         # 🎯 FINAL DECISION - ALL 20 LAYERS ANALYSIS COMPLETE
@@ -4860,28 +4891,30 @@ class AITradingBot:
         # 🛡️ ANTI-WIPEOUT: Validate and adjust SL distance
         is_gold = 'XAU' in symbol.upper() or 'GOLD' in symbol.upper()
         if is_gold and stop_loss:
-            # Gold: Minimum SL = $15 (150 points), Maximum = $50 (500 points)
-            sl_distance_points = abs(current_price - stop_loss) * 10  # Convert to points
-            min_sl_points = 150  # $15
-            max_sl_points = 500  # $50
-            
-            if sl_distance_points < min_sl_points:
+            # 🔧 FIX #4: Use gold_config.min_sl_distance instead of hardcoded values
+            # Previous: hardcoded min=150pts ($15), max=500pts ($50) - broke R:R from 1.5:1 to 0.8:1
+            # Now: uses config (default min_sl=$8=80pts, max scaled by ATR)
+            from trading.gold_strategy_config import get_gold_config
+            _gold_cfg = get_gold_config(self.timeframe)
+            sl_distance_usd = abs(current_price - stop_loss)
+            min_sl_usd = _gold_cfg.min_sl_distance  # $8 from config
+            max_sl_usd = min_sl_usd * 5  # $40 max (5x min, reasonable range)
+
+            if sl_distance_usd < min_sl_usd:
                 old_sl = stop_loss
-                sl_distance_price = min_sl_points / 10  # Convert back to price
                 if side == OrderSide.BUY:
-                    stop_loss = current_price - sl_distance_price
+                    stop_loss = current_price - min_sl_usd
                 else:
-                    stop_loss = current_price + sl_distance_price
-                logger.warning(f"🛡️ ANTI-WIPEOUT: SL too tight! {sl_distance_points:.0f} pts → {min_sl_points} pts (${min_sl_points/10:.0f})")
+                    stop_loss = current_price + min_sl_usd
+                logger.warning(f"🛡️ ANTI-WIPEOUT: SL too tight! ${sl_distance_usd:.2f} → ${min_sl_usd:.2f} (config min)")
                 logger.warning(f"   Adjusted SL: {old_sl:.2f} → {stop_loss:.2f}")
-            elif sl_distance_points > max_sl_points:
+            elif sl_distance_usd > max_sl_usd:
                 old_sl = stop_loss
-                sl_distance_price = max_sl_points / 10
                 if side == OrderSide.BUY:
-                    stop_loss = current_price - sl_distance_price
+                    stop_loss = current_price - max_sl_usd
                 else:
-                    stop_loss = current_price + sl_distance_price
-                logger.info(f"🛡️ SL capped: {sl_distance_points:.0f} pts → {max_sl_points} pts (${max_sl_points/10:.0f})")
+                    stop_loss = current_price + max_sl_usd
+                logger.info(f"🛡️ SL capped: ${sl_distance_usd:.2f} → ${max_sl_usd:.2f} (5x config min)")
         
         
         if self.risk_guardian:
@@ -5632,8 +5665,9 @@ class AITradingBot:
             return
         
         config = self._trailing_stop_config
-        activation_tp_pct = config.get("activation_tp_pct", 0.08)  # 8% of TP distance
-        trail_profit_pct = config.get("trail_profit_pct", 0.15)    # 15% of profit from peak
+        # 🔧 FIX #9: Default values match backtest (was 0.08/0.15, backtest uses 0.05/0.10)
+        activation_tp_pct = config.get("activation_tp_pct", 0.05)  # 5% of TP distance (matches backtest)
+        trail_profit_pct = config.get("trail_profit_pct", 0.10)    # 10% of profit from peak (matches backtest)
         
         for pos_id, position in list(self.trading_engine.positions.items()):
             try:
