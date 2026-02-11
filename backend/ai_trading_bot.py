@@ -885,32 +885,32 @@ class AITradingBot:
             # 🎯 MOMENTUM FILTER (MACD Histogram) - ป้องกันเข้าตอน Momentum หมด
             # ═══════════════════════════════════════════════════════════════════════════════
             if is_gold and gold_config and gold_config.momentum_filter_enabled:
-                # Calculate MACD
+                # Calculate MACD using _ema method (returns single float)
                 if len(close) >= 26:
-                    ema_12 = self._calculate_ema(close, 12)
-                    ema_26 = self._calculate_ema(close, 26)
-                    macd_line = ema_12 - ema_26
-                    signal_line = self._calculate_ema(macd_line[-9:], 9) if len(macd_line) >= 9 else macd_line[-1:]
-                    
-                    if len(signal_line) > 0:
-                        histogram = macd_line[-1] - signal_line[-1]
-                        prev_histogram = macd_line[-2] - signal_line[-1] if len(macd_line) >= 2 else histogram
-                        
-                        # Check momentum weakening
-                        if abs(prev_histogram) > 0:
-                            histogram_change = (histogram - prev_histogram) / abs(prev_histogram)
-                        else:
-                            histogram_change = 0
-                        
-                        # BUY: Block if momentum weakening (histogram decreasing when positive)
-                        if histogram > 0 and histogram_change < -gold_config.momentum_weakening_threshold:
-                            logger.info(f"   🚫 MOMENTUM WEAKENING (BUY): Histogram decreasing {histogram_change:.1%}")
-                            buy_score -= 2  # Penalty instead of block
-                        
-                        # SELL: Block if momentum weakening (histogram increasing when negative)
-                        if histogram < 0 and histogram_change > gold_config.momentum_weakening_threshold:
-                            logger.info(f"   🚫 MOMENTUM WEAKENING (SELL): Histogram increasing {histogram_change:.1%}")
-                            sell_score -= 2  # Penalty instead of block
+                    ema_12_curr = self._ema(close, 12)
+                    ema_26_curr = self._ema(close, 26)
+                    macd_curr = ema_12_curr - ema_26_curr
+
+                    # Calculate previous MACD (shift by 1 candle)
+                    ema_12_prev = self._ema(close[:-1], 12)
+                    ema_26_prev = self._ema(close[:-1], 26)
+                    macd_prev = ema_12_prev - ema_26_prev
+
+                    # Simple momentum check: is MACD strengthening or weakening?
+                    if abs(macd_prev) > 0:
+                        macd_change = (macd_curr - macd_prev) / abs(macd_prev)
+                    else:
+                        macd_change = 0
+
+                    # BUY: Block if momentum weakening (MACD decreasing when positive)
+                    if macd_curr > 0 and macd_change < -gold_config.momentum_weakening_threshold:
+                        logger.info(f"   🚫 MOMENTUM WEAKENING (BUY): MACD decreasing {macd_change:.1%}")
+                        buy_score -= 2  # Penalty instead of block
+
+                    # SELL: Block if momentum weakening (MACD increasing when negative)
+                    if macd_curr < 0 and macd_change > gold_config.momentum_weakening_threshold:
+                        logger.info(f"   🚫 MOMENTUM WEAKENING (SELL): MACD increasing {macd_change:.1%}")
+                        sell_score -= 2  # Penalty instead of block
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SCORE GAP FILTER (matches backtest)
