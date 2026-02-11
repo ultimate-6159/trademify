@@ -645,6 +645,50 @@ class AITradingBot:
                     logger.info(f"   🚫 ASIAN SESSION BLOCKED: Hour={hour} (Asian=22:00-06:00 UTC)")
                     return None  # ❌ HARD BLOCK - ไม่สร้าง signal เลย
             
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🛡️ ADVANCED FILTERS - ป้องกันช่องโหว่เพิ่มเติม
+            # ═══════════════════════════════════════════════════════════════════════════════
+            
+            if is_gold and gold_config:
+                # 🗓️ FRIDAY LATE BLOCK - ไม่เทรดวันศุกร์หลัง cutoff
+                if gold_config.friday_late_block:
+                    if day_of_week == 4 and hour >= gold_config.friday_cutoff_hour:
+                        logger.info(f"   🚫 FRIDAY LATE BLOCKED: Hour={hour} >= {gold_config.friday_cutoff_hour}:00 UTC")
+                        return None
+                
+                # 📊 VOLUME SPIKE BLOCK - ไม่เทรดตอน Volume พุ่งผิดปกติ (อาจเป็นข่าว)
+                if gold_config.volume_spike_block:
+                    vol_data = df['volume'].values if 'volume' in df.columns else None
+                    if vol_data is not None and len(vol_data) >= 20:
+                        avg_volume = np.mean(vol_data[-20:-1])  # ไม่รวมแท่งปัจจุบัน
+                        current_vol = vol_data[-1]
+                        vol_spike_ratio = current_vol / max(avg_volume, 1)
+                        if vol_spike_ratio > gold_config.volume_spike_threshold:
+                            logger.info(f"   🚫 VOLUME SPIKE BLOCKED: {vol_spike_ratio:.1f}x > {gold_config.volume_spike_threshold}x threshold (possible news)")
+                            return None
+                
+                # 📈 ATR EXPANSION BLOCK - ไม่เทรดตอน ATR พุ่งกะทันหัน
+                if gold_config.atr_expansion_block:
+                    if len(high) >= 28:
+                        # ATR ปัจจุบัน vs ATR เฉลี่ย 14 แท่งก่อนหน้า
+                        prev_atr_period = high[-28:-14] - low[-28:-14]
+                        prev_atr_avg = np.mean(prev_atr_period)
+                        atr_expansion_ratio = atr / max(prev_atr_avg, 0.01)
+                        if atr_expansion_ratio > gold_config.atr_expansion_threshold:
+                            logger.info(f"   🚫 ATR EXPANSION BLOCKED: {atr_expansion_ratio:.1f}x > {gold_config.atr_expansion_threshold}x (volatility spike)")
+                            return None
+                
+                # 🌅 MONDAY GAP CHECK - Skip ถ้ามี Gap วันจันทร์
+                if gold_config.monday_gap_skip:
+                    if day_of_week == 0 and hour <= 8:  # Monday early
+                        if len(close) >= 2:
+                            friday_close = close[-2]  # Assuming this is first candle after weekend
+                            monday_open = opens[-1]
+                            gap_pct = abs(monday_open - friday_close) / friday_close * 100
+                            if gap_pct > gold_config.monday_gap_threshold_pct:
+                                logger.info(f"   🚫 MONDAY GAP BLOCKED: Gap={gap_pct:.2f}% > {gold_config.monday_gap_threshold_pct}%")
+                                return None
+            
             # Only trade during London & NY sessions
             good_session = (london_session or ny_session) and not is_weekend_risk
             
@@ -836,6 +880,37 @@ class AITradingBot:
             if is_gold and overlap_session:
                 buy_score += 1
                 sell_score += 1
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # 🎯 MOMENTUM FILTER (MACD Histogram) - ป้องกันเข้าตอน Momentum หมด
+            # ═══════════════════════════════════════════════════════════════════════════════
+            if is_gold and gold_config and gold_config.momentum_filter_enabled:
+                # Calculate MACD
+                if len(close) >= 26:
+                    ema_12 = self._calculate_ema(close, 12)
+                    ema_26 = self._calculate_ema(close, 26)
+                    macd_line = ema_12 - ema_26
+                    signal_line = self._calculate_ema(macd_line[-9:], 9) if len(macd_line) >= 9 else macd_line[-1:]
+                    
+                    if len(signal_line) > 0:
+                        histogram = macd_line[-1] - signal_line[-1]
+                        prev_histogram = macd_line[-2] - signal_line[-1] if len(macd_line) >= 2 else histogram
+                        
+                        # Check momentum weakening
+                        if abs(prev_histogram) > 0:
+                            histogram_change = (histogram - prev_histogram) / abs(prev_histogram)
+                        else:
+                            histogram_change = 0
+                        
+                        # BUY: Block if momentum weakening (histogram decreasing when positive)
+                        if histogram > 0 and histogram_change < -gold_config.momentum_weakening_threshold:
+                            logger.info(f"   🚫 MOMENTUM WEAKENING (BUY): Histogram decreasing {histogram_change:.1%}")
+                            buy_score -= 2  # Penalty instead of block
+                        
+                        # SELL: Block if momentum weakening (histogram increasing when negative)
+                        if histogram < 0 and histogram_change > gold_config.momentum_weakening_threshold:
+                            logger.info(f"   🚫 MOMENTUM WEAKENING (SELL): Histogram increasing {histogram_change:.1%}")
+                            sell_score -= 2  # Penalty instead of block
             
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 SCORE GAP FILTER (matches backtest)
@@ -4372,10 +4447,20 @@ class AITradingBot:
                         current_signal=signal
                     )
                     
+                    # 🆕 Get gold_config for hard block setting
+                    from trading.gold_strategy_config import get_gold_config
+                    peak_gold_config = get_gold_config(self.timeframe)
+                    
                     # Check if we should trade based on peak detection
                     if signal in ["BUY", "STRONG_BUY"]:
                         peak_can_trade = peak_result.can_buy
                         if peak_result.is_peak:
+                            # 🆕 HARD BLOCK if configured
+                            if peak_gold_config.peak_detection_hard_block:
+                                logger.warning(f"   🚫 PEAK HARD BLOCK: BUY at PEAK detected ({peak_result.confidence:.0f}% confidence)")
+                                for reason in peak_result.reasons[:3]:
+                                    logger.warning(f"      {reason}")
+                                return {"action": "SKIP", "reason": "Peak detected - HARD BLOCK"}
                             peak_multiplier = 0.3  # Reduce position if at peak
                             logger.warning(f"   ⚠️ PEAK DETECTED: {peak_result.confidence:.0f}% confidence")
                             for reason in peak_result.reasons[:3]:
@@ -4386,6 +4471,12 @@ class AITradingBot:
                     else:  # SELL
                         peak_can_trade = peak_result.can_sell
                         if peak_result.is_bottom:
+                            # 🆕 HARD BLOCK if configured
+                            if peak_gold_config.peak_detection_hard_block:
+                                logger.warning(f"   🚫 BOTTOM HARD BLOCK: SELL at BOTTOM detected ({peak_result.confidence:.0f}% confidence)")
+                                for reason in peak_result.reasons[:3]:
+                                    logger.warning(f"      {reason}")
+                                return {"action": "SKIP", "reason": "Bottom detected - HARD BLOCK"}
                             peak_multiplier = 0.3
                             logger.warning(f"   ⚠️ BOTTOM DETECTED: {peak_result.confidence:.0f}% confidence")
                             for reason in peak_result.reasons[:3]:

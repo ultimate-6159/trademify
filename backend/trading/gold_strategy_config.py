@@ -148,6 +148,38 @@ class GoldH1Config:
     # Support/Resistance Zone (% of range)
     sr_zone_pct: float = 0.25  # 25% จาก High/Low
     
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🚫 ADVANCED FILTERS - ป้องกันช่องโหว่เพิ่มเติม
+    # ═══════════════════════════════════════════════════════════════════════════════
+    
+    # 🎯 Peak Detection Hard Block (ไม่ใช่แค่ลด position)
+    peak_detection_hard_block: bool = True  # True = บล็อกเลยเมื่อเจอ Peak/Bottom
+    
+    # 📉 Momentum Filter (MACD Histogram)
+    momentum_filter_enabled: bool = True
+    momentum_weakening_threshold: float = 0.3  # Block ถ้า histogram ลดลง > 30%
+    
+    # 🔴 Consecutive Loss Protection
+    consecutive_loss_pause: bool = True
+    max_consecutive_losses: int = 2  # Pause หลังเสีย 2 ครั้งติด
+    pause_duration_hours: int = 4  # พัก 4 ชม.
+    
+    # 📊 Volume Spike Detection (ข่าว/Event)
+    volume_spike_block: bool = True
+    volume_spike_threshold: float = 3.0  # Block ถ้า Volume > 3x avg
+    
+    # 📈 ATR Expansion Check (Volatility Spike)
+    atr_expansion_block: bool = True
+    atr_expansion_threshold: float = 1.5  # Block ถ้า ATR ปัจจุบัน > 1.5x ATR avg
+    
+    # 🗓️ Friday Late Block
+    friday_late_block: bool = True
+    friday_cutoff_hour: int = 19  # บล็อกหลัง 19:00 UTC ในวันศุกร์
+    
+    # 🌅 Monday Gap Check
+    monday_gap_skip: bool = True
+    monday_gap_threshold_pct: float = 0.5  # Skip ถ้า Gap > 0.5%
+    
     def to_dict(self) -> Dict[str, Any]:
         """แปลงเป็น dict สำหรับ logging/debugging"""
         return {
@@ -181,6 +213,15 @@ class GoldH1Config:
                 "min_body_ratio": self.min_body_ratio,
                 "min_volume_ratio": self.min_volume_ratio,
                 "max_volatility_pct": self.max_volatility_pct,
+            },
+            "advanced_filters": {
+                "peak_hard_block": self.peak_detection_hard_block,
+                "momentum_filter": self.momentum_filter_enabled,
+                "consecutive_loss_pause": self.consecutive_loss_pause,
+                "volume_spike_block": self.volume_spike_block,
+                "atr_expansion_block": self.atr_expansion_block,
+                "friday_late_block": self.friday_late_block,
+                "monday_gap_skip": self.monday_gap_skip,
             },
         }
 
