@@ -756,14 +756,17 @@ class AITradingBot:
             price_above_vwap = current_price > vwap
             price_below_vwap = current_price < vwap
             
-            # 8. SUPPORT/RESISTANCE
+            # 8. SUPPORT/RESISTANCE - 🥇 USES CONFIG
             lookback = 20 if is_gold else (15 if is_m15 else 20)
             recent_high = np.max(high[-lookback:])
             recent_low = np.min(low[-lookback:])
             price_range = recent_high - recent_low
             
-            # 🥇 GOLD: Tighter entry zones
-            zone_pct = 0.25 if is_gold else 0.35
+            # 🥇 Use config for S/R zone
+            if is_gold and gold_config:
+                zone_pct = gold_config.sr_zone_pct
+            else:
+                zone_pct = 0.35
             near_support = current_price <= recent_low + price_range * zone_pct
             near_resistance = current_price >= recent_high - price_range * zone_pct
             
