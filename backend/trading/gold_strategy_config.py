@@ -26,8 +26,8 @@ class GoldH1Config:
     # ═══════════════════════════════════════════════════════════════════════════════
     
     # True = ต้อง Strong Trend เท่านั้น (EMA Fast > Mid > Slow > Trend)
-    # False = อนุญาต Moderate Trend ด้วย (เทรดบ่อยขึ้น แต่เสี่ยงขึ้น)
-    require_strong_trend: bool = True
+    # False = อนุญาต Moderate Trend ด้วย (เทรดบ่อยขึ้น — SMC handles structure)
+    require_strong_trend: bool = False
     
     # ═══════════════════════════════════════════════════════════════════════════════
     # 🎯 SIGNAL SCORING - ควบคุมว่าสัญญาณต้องแข็งแค่ไหน
@@ -194,7 +194,7 @@ class GoldH1Config:
     smc_swing_lookback: int = 5
 
     # จำนวนแท่งล่าสุดที่ตรวจ Sweep
-    smc_sweep_lookback_candles: int = 3
+    smc_sweep_lookback_candles: int = 20
 
     # SL Buffer: ระยะห่าง SL จากจุด sweep (ATR multiplier)
     smc_sl_buffer_atr: float = 0.3
@@ -203,7 +203,7 @@ class GoldH1Config:
     smc_max_sl_atr: float = 2.0
 
     # Minimum Sweep Strength (0-100) - ความแรงขั้นต่ำของ sweep
-    smc_min_sweep_strength: float = 50.0
+    smc_min_sweep_strength: float = 40.0
 
     def to_dict(self) -> Dict[str, Any]:
         """แปลงเป็น dict สำหรับ logging/debugging"""
@@ -313,9 +313,9 @@ class ForexH1Config(GoldH1Config):
     """
 
     # ═══════════════════════════════════════════════════════════════════════════════
-    # 📊 TREND FILTER - ต้อง Strong Trend เท่านั้น (เทรดตาม H4)
+    # 📊 TREND FILTER - ใช้ Moderate Trend ก็พอ (SMC handles structure)
     # ═══════════════════════════════════════════════════════════════════════════════
-    require_strong_trend: bool = True
+    require_strong_trend: bool = False
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # 🎯 SIGNAL SCORING - SMC handles precision, basic trend filter only
@@ -413,10 +413,10 @@ class ForexH1Config(GoldH1Config):
     smc_enabled: bool = True
     smc_require_sweep: bool = True          # ห้ามเข้าถ้าไม่มี Liquidity Sweep
     smc_swing_lookback: int = 5
-    smc_sweep_lookback_candles: int = 3
+    smc_sweep_lookback_candles: int = 20    # 20 candles (H1 = 20 ชม.)
     smc_sl_buffer_atr: float = 0.2          # Forex: tighter SL buffer
     smc_max_sl_atr: float = 1.5             # Forex: max SL tighter than Gold
-    smc_min_sweep_strength: float = 50.0
+    smc_min_sweep_strength: float = 40.0
 
 
 @dataclass
@@ -444,8 +444,8 @@ class GBPUSDConfig(ForexH1Config):
     # GBP: ATR สูงกว่า → ยอม volatility มากขึ้น
     max_volatility_pct: float = 2.5
 
-    # GBP: ต้อง sweep strength สูงกว่า (เพราะ fake moves เยอะ)
-    smc_min_sweep_strength: float = 55.0
+    # GBP: ลด sweep strength ลงเล็กน้อย (มี fake moves บ่อย)
+    smc_min_sweep_strength: float = 45.0
 
 
 @dataclass

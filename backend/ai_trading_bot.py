@@ -145,7 +145,7 @@ class MT5DataProvider:
                 logger.info(f"✅ MT5 logged in: {mt5_login}@{mt5_server}")
             
             # Enable symbols
-            for symbol in ["EURUSDm", "GBPUSDm", "XAUUSDm"]:
+            for symbol in ["EURUSDm", "GBPUSDm", "XAUUSDm", "USDJPYm", "USDCADm"]:
                 info = mt5.symbol_info(symbol)
                 if info and not info.visible:
                     mt5.symbol_select(symbol, True)
@@ -1009,12 +1009,18 @@ class AITradingBot:
                         logger.info(f"   🚫 SMC 90% PROTOCOL: BLOCKED → {smc_signal.reason}")
                         return None
 
+                    # 🧠 SMC IS PRIMARY — SMC determines direction
+                    # If SMC disagrees with technical, SMC WINS (not blocked)
                     if smc_signal.signal != signal:
-                        logger.info(f"   🚫 SMC FILTER: SMC={smc_signal.signal} conflicts with technical={signal} → BLOCKED")
-                        return None
+                        logger.info(f"   🧠 SMC PRIMARY: SMC={smc_signal.signal} overrides technical={signal}")
+                        signal = smc_signal.signal  # SMC direction wins
+                        # Reduce confidence slightly since technicals disagree
+                        confidence = max(60, confidence - 10)
+                    else:
+                        # ✅ SMC + Technical agree — highest confidence
+                        confidence = min(95, confidence + 10)
+                        logger.info(f"   🧠 SMC + TECHNICAL ALIGNED: {signal}")
 
-                    # ✅ SMC confirms the signal - boost confidence
-                    confidence = min(95, confidence + 10)
                     if smc_signal.choch_confirmed:
                         confidence = min(98, confidence + 5)
                     logger.info(f"   🧠 SMC 90%% CONFIRMED: {smc_signal.reason}")

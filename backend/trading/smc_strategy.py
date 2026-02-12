@@ -537,7 +537,7 @@ class SMCStrategy:
             return no_signal
 
         # ═══════════════════════════════════════════════════════════════════
-        # RULE 1: HTF STRUCTURE (H4) - ห้ามเทรดถ้า Sideway
+        # RULE 1: HTF STRUCTURE (H4) - ใช้เป็น directional bias (ไม่ hard block)
         # ═══════════════════════════════════════════════════════════════════
         htf_structure = StructureTrend.RANGING
 
@@ -547,10 +547,8 @@ class SMCStrategy:
             logger.info(f"   📐 Rule 1 HTF (H4): {htf_structure.value} ({len(htf_swings)} swings)")
 
             if htf_structure == StructureTrend.RANGING:
-                no_signal.htf_structure = htf_structure
-                no_signal.reason = "Rule 1 FAIL: H4 Sideway - NO TRADE"
-                logger.info(f"   🚫 Rule 1: H4 is RANGING → ห้ามเทรด")
-                return no_signal
+                # H4 Ranging → fallback to H1 structure (don't hard block)
+                logger.info(f"   ⚠️ Rule 1: H4 is RANGING → fallback to H1 structure")
         else:
             # ถ้าไม่มี H4 data ใช้ H1 structure แทน (fallback)
             logger.info(f"   ⚠️ Rule 1: No H4 data, using H1 structure as fallback")
@@ -559,26 +557,33 @@ class SMCStrategy:
         # H1 Analysis
         # ═══════════════════════════════════════════════════════════════════
         swings = self.detect_swing_points(highs, lows)
-        if len(swings) < 4:
+        if len(swings) < 3:
             no_signal.reason = f"Not enough H1 swings ({len(swings)})"
             return no_signal
 
         structure = self.detect_structure(swings)
 
-        # ถ้ามี H4 → ต้องเทรดตามทิศ H4 เท่านั้น
+        # ถ้ามี H4 trend → ให้ preference ตามทิศ H4 (but don't hard block)
+        # H4 conflict จะลด confidence แทนที่จะ block
+        h1_h4_conflict = False
         if htf_structure != StructureTrend.RANGING:
             if structure != htf_structure and structure != StructureTrend.RANGING:
-                no_signal.structure = structure
-                no_signal.htf_structure = htf_structure
-                no_signal.reason = f"Rule 1: H1 ({structure.value}) conflicts with H4 ({htf_structure.value})"
-                logger.info(f"   🚫 Rule 1: H1 {structure.value} vs H4 {htf_structure.value} → BLOCKED")
-                return no_signal
+                h1_h4_conflict = True
+                logger.info(f"   ⚠️ Rule 1: H1 {structure.value} vs H4 {htf_structure.value} → confidence penalty")
 
         # ═══════════════════════════════════════════════════════════════════
         # RULE 2: LIQUIDITY SWEEP - "No Sweep, No Entry"
+        # Try multiple lookback windows to catch sweeps
         # ═══════════════════════════════════════════════════════════════════
         pools_above, pools_below = self.detect_liquidity_pools(swings, current_price, atr)
+
+        # Try with configured lookback first, then expand if no sweep found
         sweep = self.detect_liquidity_sweep(opens, highs, lows, closes, swings)
+        if sweep is None and self.sweep_lookback < 20:
+            # Expand search window — sweeps can happen earlier and still be valid
+            sweep = self.detect_liquidity_sweep(opens, highs, lows, closes, swings, lookback=20)
+            if sweep:
+                logger.info(f"   🔍 Rule 2: Found sweep in expanded window (20 candles)")
 
         if sweep is None:
             no_signal.structure = structure
@@ -595,42 +600,64 @@ class SMCStrategy:
         in_discount, in_premium, fib_level = self.detect_premium_discount(swings, current_price)
 
         # Determine signal direction from sweep
+        # Rule 3: Relaxed zone — allow near-boundary trades (0.35-0.65 neutral zone)
+        zone_penalty = 0  # confidence penalty for being in wrong zone
         if sweep.side == SweepSide.SELL_SIDE:
             proposed_signal = "BUY"
             if not in_discount:
-                no_signal.structure = structure
-                no_signal.htf_structure = htf_structure
-                no_signal.sweep_detected = True
-                no_signal.sweep_side = sweep.side
-                no_signal.reason = f"Rule 3 FAIL: BUY but NOT in Discount zone (Fib={fib_level:.2f}, need <0.5)"
-                logger.info(f"   🚫 Rule 3: BUY at Fib {fib_level:.2f} > 0.5 → ไม่อยู่ในโซน Discount")
-                return no_signal
+                if fib_level <= 0.65:
+                    # Near equilibrium — allow but penalize
+                    zone_penalty = 15
+                    logger.info(f"   ⚠️ Rule 3: BUY at Fib {fib_level:.2f} (neutral zone, -15 confidence)")
+                else:
+                    no_signal.structure = structure
+                    no_signal.htf_structure = htf_structure
+                    no_signal.sweep_detected = True
+                    no_signal.sweep_side = sweep.side
+                    no_signal.reason = f"Rule 3 FAIL: BUY in deep Premium zone (Fib={fib_level:.2f}, need <0.65)"
+                    logger.info(f"   🚫 Rule 3: BUY at Fib {fib_level:.2f} > 0.65 → ไม่อยู่ในโซน Discount")
+                    return no_signal
         else:
             proposed_signal = "SELL"
             if not in_premium:
+                if fib_level >= 0.35:
+                    # Near equilibrium — allow but penalize
+                    zone_penalty = 15
+                    logger.info(f"   ⚠️ Rule 3: SELL at Fib {fib_level:.2f} (neutral zone, -15 confidence)")
+                else:
+                    no_signal.structure = structure
+                    no_signal.htf_structure = htf_structure
+                    no_signal.sweep_detected = True
+                    no_signal.sweep_side = sweep.side
+                    no_signal.reason = f"Rule 3 FAIL: SELL in deep Discount zone (Fib={fib_level:.2f}, need >0.35)"
+                    logger.info(f"   🚫 Rule 3: SELL at Fib {fib_level:.2f} < 0.35 → ไม่อยู่ในโซน Premium")
+                    return no_signal
+
+        logger.info(f"   ✅ Rule 3: {proposed_signal} in {'Discount' if in_discount else 'Premium/Neutral'} zone (Fib={fib_level:.2f})")
+
+        # HTF direction check — penalize instead of hard block
+        htf_penalty = 0
+        if htf_structure == StructureTrend.BULLISH and proposed_signal != "BUY":
+            if h1_h4_conflict:
+                # Both H1 and H4 disagree → hard block
                 no_signal.structure = structure
                 no_signal.htf_structure = htf_structure
-                no_signal.sweep_detected = True
-                no_signal.sweep_side = sweep.side
-                no_signal.reason = f"Rule 3 FAIL: SELL but NOT in Premium zone (Fib={fib_level:.2f}, need >0.5)"
-                logger.info(f"   🚫 Rule 3: SELL at Fib {fib_level:.2f} < 0.5 → ไม่อยู่ในโซน Premium")
+                no_signal.reason = f"Rule 1: H4 BULLISH + H1 conflict → SELL blocked"
+                logger.info(f"   🚫 Rule 1: H4 BULLISH → can't SELL (H1 also conflicts)")
                 return no_signal
-
-        logger.info(f"   ✅ Rule 3: {proposed_signal} in {'Discount' if in_discount else 'Premium'} zone (Fib={fib_level:.2f})")
-
-        # ตรวจว่าทิศตรงกับ HTF Structure
-        if htf_structure == StructureTrend.BULLISH and proposed_signal != "BUY":
-            no_signal.structure = structure
-            no_signal.htf_structure = htf_structure
-            no_signal.reason = f"Rule 1: H4 BULLISH but signal is SELL → ห้ามสวน"
-            logger.info(f"   🚫 Rule 1: H4 BULLISH → Buy only, can't SELL")
-            return no_signal
+            else:
+                htf_penalty = 20
+                logger.info(f"   ⚠️ Rule 1: H4 BULLISH but SELL from sweep → -20 confidence")
         if htf_structure == StructureTrend.BEARISH and proposed_signal != "SELL":
-            no_signal.structure = structure
-            no_signal.htf_structure = htf_structure
-            no_signal.reason = f"Rule 1: H4 BEARISH but signal is BUY → ห้ามสวน"
-            logger.info(f"   🚫 Rule 1: H4 BEARISH → Sell only, can't BUY")
-            return no_signal
+            if h1_h4_conflict:
+                no_signal.structure = structure
+                no_signal.htf_structure = htf_structure
+                no_signal.reason = f"Rule 1: H4 BEARISH + H1 conflict → BUY blocked"
+                logger.info(f"   🚫 Rule 1: H4 BEARISH → can't BUY (H1 also conflicts)")
+                return no_signal
+            else:
+                htf_penalty = 20
+                logger.info(f"   ⚠️ Rule 1: H4 BEARISH but BUY from sweep → -20 confidence")
 
         # ═══════════════════════════════════════════════════════════════════
         # RULE 4: ORDER BLOCK + FVG (รอยเท้าเจ้ามือ)
@@ -767,6 +794,12 @@ class SMCStrategy:
             else:
                 take_profit = current_price - sl_dist * 1.5
             reason_parts.append("TP adjusted R:R≥1.5")
+
+        # Apply penalties from relaxed rules
+        confidence -= zone_penalty
+        confidence -= htf_penalty
+        if h1_h4_conflict:
+            confidence -= 10
 
         confidence = max(0, min(100, confidence))
         reason = " | ".join(reason_parts)
