@@ -33,13 +33,13 @@ class GoldH1Config:
     # 🎯 SIGNAL SCORING - ควบคุมว่าสัญญาณต้องแข็งแค่ไหน
     # ═══════════════════════════════════════════════════════════════════════════════
     
-    # จำนวน conditions ขั้นต่ำที่ต้องผ่าน (จาก 10-12 conditions)
-    # สูงขึ้น = เทรดน้อยลง แต่แม่นยำขึ้น
-    min_conditions: int = 3  # 3/5 = 60% (SMC handles entry precision)
-    
+    # จำนวน conditions ขั้นต่ำที่ต้องผ่าน (จาก 5 conditions)
+    # SMC handles entry precision → technical เป็นแค่ basic filter
+    min_conditions: int = 2  # 2/5 = 40% (SMC is primary signal generator)
+
     # Score Gap ขั้นต่ำ (ความแตกต่างระหว่าง BUY vs SELL score)
-    # สูงขึ้น = สัญญาณชัดเจนขึ้น
-    min_score_gap: int = 2  # BUY vs SELL ต้องห่างกัน >= 2 (fewer conditions)
+    # ลดลงเพราะ SMC กำหนดทิศทาง
+    min_score_gap: int = 1  # BUY vs SELL ต้องห่างกัน >= 1 (SMC overrides direction)
     
     # ═══════════════════════════════════════════════════════════════════════════════
     # 📈 RSI FILTER - ควบคุม RSI Range ที่อนุญาต
@@ -127,8 +127,8 @@ class GoldH1Config:
     # ═══════════════════════════════════════════════════════════════════════════════
     
     # Volume Ratio ขั้นต่ำ (Current / Avg20)
-    # ค่าสูง = ต้องมี Volume สูงกว่าค่าเฉลี่ย
-    min_volume_ratio: float = 1.15  # 115% ของค่าเฉลี่ย
+    # ค่าต่ำ = อนุญาต volume ต่ำกว่าค่าเฉลี่ย (MT5 tick_volume ไม่เชื่อถือได้มาก)
+    min_volume_ratio: float = 0.8  # 80% ของค่าเฉลี่ย (SMC handles confirmation)
     
     # ═══════════════════════════════════════════════════════════════════════════════
     # 🎚️ VOLATILITY FILTER - ควบคุม ATR% สูงสุด
@@ -205,6 +205,11 @@ class GoldH1Config:
     # Minimum Sweep Strength (0-100) - ความแรงขั้นต่ำของ sweep
     smc_min_sweep_strength: float = 40.0
 
+    # 🆕 SMC IS PRIMARY - SMC สามารถสร้าง signal โดยไม่ต้องรอ technical conditions ผ่าน
+    # True = SMC runs INDEPENDENTLY (ไม่ถูก gate โดย technical min_conditions)
+    # False = technical ต้องผ่าน min_conditions ก่อน SMC จึงจะรัน
+    smc_is_primary: bool = True
+
     def to_dict(self) -> Dict[str, Any]:
         """แปลงเป็น dict สำหรับ logging/debugging"""
         return {
@@ -251,6 +256,7 @@ class GoldH1Config:
             "smc": {
                 "enabled": self.smc_enabled,
                 "require_sweep": self.smc_require_sweep,
+                "is_primary": self.smc_is_primary,
                 "swing_lookback": self.smc_swing_lookback,
                 "sweep_lookback": self.smc_sweep_lookback_candles,
                 "sl_buffer_atr": self.smc_sl_buffer_atr,
@@ -320,8 +326,8 @@ class ForexH1Config(GoldH1Config):
     # ═══════════════════════════════════════════════════════════════════════════════
     # 🎯 SIGNAL SCORING - SMC handles precision, basic trend filter only
     # ═══════════════════════════════════════════════════════════════════════════════
-    min_conditions: int = 3   # 3/5 basic conditions (trend, RSI, session, vol, volume)
-    min_score_gap: int = 2    # BUY vs SELL gap
+    min_conditions: int = 2   # 2/5 basic conditions (SMC is primary)
+    min_score_gap: int = 1    # BUY vs SELL gap (SMC overrides direction)
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # 📈 RSI FILTER - Forex ranges
@@ -338,9 +344,9 @@ class ForexH1Config(GoldH1Config):
     # นอกเวลาเหล่านี้ ห้ามเปิดออเดอร์เด็ดขาด
     # ═══════════════════════════════════════════════════════════════════════════════
     london_start_hour: int = 7
-    london_end_hour: int = 9     # KILL ZONE only: 07-09 UTC (was 16)
+    london_end_hour: int = 12    # EXPANDED: 07-12 UTC (was 09) — 5 hours London
     ny_start_hour: int = 12
-    ny_end_hour: int = 15        # KILL ZONE only: 12-15 UTC (was 21)
+    ny_end_hour: int = 18        # EXPANDED: 12-18 UTC (was 15) — 6 hours NY
     block_asian_session: bool = True  # ห้ามเทรด Asian session
 
     # 🆕 KILL ZONE HARD BLOCK - ห้ามเทรดนอก Kill Zone เด็ดขาด
@@ -377,7 +383,7 @@ class ForexH1Config(GoldH1Config):
     # ═══════════════════════════════════════════════════════════════════════════════
     # 📊 VOLUME FILTER
     # ═══════════════════════════════════════════════════════════════════════════════
-    min_volume_ratio: float = 1.2
+    min_volume_ratio: float = 0.8  # 80% (MT5 tick_volume ไม่เชื่อถือ — SMC handles confirmation)
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # 🎚️ VOLATILITY FILTER
@@ -417,6 +423,9 @@ class ForexH1Config(GoldH1Config):
     smc_sl_buffer_atr: float = 0.2          # Forex: tighter SL buffer
     smc_max_sl_atr: float = 1.5             # Forex: max SL tighter than Gold
     smc_min_sweep_strength: float = 40.0
+
+    # 🆕 SMC IS PRIMARY (inherited from GoldH1Config, confirmed for Forex)
+    smc_is_primary: bool = True
 
 
 @dataclass

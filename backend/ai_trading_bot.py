@@ -891,17 +891,24 @@ class AITradingBot:
             mtf_direction = "NEUTRAL"
             
             logger.info(f"   📊 Scoring: {score_display} | Gap={score_gap}")
-            
+
+            # 🧠 Check if SMC is PRIMARY signal generator
+            smc_is_primary = _cfg and getattr(_cfg, 'smc_is_primary', False) and _cfg.smc_enabled
+
             # 🛡️ Score gap filter - 🌐 USES CONFIG
+            # When SMC is primary: skip this filter (SMC determines direction independently)
             if _cfg:
                 min_gap = _cfg.min_score_gap
             else:
                 min_gap = 3
             if score_gap < min_gap:
-                logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < {min_gap} required")
-                return None
-            
-            
+                if smc_is_primary:
+                    logger.info(f"   ⚡ SCORE GAP BYPASSED (SMC PRIMARY): {score_display}, Gap={score_gap} < {min_gap}")
+                else:
+                    logger.info(f"   🚫 SCORE GAP FILTER: {score_display}, Gap={score_gap} < {min_gap} required")
+                    return None
+
+
             # 🛡️ Min conditions - 🌐 USES CONFIG
             if _cfg:
                 min_conditions = _cfg.min_conditions
@@ -909,15 +916,17 @@ class AITradingBot:
                 min_conditions = 4  # M15 needs 4
             else:
                 min_conditions = 6  # Fallback
-            
+
             # ═══════════════════════════════════════════════════════════════════════════════
             # 🎯 FINAL SIGNAL (matches backtest exactly)
+            # When SMC is PRIMARY: technical only needs basic direction hint
+            # SMC will override direction later if it disagrees
             # ═══════════════════════════════════════════════════════════════════════════════
-            
+
             signal = None
             confidence = 0
             quality = "LOW"
-            
+
             if is_m15:
                 if buy_score >= min_conditions and buy_score > sell_score:
                     signal = "BUY"
@@ -941,6 +950,18 @@ class AITradingBot:
                         quality = "MEDIUM"
                     else:
                         quality = "LOW"
+                elif smc_is_primary:
+                    # 🧠 SMC PRIMARY: Technical weak but SMC will decide direction
+                    # Use best available score as hint (SMC will override)
+                    if buy_score > sell_score:
+                        signal = "BUY"
+                    elif sell_score > buy_score:
+                        signal = "SELL"
+                    else:
+                        signal = "BUY"  # Default hint, SMC will override
+                    confidence = 55  # Low confidence — SMC must confirm
+                    quality = "LOW"
+                    logger.info(f"   ⚡ SMC PRIMARY FALLBACK: Technical weak ({buy_score}B/{sell_score}S < {min_conditions}), SMC will decide")
                 else:
                     return None
             else:
@@ -967,6 +988,17 @@ class AITradingBot:
                         quality = "MEDIUM"
                     else:
                         quality = "LOW"
+                elif smc_is_primary:
+                    # 🧠 SMC PRIMARY: Technical weak but SMC will decide direction
+                    if buy_score > sell_score:
+                        signal = "BUY"
+                    elif sell_score > buy_score:
+                        signal = "SELL"
+                    else:
+                        signal = "BUY"  # Default hint, SMC will override
+                    confidence = 55
+                    quality = "LOW"
+                    logger.info(f"   ⚡ SMC PRIMARY FALLBACK: Technical weak ({buy_score}B/{sell_score}S < {min_conditions}), SMC will decide")
                 else:
                     return None
             
